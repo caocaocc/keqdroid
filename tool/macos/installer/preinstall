@@ -24,6 +24,8 @@ if [[ -e "$runtime" ]]; then
 fi
 # Payload extraction can still fail after preinstall. The old service remains
 # available until postinstall has validated the complete replacement payload.
+# Retrying after extraction fails only clears the incomplete staging directory;
+# the installed application and runtime stay available until validation succeeds.
 if [[ -e "$incoming" ]]; then
   [[ -d "$incoming" && $(stat -f %u "$incoming") == 0 ]] || fail 'Invalid installer staging directory.'
   rm -rf "$incoming"
