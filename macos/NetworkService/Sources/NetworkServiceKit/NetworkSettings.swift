@@ -97,27 +97,11 @@ public final class NetworkSettings {
         defer { SCPreferencesUnlock(prefs) }
         var records: [[String: Any]] = []
         var pending: [(SCNetworkProtocol, [String: Any])] = []
+        let plans = NetworkSettingsReadiness.managedFields(proxyPorts: proxyPorts, dnsAddress: dnsAddress)
         for identifier in context.serviceIDs {
             guard let service = SCNetworkServiceCopy(prefs, identifier as CFString) else { continue }
-            var plans: [(CFString, [String: Any])] = []
-            if let ports = proxyPorts {
-                plans.append((kSCNetworkProtocolTypeProxies, [
-                    kSCPropNetProxiesHTTPEnable as String: 1,
-                    kSCPropNetProxiesHTTPProxy as String: "127.0.0.1",
-                    kSCPropNetProxiesHTTPPort as String: ports.http,
-                    kSCPropNetProxiesHTTPSEnable as String: 1,
-                    kSCPropNetProxiesHTTPSProxy as String: "127.0.0.1",
-                    kSCPropNetProxiesHTTPSPort as String: ports.http,
-                    kSCPropNetProxiesSOCKSEnable as String: 1,
-                    kSCPropNetProxiesSOCKSProxy as String: "127.0.0.1",
-                    kSCPropNetProxiesSOCKSPort as String: ports.socks,
-                    kSCPropNetProxiesProxyAutoConfigEnable as String: 0,
-                    kSCPropNetProxiesProxyAutoDiscoveryEnable as String: 0,
-                ]))
-            }
-            if let address = dnsAddress { plans.append((kSCNetworkProtocolTypeDNS, [kSCPropNetDNSServerAddresses as String: [address]])) }
             for (kind, fields) in plans {
-                guard let proto = SCNetworkServiceCopyProtocol(service, kind) else { throw ServiceFailure("networkProtocolUnavailable", "Network service \(identifier) has no \(kind) protocol.") }
+                guard let proto = SCNetworkServiceCopyProtocol(service, kind as CFString) else { throw ServiceFailure("networkProtocolUnavailable", "Network service \(identifier) has no \(kind) protocol.") }
                 let original = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] ?? [:]
                 var changed = original
                 var journal: [String: Any] = [:]
@@ -139,6 +123,36 @@ public final class NetworkSettings {
             throw ServiceFailure("networkSettingsFailed", "Cannot apply the network settings change.")
         }
         if let dnsAddress { appliedDNS = (context.serviceIDs, dnsAddress) }
+    }
+
+    /// Reads fresh committed preferences and configd's merged default resolver /
+    /// proxy dictionaries. It neither rewrites settings nor selects another DNS.
+    public func verifyApplied(context: NetworkContext, proxyPorts: (socks: Int, http: Int)?, dnsAddress: String?, timeout: TimeInterval = 5) throws {
+        let fields = NetworkSettingsReadiness.managedFields(proxyPorts: proxyPorts, dnsAddress: dnsAddress)
+        let readiness = NetworkSettingsReadiness(primaryService: context.primaryServiceID, primaryInterface: context.interfaceName, serviceIDs: context.serviceIDs, fields: fields)
+        try readiness.wait(timeout: timeout) {
+            let prefs = try self.preferences()
+            SCPreferencesSynchronize(prefs)
+            var committed: [String: [String: Any]] = [:]
+            var enabled: Set<String> = []
+            for identifier in context.serviceIDs {
+                guard let service = SCNetworkServiceCopy(prefs, identifier as CFString), SCNetworkServiceGetEnabled(service) else { continue }
+                for kind in fields.keys {
+                    guard let proto = SCNetworkServiceCopyProtocol(service, kind as CFString) else { continue }
+                    let key = "\(identifier)/\(kind)"
+                    committed[key] = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] ?? [:]
+                    if SCNetworkProtocolGetEnabled(proto) { enabled.insert(key) }
+                }
+            }
+            guard let store = SCDynamicStoreCreate(nil, "KEQDIS settings verification" as CFString, nil, nil),
+                  let values = SCDynamicStoreCopyMultiple(store, ["State:/Network/Global/IPv4", "State:/Network/Global/DNS", "State:/Network/Global/Proxies"] as CFArray, nil) as? [String: Any] else {
+                throw ServiceFailure("networkSettingsUnavailable", "Cannot read effective system network settings.")
+            }
+            let primary = values["State:/Network/Global/IPv4"] as? [String: Any] ?? [:]
+            var effective: [String: [String: Any]] = [:]
+            for kind in fields.keys { effective[kind] = values["State:/Network/Global/\(kind)"] as? [String: Any] }
+            return NetworkSettingsObservation(primaryService: primary["PrimaryService"] as? String, primaryInterface: primary["PrimaryInterface"] as? String, committed: committed, enabled: enabled, effective: effective)
+        }
     }
 
     public func restore() throws {

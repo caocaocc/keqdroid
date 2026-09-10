@@ -1,6 +1,10 @@
 # macOS CI 构建与恢复
 
-开发包在 `dev` 分支构建，产物仍标记为未完成发布验收。ARM 和 Intel 分别使用 `macos-15`、`macos-15-intel`，保持固定的 Flutter 3.44.4、Xcode 16.4、CocoaPods 1.16.2 和 Go 1.26.8。
+开发包在 `dev` 分支构建，产物仍标记为未完成发布验收。ARM 和 Intel 分别使用 `macos-15`、`macos-15-intel`，保持固定的 Flutter 3.44.4、Xcode 16.4、Ruby 3.3.12、CocoaPods 1.16.2 和 Go 1.26.8。
+
+Flutter 3.44.4 使用一处受校验的工具补丁：固定版本的 `packages/flutter_tools/lib/src/isolated/native_assets/macos/native_assets.dart` 把原生资产目标写死为 macOS 13，未读取工程的 macOS 12 设置（相关上游问题：[flutter/flutter#145104](https://github.com/flutter/flutter/issues/145104)）。`build_app.sh` 只将该常量改为 12；先核验 SDK 提交和原文件 SHA-256，缓存中已修改的文件也必须匹配已知补丁 SHA-256。随后保留 Flutter 工具自身的依赖锁，重新生成工具快照，并校验来源和快照哈希。Flutter、Dart、插件版本及项目 `pubspec.lock` 保持不变。
+
+这项修改会使 `objective_c` 等原生资产实际重新按 macOS 12 编译。固定的 objective_c 9.5.0 原生源文件已用两个架构、macOS 12 编译参数及严格 API 可用性警告检查通过，产物最低版本均为 12；Apple Silicon 产物在本机 macOS 15.6 的加载检查通过。这些证据不能替代 macOS 12 真机验收，也不能通过修改 Mach-O 版本字段宣称兼容。
 
 ## 组件检查点
 
@@ -12,6 +16,8 @@
 
 tar 保留应用框架的符号链接和可执行权限。最终打包阶段重新检查组件来源、架构、最低系统版本，按由内到外顺序签名，生成安装 PKG、卸载 PKG、DMG、SHA-256 和验证报告。
 
+应用归档前还会分别检查每个 Universal 2 Mach-O 的 arm64、x86_64 切片，拒绝缺失架构或实际最低版本高于 12 的资产。原生依赖安装使用 `pod install --deployment`，在编译前检查锁文件；Ruby 版本同时固定，避免不同 JSON 序列化格式改变 CocoaPods 的 podspec 校验值。Flutter SDK、Pub 依赖、Xcode 中间文件和 Dart AOT 中间文件均按构建环境缓存，失败后的缓存保存不会代替组件完整性验证。
+
 ## 失败后怎样继续
 
 - 临时下载或 runner 故障：在原运行中选择 **Re-run failed jobs**，或只重跑对应失败任务。
@@ -21,7 +27,7 @@ tar 保留应用框架的符号链接和可执行权限。最终打包阶段重�
 
 工作流不因新提交或另一架构失败自动取消有效运行。每份组件和最终产物记录来源提交、输入指纹及校验值；下载时按目标提交选择，不能把不同运行中名字相似的 DMG 当作同一版本。
 
-可通过手动运行的 `fault_injection` 选择单个架构，主动验证打包失败后的续跑。在工作流尚未进入默认分支时，也可在 `dev` 提交说明中加入 `[test-package-retry-arm64]`。两种方式都仅在第一次运行、恢复并校验组件之后使指定架构的打包失败；选择 **Re-run failed jobs** 后完成打包，另一架构继续正常运行。
+可通过手动运行的 `fault_injection` 选择单个架构，主动验证打包失败后的续跑。在工作流尚未进入默认分支时，也可在 `dev` 提交说明中加入 `[test-package-retry-arm64]` 或 `[test-package-retry-x64]`，选择需要验证的架构。两种方式都仅在第一次运行、恢复并校验组件之后使指定架构的打包失败；选择 **Re-run failed jobs** 后完成打包，另一架构继续正常运行。
 
 ## 本机验收
 

@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import NetworkServiceKit
 
 final class NetworkServiceTests: XCTestCase {
@@ -37,6 +38,70 @@ final class NetworkServiceTests: XCTestCase {
         XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: ["directory": UUID().uuidString], root: ServicePaths.root))
         XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: ["directory": "../../etc", "processes": []], root: ServicePaths.root))
         XCTAssertNoThrow(try SessionRecoveryJournal(dictionary: ["directory": UUID().uuidString, "processes": []], root: ServicePaths.root))
+    }
+    func testRecoveryJournalPreservesTunnelIdentityAndAcceptsOlderRecords() throws {
+        let old: [String: Any] = ["directory": UUID().uuidString, "processes": []]
+        XCTAssertNil(try SessionRecoveryJournal(dictionary: old, root: ServicePaths.root).tunnelInterface)
+        var record = old
+        record["tunnelInterface"] = ["name": "utun9", "index": 42]
+        let identity = try SessionRecoveryJournal(dictionary: record, root: ServicePaths.root).tunnelInterface
+        XCTAssertEqual(identity, try TunnelInterfaceIdentity(name: "utun9", index: 42))
+        for invalid in [NSNull(), ["name": "en0", "index": 42], ["name": "utun9", "index": 0], ["name": "utun../9", "index": 42], ["name": "utun9"]] as [Any] {
+            record["tunnelInterface"] = invalid
+            XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: record, root: ServicePaths.root))
+        }
+        for index in [true, -1, Int.max, 1.5] as [Any] {
+            record["tunnelInterface"] = ["name": "utun9", "index": index]
+            XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: record, root: ServicePaths.root))
+        }
+    }
+    func testTunnelRecoveryWaitsForOriginalInterfaceAndIgnoresNameReuse() throws {
+        let identity = try TunnelInterfaceIdentity(name: "utun9", index: 42)
+        var time: TimeInterval = 0
+        var samples = [["utun9": UInt32(42), "utun6": UInt32(7)], ["utun9": UInt32(43), "utun6": UInt32(7)]]
+        try TunnelInterfaceRecovery.waitUntilRemoved(identity, timeout: 1, snapshot: { samples.removeFirst() }, routes: { [43] }, now: { time }, sleep: { time += $0 })
+        XCTAssertTrue(samples.isEmpty)
+        XCTAssertGreaterThan(time, 0)
+        XCTAssertNoThrow(try TunnelInterfaceRecovery.waitUntilRemoved(nil, snapshot: { XCTFail("older/proxy journal queried interfaces"); return [:] }))
+    }
+    func testTunnelRecoveryTimesOutOrReportsUnreadableSnapshot() throws {
+        let identity = try TunnelInterfaceIdentity(name: "utun9", index: 42)
+        var time: TimeInterval = 0
+        XCTAssertThrowsError(try TunnelInterfaceRecovery.waitUntilRemoved(identity, timeout: 0.2, snapshot: { ["utun9": 42] }, routes: { [] }, now: { time }, sleep: { time += $0 })) {
+            XCTAssertEqual(($0 as? ServiceFailure)?.code, "recoveryFailed")
+        }
+        XCTAssertEqual(time, 0.2, accuracy: 0.001)
+        XCTAssertThrowsError(try TunnelInterfaceRecovery.waitUntilRemoved(identity, snapshot: { throw ServiceFailure("synthetic", "unavailable") })) {
+            XCTAssertEqual(($0 as? ServiceFailure)?.code, "recoveryFailed")
+        }
+        XCTAssertNoThrow(try TunnelInterfaceRecovery.waitUntilRemoved(identity, snapshot: { ["utun6": 7] }, routes: { [7] }))
+    }
+    func testTunnelRecoveryWaitsForRoutesAfterInterfaceDisappears() throws {
+        let identity = try TunnelInterfaceIdentity(name: "utun9", index: 42)
+        var time: TimeInterval = 0
+        var routes: [Set<UInt32>] = [[42, 7], [42, 7], [7]]
+        try TunnelInterfaceRecovery.waitUntilRemoved(identity, timeout: 1, snapshot: { ["utun6": 7] }, routes: { routes.removeFirst() }, now: { time }, sleep: { time += $0 })
+        XCTAssertTrue(routes.isEmpty)
+        XCTAssertEqual(time, 0.1, accuracy: 0.001)
+        XCTAssertThrowsError(try TunnelInterfaceRecovery.waitUntilRemoved(identity, timeout: 0, snapshot: { [:] }, routes: { [42] })) {
+            XCTAssertEqual(($0 as? ServiceFailure)?.code, "recoveryFailed")
+        }
+        XCTAssertThrowsError(try TunnelInterfaceRecovery.waitUntilRemoved(identity, snapshot: { [:] }, routes: { throw ServiceFailure("synthetic", "unavailable") })) {
+            XCTAssertEqual(($0 as? ServiceFailure)?.code, "recoveryFailed")
+        }
+    }
+    func testRecoveryRouteDumpParserKeepsStaticGatewayRoutesAndRejectsTruncation() throws {
+        var message = rt_msghdr()
+        message.rtm_msglen = UInt16(MemoryLayout<rt_msghdr>.size)
+        message.rtm_version = UInt8(RTM_VERSION)
+        message.rtm_type = UInt8(RTM_GET)
+        message.rtm_index = 42
+        message.rtm_flags = RTF_UP | RTF_STATIC | RTF_GATEWAY
+        let bytes = withUnsafeBytes(of: &message) { Data($0) }
+        XCTAssertEqual(try TunnelInterfaceRecovery.routeInterfaceIndices(from: bytes), [42])
+        XCTAssertThrowsError(try TunnelInterfaceRecovery.routeInterfaceIndices(from: bytes.dropLast()))
+        message.rtm_flags = RTF_STATIC | RTF_GATEWAY
+        XCTAssertTrue(try TunnelInterfaceRecovery.routeInterfaceIndices(from: withUnsafeBytes(of: &message) { Data($0) }).isEmpty)
     }
     func testIPv6ProtectionRejectsMissingGuarantees() {
         XCTAssertThrowsError(try ConfigPolicy.validateIPv6Protection(configurations: [:], core: "mihomo", required: true))

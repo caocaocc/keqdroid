@@ -78,6 +78,18 @@
         "macos/xray-bootstrap-dns.patch"
       ]
     },
+    "singtun": {
+      "module": "github.com/sagernet/sing-tun",
+      "version": "v0.8.12-0.20260810140523-7c73233bd0fb",
+      "commit": "7c73233bd0fb0dae02e76505af888ef729319be9",
+      "url": "https://proxy.golang.org/github.com/sagernet/sing-tun/@v/v0.8.12-0.20260810140523-7c73233bd0fb.zip",
+      "sha256": "4b91c01b839643f9caa4b445b2dc274bf5f608a99c1e016ffbe8ade681ae62fa",
+      "prefix": "github.com/sagernet/sing-tun@v0.8.12-0.20260810140523-7c73233bd0fb",
+      "format": "zip",
+      "patches": [
+        "macos/singtun-route-ownership.patch"
+      ]
+    },
     "singbox": {
       "module": "github.com/sagernet/sing-box",
       "version": "v1.13.19",

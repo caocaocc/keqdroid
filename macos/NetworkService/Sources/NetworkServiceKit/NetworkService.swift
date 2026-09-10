@@ -19,6 +19,8 @@ public final class NetworkService {
     private var owner: ClientIdentity?
     private var snapshotUID: uid_t?
     private var sessionDirectory: URL?
+    private var tunnelInterface: TunnelInterfaceIdentity?
+    private var interfacesBeforeSession: [String: UInt32] = [:]
     private var snapshot: [String: Any] = ["status": "disconnected"]
     private var connectedAt: Date?
     private var lastContact = Date()
@@ -146,9 +148,10 @@ public final class NetworkService {
             try validateContext(request, context: context)
             try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode)
         } else { context = try settings.prepare(uid: identity.uid) }
+        let before = request.mode == "tun" ? try TunnelInterfaceRecovery.capture() : [:]
         owner = identity; snapshotUID = identity.uid; activeRequest = request; activeContext = context; lastContact = Date()
+        interfacesBeforeSession = before; tunnelInterface = nil
         snapshot = ["sessionId": request.id, "status": "connecting", "connectionMode": request.mode, "core": request.core]
-        let before = networkInterfaces()
         do {
             let directory = root.appendingPathComponent("sessions", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o711])
@@ -174,10 +177,9 @@ public final class NetworkService {
             if request.mode == "tun" {
                 var interface: String?
                 try waitUntilReady(timeout: 8) {
-                    let candidates = networkInterfaces().subtracting(before).filter { $0.hasPrefix("utun") }
-                    guard candidates.count == 1, let candidate = candidates.first else { return false }
-                    interface = candidate
-                    return IPv4RouteSnapshot.capture().usesTunnel(candidate)
+                    guard let candidate = tunnelInterface else { return false }
+                    interface = candidate.name
+                    return IPv4RouteSnapshot.capture().usesTunnel(candidate.name)
                 }
                 snapshot["interfaceName"] = interface
                 if request.blockIpv6Leak && context.hasIPv6 {
@@ -200,7 +202,18 @@ public final class NetworkService {
             }
             // Never publish system proxy/DNS until processes, ports, utun, and
             // both DNS transports are working.
-            try settings.apply(context: context, proxyPorts: request.systemProxy && request.mode == "proxy" ? (request.socksPort, request.httpPort) : nil, dnsAddress: request.mode == "tun" ? request.dnsAddress : nil)
+            let proxyPorts: (socks: Int, http: Int)? = request.systemProxy && request.mode == "proxy" ? (request.socksPort, request.httpPort) : nil
+            let dnsAddress = request.mode == "tun" ? request.dnsAddress : nil
+            try settings.apply(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
+            try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
+            if request.mode == "tun" { try SystemDNSReadiness.verify() }
+            // Catch a core exit or a user edit during the asynchronous configd /
+            // resolver checks before publishing a connected session.
+            try waitUntilReady(timeout: 1) {
+                keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 &&
+                keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
+            }
+            try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress, timeout: 0)
             connectedAt = Date(); lastContact = Date(); lastMonitor = Date(); snapshot["status"] = "connected"
             try persistSession(); updateSnapshot()
             return snapshot
@@ -235,6 +248,7 @@ public final class NetworkService {
     private func waitUntilReady(timeout: TimeInterval, predicate: () -> Bool) throws {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
+            try recordTunnelInterfaceIfAvailable()
             for process in processes {
                 process.collectOutput()
                 guard process.isAlive else { throw ServiceFailure("coreExited", "\(process.name) exited during startup. \(String(decoding: process.log.suffix(4096), as: UTF8.self))") }
@@ -245,8 +259,28 @@ public final class NetworkService {
         throw ServiceFailure("readinessTimeout", "Core, tunnel, or TCP/UDP DNS readiness timed out.")
     }
 
+    private func recordTunnelInterfaceIfAvailable() throws {
+        guard activeRequest?.mode == "tun", processes.contains(where: { $0.name != "wireproxy" }) else { return }
+        let current = try TunnelInterfaceRecovery.capture()
+        if let tunnelInterface {
+            guard current[tunnelInterface.name] == tunnelInterface.index else {
+                throw ServiceFailure("tunnelInterfaceLost", "The session's original tunnel interface has disappeared or been replaced.")
+            }
+            return
+        }
+        let candidates = current.filter { $0.key.hasPrefix("utun") && interfacesBeforeSession[$0.key] != $0.value }
+        guard candidates.count == 1, let candidate = candidates.first else { return }
+        tunnelInterface = try TunnelInterfaceIdentity(name: candidate.key, index: candidate.value)
+        // Persist as soon as observed, including before local ports/DNS become
+        // ready, so partial startup and helper crashes retain cleanup evidence.
+        try persistSession()
+        snapshot["interfaceName"] = candidate.key
+    }
+
     private func persistSession() throws {
-        try SecureFiles.writeJSON(["processes": processes.map(\.journal), "directory": sessionDirectory?.lastPathComponent ?? ""], to: state.appendingPathComponent("session-journal.json"))
+        var journal: [String: Any] = ["processes": processes.map(\.journal), "directory": sessionDirectory?.lastPathComponent ?? ""]
+        if let tunnelInterface { journal["tunnelInterface"] = tunnelInterface.dictionary }
+        try SecureFiles.writeJSON(journal, to: state.appendingPathComponent("session-journal.json"))
     }
     private func requireRecovered() throws {
         let files = ["network-journal.json", "session-journal.json"]
@@ -273,6 +307,7 @@ public final class NetworkService {
                 }
             }
         }
+        try TunnelInterfaceRecovery.waitUntilRemoved(document.tunnelInterface)
         let directory = root.appendingPathComponent("sessions").appendingPathComponent(document.directory)
         guard keq_remove_tree(directory.path) == 0 else { throw ServiceFailure("recoveryFailed", "Cannot remove the old private session directory.") }
         try FileManager.default.removeItem(at: journal)
@@ -289,13 +324,21 @@ public final class NetworkService {
         // If recovery fails, retain the journal and report it, but still stop the
         // service's processes. Never claim network settings were restored.
         var recoveryError: Error?
-        do { try settings.restore() } catch { recoveryError = error }
+        // A core may have created its utun just before another startup step
+        // failed. Capture that identity before stopping its process.
+        if tunnelInterface == nil {
+            do { try recordTunnelInterfaceIfAvailable() } catch { recoveryError = error }
+        }
+        do { try settings.restore() } catch { recoveryError = recoveryError ?? error }
         for process in processes.reversed() {
             do { try process.stop() } catch { recoveryError = recoveryError ?? error }
         }
+        do { try TunnelInterfaceRecovery.waitUntilRemoved(tunnelInterface) } catch { recoveryError = recoveryError ?? error }
         let logs = processes.map { "[\($0.name)]\n\(String(decoding: $0.log, as: UTF8.self))" }.joined(separator: "\n")
         processes.removeAll()
-        if let directory = sessionDirectory, keq_remove_tree(directory.path) != 0 { recoveryError = recoveryError ?? ServiceFailure("recoveryFailed", "Cannot remove the private session directory.") }
+        if recoveryError == nil, let directory = sessionDirectory, keq_remove_tree(directory.path) != 0 {
+            recoveryError = ServiceFailure("recoveryFailed", "Cannot remove the private session directory.")
+        }
         // Keep both journals until every cleanup step succeeds. A failed
         // restoration must not be overwritten by the next session.
         if recoveryError == nil {
@@ -306,11 +349,16 @@ public final class NetworkService {
         }
         recoveryPending = recoveryError != nil
         owner = nil; activeRequest = nil; activeContext = nil; sessionDirectory = nil; connectedAt = nil
+        tunnelInterface = nil; interfacesBeforeSession = [:]
         snapshot.removeValue(forKey: "networkContext")
         snapshot["status"] = recoveryError == nil ? "disconnected" : "error"
         snapshot["pids"] = [:] as [String: Int]; snapshot.removeValue(forKey: "apiSecret")
         if !logs.isEmpty { snapshot["log"] = String(logs.suffix(64 * 1024)) }
-        if let recoveryError { snapshot["recoveryError"] = recoveryError.localizedDescription; throw recoveryError }
+        if let recoveryError {
+            snapshot["recoveryError"] = recoveryError.localizedDescription
+            snapshot["errorCode"] = (recoveryError as? ServiceFailure)?.code ?? "recoveryFailed"
+            throw recoveryError
+        }
     }
 
     private func updateSnapshot() {

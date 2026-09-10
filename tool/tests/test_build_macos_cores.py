@@ -75,6 +75,34 @@ class CoreCheckpointTests(unittest.TestCase):
         self.change_patch("macos/bootstrapdns/resolver.go")
         self.assert_changed(before, builder.CORES)
 
+    def test_darwin_route_dependency_invalidates_only_keqrnel(self):
+        before = self.fingerprints()
+        self.change_patch("macos/singtun-route-ownership.patch")
+        self.assert_changed(before, ("keqrnel",))
+        before = self.fingerprints()
+        self.change_patch("macos/singtun/route_ownership_darwin.go")
+        self.assert_changed(before, ("keqrnel",))
+        before = self.fingerprints()
+        manifest = json.loads(self.manifest.read_text())
+        manifest["sources"]["singtun"]["sha256"] = "different-source"
+        self.manifest.write_text(json.dumps(manifest))
+        self.assert_changed(before, ("keqrnel",))
+
+    def test_keqrnel_preparation_uses_pinned_route_dependency_for_build_and_tests(self):
+        manifest = json.loads(self.manifest.read_text())
+        with patch.object(builder, "download", return_value=Path("archive")), \
+                patch.object(builder, "extract", side_effect=lambda archive, prefix, source: source.mkdir(parents=True)), \
+                patch.object(builder, "run") as commands:
+            sources = builder.prepare_sources(manifest, Path("go"), {}, ("keqrnel",))
+        self.assertEqual(set(sources), {"keqrnel", "xray", "singbox", "singtun"})
+        replacements = [call.args for call in commands.call_args_list
+                        if "github.com/sagernet/sing-tun=../singtun" in call.args[0]]
+        self.assertEqual({args[1].name for args in replacements}, {"keqrnel", "singbox"})
+        self.assertTrue((sources["singtun"] / "route_ownership_darwin.go").exists())
+        with patch.object(builder, "run") as tests:
+            builder.test_sources(("keqrnel",), Path("go"), {}, sources)
+        self.assertIn("test-singtun-route-ownership", [call.args[-1] for call in tests.call_args_list])
+
     def test_unrelated_manifest_source_and_documentation_are_excluded(self):
         before = self.fingerprints()
         self.change_patch("macos/README.md")
