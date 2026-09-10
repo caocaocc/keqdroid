@@ -85,6 +85,37 @@ rejects("duplicate ports") { var bad = arguments; bad["httpPort"] = 2080; _ = tr
 rejects("protocol mismatch") { var bad = arguments; bad["protocolVersion"] = 2; _ = try SessionRequest(arguments: bad) }
 rejects("session path traversal") { var bad = arguments; bad["sessionId"] = "../../etc"; _ = try SessionRequest(arguments: bad) }
 rejects("extra configuration") { var bad = arguments; bad["configurations"] = ["keqrnel": String(decoding: encoded, as: UTF8.self), "sh": "bad"]; _ = try SessionRequest(arguments: bad) }
+let caller = ClientIdentity(uid: 501, gid: 20, connectionID: 10)
+func access(_ method: String, _ args: [String: Any] = [:], authorized: Bool = false, owner: ClientIdentity? = nil, session: String? = nil) throws {
+    try SessionAccessPolicy.validate(method: method, arguments: args, identity: caller, tunAuthorized: authorized, owner: owner, activeSessionID: session)
+}
+try access("startProxySession", arguments); checks += 1
+try access("getSession"); checks += 1
+try access("stopSession", ["sessionId": "active"], owner: caller, session: "active"); checks += 1
+for method in ["prepareNetworkContext", "startSession"] {
+    rejects("TUN without grant: \(method)") { try access(method) }
+    try access(method, authorized: true); checks += 1
+}
+for method in ["getSession", "stopSession", "startProxySession"] {
+    for owner in [ClientIdentity(uid: 502, gid: 20, connectionID: 11), ClientIdentity(uid: 501, gid: 20, connectionID: 11)] {
+        rejects("foreign session \(method)") { try access(method, arguments, owner: owner, session: "active") }
+    }
+}
+for payload: [String: Any] in [[:], ["sessionId": "old"], ["sessionId": 123]] {
+    rejects("stop without exact session") { try access("stopSession", payload, owner: caller, session: "active") }
+}
+rejects("old session poll") { try access("getSession", ["sessionId": "old"], owner: caller, session: "active") }
+rejects("unknown operation") { try access("runCommand", authorized: true) }
+rejects("TUN through proxy operation") { var bad = arguments; bad["connectionMode"] = "tun"; try access("startProxySession", bad, authorized: true) }
+for key in ["contextId", "dnsAddress"] {
+    rejects("Proxy TUN field: \(key)") { var bad = arguments; bad[key] = "172.19.0.2"; try access("startProxySession", bad) }
+    rejects("Proxy config TUN field: \(key)") { var bad = arguments; bad[key] = "172.19.0.2"; _ = try SessionRequest(arguments: bad) }
+}
+rejects("keqrnel TUN in Proxy config") { var bad = valid; bad["inbounds"] = [["type": "tun"]]; try validate(bad) }
+rejects("mihomo TUN in Proxy config") { var bad = cached; bad["tun"] = ["enable": true]; try validateMihomo(bad) }
+for uid: UInt32 in [0, 1, 499] {
+    rejects("Proxy root/system account") { try SessionAccessPolicy.validate(method: "startProxySession", arguments: arguments, identity: ClientIdentity(uid: uid, gid: 0, connectionID: 1), tunAuthorized: true, owner: nil, activeSessionID: nil) }
+}
 let defaultRequest = try SessionRequest(arguments: arguments)
 expect(defaultRequest.blockIpv6Leak == false, "IPv6 protection flag defaults to disabled")
 let ipv6: [String: Any] = ["inbounds": [["type": "tun", "auto_route": true, "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"]]], "route": ["rules": [["ip_cidr": ["::/0"], "outbound": "block"]]], "outbounds": [["type": "block", "tag": "block"]]]

@@ -79,13 +79,29 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     return result ?? const {'installed': false, 'authorized': false};
   }
 
+  static bool canConnectWithoutPrompt(
+    Map<String, dynamic> service,
+    ConnectionMode mode,
+  ) =>
+      service['installed'] == true &&
+      service['protocolVersion'] == 1 &&
+      (mode == ConnectionMode.proxy
+          ? service['proxyWithoutElevation'] == true
+          : service['authorized'] == true);
+
   Future<Map<String, dynamic>> _call(
     String method, [
     Map<String, dynamic>? args,
   ]) async {
     final result = await _channel
         .invokeMapMethod<String, dynamic>(method, args)
-        .timeout(Duration(seconds: method == 'startSession' ? 90 : 15));
+        .timeout(
+          Duration(
+            seconds: method == 'startSession' || method == 'startProxySession'
+                ? 90
+                : 15,
+          ),
+        );
     if (result == null) {
       throw PlatformChannelException(
         'The macOS network service returned no result.',
@@ -169,9 +185,17 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
           'The macOS network service needs to be updated with this application.',
         );
       }
-      if (service['authorized'] != true && !await requestTunnelPermission()) {
+      if (request.mode == ConnectionMode.proxy &&
+          service['proxyWithoutElevation'] != true) {
+        throw const VpnStartException(
+          'The macOS network service needs to be updated for Proxy without administrator authorization.',
+        );
+      }
+      if (request.mode == ConnectionMode.tun &&
+          service['authorized'] != true &&
+          !await requestTunnelPermission()) {
         throw const VpnPermissionDeniedException(
-          'The macOS network service is not authorized.',
+          'TUN is not authorized for this macOS account.',
         );
       }
       if (generation != _operationGeneration) return;
@@ -211,7 +235,12 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       totalDownload = 0;
       _lastStats = null;
       sessionStartedAt = DateTime.now();
-      final snapshot = await _call('startSession', payload);
+      final snapshot = await _call(
+        request.mode == ConnectionMode.proxy
+            ? 'startProxySession'
+            : 'startSession',
+        payload,
+      );
       if (generation != _operationGeneration) {
         await _stop();
         return;

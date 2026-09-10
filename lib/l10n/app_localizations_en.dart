@@ -2482,11 +2482,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get macosNetworkServiceTitle => 'Network service';
 
   @override
-  String get macosNetworkServiceHint => 'Authorize this account to control the system proxy and TUN. macOS asks for administrator permission once per installed version.';
+  String get macosNetworkServiceHint => 'Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.';
 
   @override
   String get macosNetworkServiceMissing => 'Install or update KEQDIS using the complete PKG installer to enable the network service.';
 
   @override
-  String get macosAuthorizeAccount => 'Authorize this account';
+  String get macosAuthorizeAccount => 'Authorize TUN for this account';
 }

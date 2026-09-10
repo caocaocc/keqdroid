@@ -26,6 +26,7 @@ public final class NetworkService {
     private var lastContact = Date()
     private var lastMonitor = Date()
     private var recoveryPending = false
+    private var recoverySessionID: String?
 
     public init(root: URL = ServicePaths.root, clientRequirement: String) throws {
         self.root = root; state = root.appendingPathComponent("state", isDirectory: true)
@@ -91,7 +92,7 @@ public final class NetworkService {
         return grant["packageFingerprint"] as? String == packageFingerprint
     }
     private func serviceStatus(_ uid: uid_t) -> [String: Any] {
-        ["installed": true, "authorized": isAuthorized(uid), "protocolVersion": ServicePaths.protocolVersion, "version": ServicePaths.version, "busy": owner != nil && owner?.uid != uid, "recoveryRequired": recoveryPending]
+        ["installed": true, "authorized": isAuthorized(uid), "proxyWithoutElevation": true, "protocolVersion": ServicePaths.protocolVersion, "version": ServicePaths.version, "busy": owner != nil && owner?.uid != uid, "recoveryRequired": recoveryPending]
     }
     private func handle(method: String, arguments: [String: Any], identity: ClientIdentity) throws -> [String: Any] {
         try SecureFiles.requireRootOwned(root, directory: true)
@@ -109,8 +110,7 @@ public final class NetworkService {
             try SecureFiles.writeJSON(grants, to: state.appendingPathComponent("authorized-users.json"))
             return serviceStatus(identity.uid)
         }
-        guard isAuthorized(identity.uid) else { throw ServiceFailure("authorizationRequired", "Authorize network control for this macOS account first.") }
-        if let owner, owner.uid != identity.uid { throw ServiceFailure("busy", "Another macOS account owns the active network session.") }
+        try SessionAccessPolicy.validate(method: method, arguments: arguments, identity: identity, tunAuthorized: isAuthorized(identity.uid), owner: owner, activeSessionID: activeRequest?.id ?? recoverySessionID)
         if owner?.connectionID == identity.connectionID { lastContact = Date() }
         switch method {
         case "prepareNetworkContext":
@@ -120,16 +120,16 @@ public final class NetworkService {
             let context = try settings.prepare(uid: identity.uid, forTUN: true)
             contexts[context.id] = context
             return context.dictionary
-        case "startSession":
+        case "startSession", "startProxySession":
             guard activeRequest == nil else { throw ServiceFailure("busy", "A network session is already active.") }
             try requireRecovered()
-            return try start(SessionRequest(arguments: arguments), identity: identity)
+            let request = try SessionRequest(arguments: arguments)
+            if method == "startProxySession", request.mode != "proxy" { throw ServiceFailure("invalidRequest", "A proxy request cannot start a TUN session.") }
+            return try start(request, identity: identity)
         case "stopSession":
-            if let requested = arguments["sessionId"] as? String, let activeRequest, requested != activeRequest.id { throw ServiceFailure("sessionMismatch", "The requested session no longer owns the connection.") }
             try stop(); snapshot = ["status": "disconnected"]
             return snapshot
         case "getSession":
-            if owner != nil && owner?.connectionID != identity.connectionID { throw ServiceFailure("busy", "Another application instance owns this network session.") }
             if let snapshotUID, snapshotUID != identity.uid { return ["status": "disconnected"] }
             updateSnapshot(); return snapshot
         default: throw ServiceFailure("unknownMethod", "Unknown network service method.")
@@ -317,6 +317,7 @@ public final class NetworkService {
         if activeRequest == nil && recoveryPending {
             try Self.recoverInstallation(root: root)
             recoveryPending = false
+            owner = nil; recoverySessionID = nil
             snapshot.removeValue(forKey: "recoveryError")
             return
         }
@@ -348,7 +349,11 @@ public final class NetworkService {
             }
         }
         recoveryPending = recoveryError != nil
-        owner = nil; activeRequest = nil; activeContext = nil; sessionDirectory = nil; connectedAt = nil
+        // Failed recovery still belongs to the original connection. Another
+        // account must not gain control merely because the core has stopped.
+        recoverySessionID = recoveryPending ? activeRequest?.id : nil
+        if !recoveryPending { owner = nil }
+        activeRequest = nil; activeContext = nil; sessionDirectory = nil; connectedAt = nil
         tunnelInterface = nil; interfacesBeforeSession = [:]
         snapshot.removeValue(forKey: "networkContext")
         snapshot["status"] = recoveryError == nil ? "disconnected" : "error"

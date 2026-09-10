@@ -1050,7 +1050,7 @@
   "macosSplitProcessHint": "Regeln verwenden Programmpfade einschließlich interner Hilfsprozesse. Gemeinsame Systemdienste lassen sich nicht immer einer App zuordnen.",
   "macosAppNeedsMatching": "App nicht in der Liste gefunden. Nach Verschieben oder Entfernen erneut auswählen.",
   "macosNetworkServiceTitle": "Netzwerkdienst",
-  "macosNetworkServiceHint": "Dieses Konto darf Systemproxy und TUN verwalten. macOS fragt einmal pro installierter Version nach Administratorrechten.",
+  "macosNetworkServiceHint": "Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.",
   "macosNetworkServiceMissing": "Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.",
-  "macosAuthorizeAccount": "Dieses Konto autorisieren"
+  "macosAuthorizeAccount": "TUN für dieses Konto autorisieren"
 }

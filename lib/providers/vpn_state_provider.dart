@@ -378,21 +378,24 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
           ? await MacOSAppRoutingStore.load()
           : null;
       if (macRouting != null) routingMode = macRouting.mode;
-      if (Platform.isMacOS &&
-          autostartTunFallback &&
-          engine.usesMacOSNetworkService) {
-        final service = await MacOSTunnelBackend.serviceStatus();
-        if (service['installed'] != true || service['authorized'] != true) {
-          throw const VpnPermissionDeniedException(
-            'Automatic connection requires the installed macOS network service. Open the application to authorize it.',
-          );
-        }
-      }
-
       var connectionMode = TunnelSessionBuilder.resolveMode(
         settings,
         vpnBackend: isAwg ? VpnBackend.awg : VpnBackend.xray,
       );
+
+      if (Platform.isMacOS &&
+          autostartTunFallback &&
+          engine.usesMacOSNetworkService) {
+        final service = await MacOSTunnelBackend.serviceStatus();
+        if (!MacOSTunnelBackend.canConnectWithoutPrompt(
+          service,
+          connectionMode,
+        )) {
+          throw const VpnPermissionDeniedException(
+            'Automatic connection requires a matching macOS network service. TUN also requires prior account authorization.',
+          );
+        }
+      }
 
       // Разрешение на VPN — только если сессия и правда поднимет интерфейс.
       // В режиме «прокси» на Android establish() не вызывается, и системный

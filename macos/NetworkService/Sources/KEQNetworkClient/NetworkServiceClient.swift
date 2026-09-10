@@ -50,7 +50,7 @@ public final class NetworkServiceClient {
         } catch { DispatchQueue.main.async { completion(.failure(error)) } }
     }
 
-    /// Requests the administrator-approved persistent grant for the current
+    /// Requests the administrator-approved persistent TUN grant for the current
     /// account. Password handling belongs to macOS Authorization Services.
     public func authorize(completion: @escaping (Result<[String: Any], Error>) -> Void) {
         call(method: "getServiceStatus") { status in
