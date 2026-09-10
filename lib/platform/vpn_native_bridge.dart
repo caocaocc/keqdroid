@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../services/hotkey_service.dart';
+import '../services/macos_desktop_service.dart';
 import '../utils/system_accent.dart';
 
 /// android: действия из уведомления; windows: автоподключение, меню трея и хоткеи
@@ -13,14 +14,31 @@ class VpnNativeBridge {
   static const channel = MethodChannel('keqdis_vpn_channel');
 
   static bool get supportsNotificationLaunch => Platform.isAndroid;
-  static bool get supportsDeepLinks => Platform.isAndroid || Platform.isWindows;
+  static bool get supportsDeepLinks =>
+      Platform.isAndroid || Platform.isWindows || Platform.isMacOS;
   static bool get supportsAutostartNotification => Platform.isWindows;
-  static bool get supportsWindowVisibilityEvents => Platform.isWindows;
-  static bool get supportsGlobalHotkeys => Platform.isWindows;
+  static bool get supportsWindowVisibilityEvents =>
+      Platform.isWindows || Platform.isMacOS;
+  static bool get supportsGlobalHotkeys =>
+      Platform.isWindows || Platform.isMacOS;
 
   static Future<void> Function(MethodCall call)? _launchHandler;
   static Future<void> Function()? _autostartHandler;
   static void Function(bool visible)? _windowVisibilityHandler;
+  static Future<void> Function()? _quitHandler;
+  static bool _quitInFlight = false;
+
+  static void registerQuitHandler(Future<void> Function()? handler) {
+    _quitHandler = handler;
+    _syncMethodCallHandler();
+    if (Platform.isMacOS) {
+      unawaited(
+        channel.invokeMethod<void>('setQuitHandlerReady', {
+          'ready': handler != null,
+        }),
+      );
+    }
+  }
 
   static Future<String?> getLaunchAction() async {
     if (!supportsNotificationLaunch) return null;
@@ -151,9 +169,7 @@ class VpnNativeBridge {
     _syncMethodCallHandler();
   }
 
-  static void registerAutostartHandler(
-    Future<void> Function()? handler,
-  ) {
+  static void registerAutostartHandler(Future<void> Function()? handler) {
     _autostartHandler = handler;
     _syncMethodCallHandler();
   }
@@ -167,7 +183,8 @@ class VpnNativeBridge {
   }
 
   static void _syncMethodCallHandler() {
-    final needsHandler = supportsNotificationLaunch ||
+    final needsHandler =
+        supportsNotificationLaunch ||
         supportsDeepLinks ||
         supportsAutostartNotification ||
         supportsSystemAccentEvents ||
@@ -177,17 +194,30 @@ class VpnNativeBridge {
       return;
     }
     channel.setMethodCallHandler((call) async {
-      if (call.method == 'onAutostartConnect' && supportsAutostartNotification) {
+      if (call.method == 'onQuitRequest' && Platform.isMacOS) {
+        if (_quitInFlight) return;
+        _quitInFlight = true;
+        try {
+          await MacOSDesktopService.quitAfter(_quitHandler);
+        } finally {
+          _quitInFlight = false;
+        }
+        return;
+      }
+      if (call.method == 'onAutostartConnect' &&
+          supportsAutostartNotification) {
         await _autostartHandler?.call();
         return;
       }
-      if (call.method == 'onWindowVisibility' && supportsWindowVisibilityEvents) {
+      if (call.method == 'onWindowVisibility' &&
+          supportsWindowVisibilityEvents) {
         final args = call.arguments;
         final visible = args is Map ? args['visible'] as bool? ?? true : true;
         _windowVisibilityHandler?.call(visible);
         return;
       }
-      if (call.method == 'onSystemAccentChanged' && supportsSystemAccentEvents) {
+      if (call.method == 'onSystemAccentChanged' &&
+          supportsSystemAccentEvents) {
         final args = call.arguments;
         _systemAccentCtrl.add(
           SystemAccentCandidates.fromMap(args is Map ? args : null),
@@ -205,4 +235,3 @@ class VpnNativeBridge {
     });
   }
 }
-

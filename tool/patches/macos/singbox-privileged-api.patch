@@ -1,0 +1,11 @@
+diff --git a/experimental/clashapi/server.go b/experimental/clashapi/server.go
+--- a/experimental/clashapi/server.go
++++ b/experimental/clashapi/server.go
+@@ -66,6 +66,7 @@
+ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options option.ClashAPIOptions) (adapter.ClashServer, error) {
+ 	trafficManager := trafficontrol.NewManager()
+ 	chiRouter := chi.NewRouter()
++	chiRouter.Use(privilegedRuntimeAPI)
+ 	s := &Server{
+ 		ctx:       ctx,
+ 		network:   service.FromContext[adapter.NetworkManager](ctx),

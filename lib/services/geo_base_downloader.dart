@@ -41,6 +41,11 @@ class GeoBaseDownloader {
     void Function(double progress)? onProgress,
     Dio? client,
   }) async {
+    if (Platform.isMacOS) {
+      throw const GeoBaseDownloadException(
+        'macOS geo databases are managed by the installer. Install an updated PKG to update them.',
+      );
+    }
     final dir = await GeoAssetService.geoDir();
     if (dir == null) {
       throw const GeoBaseDownloadException('geo directory is unknown');

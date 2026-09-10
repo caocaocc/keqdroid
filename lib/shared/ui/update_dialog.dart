@@ -22,8 +22,7 @@ class UpdatePrompt {
 
   static String? promptedVersionThisSession;
 
-  static void markShown(String version) =>
-      promptedVersionThisSession = version;
+  static void markShown(String version) => promptedVersionThisSession = version;
 }
 
 /// Показывать диалог при первой загрузке информации об обновлении,
@@ -105,8 +104,9 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
     final textColor = Theme.of(context).colorScheme.onSurface;
     final subtitleColor = Theme.of(context).colorScheme.onSurfaceVariant;
     final notes = widget.info.releaseNotes;
-    final sanitizedNotes =
-        notes != null && notes.isNotEmpty ? sanitizeReleaseNotes(notes) : null;
+    final sanitizedNotes = notes != null && notes.isNotEmpty
+        ? sanitizeReleaseNotes(notes)
+        : null;
 
     return AlertDialog(
       title: Row(
@@ -130,21 +130,22 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
           children: [
             Text(
               'v${widget.info.displayCurrentVersion} → v${widget.info.displayLatestVersion}',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: textColor,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
             ),
             const SizedBox(height: 4),
             Text(
               context.l10n.updateSizeLabel(widget.info.formattedSize),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: subtitleColor),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: subtitleColor),
             ),
             if (sanitizedNotes != null && sanitizedNotes.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
                 context.l10n.updateWhatsNew,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: textColor),
               ),
               const SizedBox(height: 6),
               Container(
@@ -161,16 +162,34 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
                     softLineBreak: true,
                     selectable: true,
                     styleSheet: MarkdownStyleSheet(
-                      p: Theme.of(context).textTheme.bodySmall?.copyWith(color: subtitleColor, height: 1.4),
-                      h1: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor),
-                      h2: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor),
-                      h3: Theme.of(context).textTheme.labelMedium?.copyWith(color: textColor),
-                      listBullet: Theme.of(context).textTheme.bodySmall?.copyWith(color: subtitleColor, height: 1.4),
+                      p: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: subtitleColor,
+                        height: 1.4,
+                      ),
+                      h1: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(color: textColor),
+                      h2: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(color: textColor),
+                      h3: Theme.of(
+                        context,
+                      ).textTheme.labelMedium?.copyWith(color: textColor),
+                      listBullet: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: subtitleColor, height: 1.4),
                       listIndent: 16,
-                      strong: Theme.of(context).textTheme.labelMedium?.copyWith(color: subtitleColor),
-                      em: Theme.of(context).textTheme.bodySmall?.copyWith(color: subtitleColor, fontStyle: FontStyle.italic),
+                      strong: Theme.of(
+                        context,
+                      ).textTheme.labelMedium?.copyWith(color: subtitleColor),
+                      em: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: subtitleColor,
+                        fontStyle: FontStyle.italic,
+                      ),
                       a: TextStyle(color: accent),
-                      code: Theme.of(context).textTheme.bodySmall?.copyWith(color: subtitleColor, fontFamily: 'monospace'),
+                      code: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: subtitleColor,
+                        fontFamily: 'monospace',
+                      ),
                     ),
                   ),
                 ),
@@ -185,7 +204,9 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
               const SizedBox(height: 6),
               Text(
                 _statusLabel(context),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: subtitleColor),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: subtitleColor),
               ),
             ],
           ],
@@ -209,23 +230,23 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
         // «Позже» просто закрывает диалог — без записи skip: пользователь ждёт
         // напоминания, а skip навсегда убирает версию из авто-предложений.
         TextButton(
-          onPressed: _downloading
-              ? null
-              : () => Navigator.pop(context),
+          onPressed: _downloading ? null : () => Navigator.pop(context),
           child: Text(context.l10n.updateActionLater),
         ),
         FilledButton(
           onPressed: _downloading ? null : _downloadAndInstall,
           style: FilledButton.styleFrom(
             backgroundColor: accent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ExpressiveShape.medium)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(ExpressiveShape.medium),
+            ),
           ),
           child: Text(
             _downloading
                 ? _statusLabel(context)
                 : widget.info.openInBrowser
-                    ? context.l10n.updateOpenDownload
-                    : context.l10n.updateActionNow,
+                ? context.l10n.updateOpenDownload
+                : context.l10n.updateActionNow,
           ),
         ),
       ],
@@ -253,7 +274,8 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
         widget.info,
         viaLocalProxy: tunnelHasLocalHttpProxy(
           vpnConnected: vpn?.status == VpnStatus.connected,
-          awgBackend: activeServer != null &&
+          awgBackend:
+              activeServer != null &&
               AwgProfile.isAwgConfig(activeServer.config),
         ),
         // Порт живой сессии: настроенный мог быть занят/изъят системой, и тогда
@@ -267,7 +289,8 @@ class _UpdateDialogState extends ConsumerState<_UpdateDialog> {
         // Desktop restarts (Windows zip, Linux AppImage in-place) tear the VPN
         // down first. Only invoked right before the app exits to apply — the
         // browser/deb hand-off path returns without calling it.
-        beforeRestart: Platform.isWindows || Platform.isLinux
+        beforeRestart:
+            Platform.isWindows || Platform.isLinux || Platform.isMacOS
             ? () async {
                 if (mounted) setState(() => _applying = true);
                 await ref.read(vpnStateProvider.notifier).disconnect();

@@ -4,10 +4,7 @@ part of '../settings_tab.dart';
 /// [ExpressiveSectionHeader]. Собственного вида у него больше нет: раньше он
 /// расходился с остальными настройками и цветом, и ролью текста.
 class _XrayCoreSectionHeader extends StatelessWidget {
-  const _XrayCoreSectionHeader({
-    required this.icon,
-    required this.title,
-  });
+  const _XrayCoreSectionHeader({required this.icon, required this.title});
 
   final IconData icon;
   final String title;
@@ -24,23 +21,24 @@ class _XrayCoreSectionHeader extends StatelessWidget {
 /// а не линия: карточка уже сказала «это одна группа», и рисовать внутри неё
 /// ещё и границы — значит говорить это дважды. Отдельная группа отделяется
 /// заголовком секции, а не швом.
-Widget _xraySettingsCard(BuildContext context, {required List<Widget> children}) =>
-    ExpressiveCard(
-      padding: const EdgeInsets.symmetric(
-        horizontal: ExpressiveSpacing.extraSmall,
-        vertical: ExpressiveSpacing.extraSmall,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      ),
-    );
+Widget _xraySettingsCard(
+  BuildContext context, {
+  required List<Widget> children,
+}) => ExpressiveCard(
+  padding: const EdgeInsets.symmetric(
+    horizontal: ExpressiveSpacing.extraSmall,
+    vertical: ExpressiveSpacing.extraSmall,
+  ),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: children,
+  ),
+);
 
-TextStyle? _xrayTileSubtitleStyle(BuildContext context) =>
-    Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: AppTheme.textLight(context),
-          height: 1.35,
-        );
+TextStyle? _xrayTileSubtitleStyle(BuildContext context) => Theme.of(context)
+    .textTheme
+    .bodySmall
+    ?.copyWith(color: AppTheme.textLight(context), height: 1.35);
 
 /// Сохранение настроек ядра. Поднято из состояния экрана: тем же самым
 /// пользуются секции, а состояния у них нет — только `ref`.
@@ -88,14 +86,12 @@ Widget _xrayChoiceTile({
   required Color accent,
   required String title,
   String? subtitle,
-}) =>
-    RadioListTile<String>(
-      value: value,
-      activeColor: accent,
-      title: Text(title),
-      subtitle: subtitle == null ? null : Text(subtitle),
-    );
-
+}) => RadioListTile<String>(
+  value: value,
+  activeColor: accent,
+  title: Text(title),
+  subtitle: subtitle == null ? null : Text(subtitle),
+);
 
 class _XrayCoreSettingsScreen extends ConsumerStatefulWidget {
   const _XrayCoreSettingsScreen();
@@ -105,7 +101,8 @@ class _XrayCoreSettingsScreen extends ConsumerStatefulWidget {
       _XrayCoreSettingsScreenState();
 }
 
-class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen> {
+class _XrayCoreSettingsScreenState
+    extends ConsumerState<_XrayCoreSettingsScreen> {
   Future<void> _resetDefaults(AppSettings settings) async {
     if (!await _confirmReset(
       context,
@@ -120,7 +117,9 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
     final portsLocked =
         vpn == VpnStatus.connected || vpn == VpnStatus.connecting;
     const defaults = AppSettings();
-    await ref.read(settingsNotifierProvider.notifier).save(
+    await ref
+        .read(settingsNotifierProvider.notifier)
+        .save(
           settings.copyWith(
             xrayCore: const XrayCoreSettings(),
             tun: const TunSettings(),
@@ -134,7 +133,9 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
         );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppLocalizations.of(context)!.settingsXrayResetDone)),
+      SnackBar(
+        content: Text(AppLocalizations.of(context)!.settingsXrayResetDone),
+      ),
     );
   }
 
@@ -158,10 +159,9 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
           onPressed: () => _resetDefaults(settings),
           child: Text(
             l10n.settingsXrayResetDefaults,
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: accent),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: accent),
           ),
         ),
       ],
@@ -179,7 +179,7 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
         const _XrayGeneralSection(),
         // sing-box TUN есть только на десктопе: Android держит TUN через
         // VpnService, эти опции там ни на что не влияют.
-        if (Platform.isWindows || Platform.isLinux) const _XrayTunSection(),
+        if (PlatformBootstrap.isDesktop) const _XrayTunSection(),
         // mihomo поставляется на всех трёх платформах, поэтому секция здесь
         // безусловна — в отличие от TUN-настроек выше, которые описывают
         // sing-box-инбаунд и на Android не значат ничего.
@@ -223,13 +223,17 @@ class _XrayDnsSection extends ConsumerWidget {
       // центрирует, и без stretch карточки схлопнулись бы по содержимому.
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _XrayCoreSectionHeader(icon: Icons.dns_rounded, title: l10n.settingsXrayDnsSection),
+        _XrayCoreSectionHeader(
+          icon: Icons.dns_rounded,
+          title: l10n.settingsXrayDnsSection,
+        ),
         _xraySettingsCard(
           context,
           children: [
             SwitchListTile(
               value: core.dnsUseCustom,
-              onChanged: (v) => _saveXrayCore(ref, settings, core.copyWith(dnsUseCustom: v)),
+              onChanged: (v) =>
+                  _saveXrayCore(ref, settings, core.copyWith(dnsUseCustom: v)),
               activeThumbColor: accent,
               title: Text(l10n.settingsXrayDnsCustom),
               subtitle: Text(
@@ -247,8 +251,11 @@ class _XrayDnsSection extends ConsumerWidget {
                     child: _DnsServersField(
                       initialValue: core.dnsServers,
                       label: l10n.settingsXrayDnsServers,
-                      onSave: (v) =>
-                          _saveXrayCore(ref, settings, core.copyWith(dnsServers: v)),
+                      onSave: (v) => _saveXrayCore(
+                        ref,
+                        settings,
+                        core.copyWith(dnsServers: v),
+                      ),
                     ),
                   ),
                 ],
@@ -261,28 +268,34 @@ class _XrayDnsSection extends ConsumerWidget {
             ),
             SwitchListTile(
               value: core.dnsSplitDirectDomains,
-              onChanged: (v) =>
-                  _saveXrayCore(ref, settings, core.copyWith(dnsSplitDirectDomains: v)),
+              onChanged: (v) => _saveXrayCore(
+                ref,
+                settings,
+                core.copyWith(dnsSplitDirectDomains: v),
+              ),
               activeThumbColor: accent,
               title: Text(l10n.settingsXrayDnsSplitDirect),
-              subtitle: Text(
-                l10n.settingsXrayDnsSplitDirectHint,
-              ),
+              subtitle: Text(l10n.settingsXrayDnsSplitDirectHint),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
                 l10n.settingsXrayDnsQueryStrategy,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppTheme.text(context)),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: AppTheme.text(context)),
               ),
             ),
             RadioGroup<String>(
               groupValue: core.dnsQueryStrategy,
               onChanged: (v) {
-                if (v != null) _saveXrayCore(ref, settings, core.copyWith(dnsQueryStrategy: v));
+                if (v != null) {
+                  _saveXrayCore(
+                    ref,
+                    settings,
+                    core.copyWith(dnsQueryStrategy: v),
+                  );
+                }
               },
               child: Column(
                 children: [
@@ -298,8 +311,11 @@ class _XrayDnsSection extends ConsumerWidget {
             ),
             SwitchListTile(
               value: core.dnsDisableCache,
-              onChanged: (v) =>
-                  _saveXrayCore(ref, settings, core.copyWith(dnsDisableCache: v)),
+              onChanged: (v) => _saveXrayCore(
+                ref,
+                settings,
+                core.copyWith(dnsDisableCache: v),
+              ),
               activeThumbColor: accent,
               title: Text(l10n.settingsXrayDnsDisableCache),
             ),
@@ -364,9 +380,7 @@ class _XrayMuxSection extends ConsumerWidget {
                       children: [
                         Text(
                           l10n.settingsXrayMuxParamsTitle,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: AppTheme.text(context)),
                         ),
                         const SizedBox(height: 4),
@@ -378,11 +392,12 @@ class _XrayMuxSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerLowest,
-                        borderRadius:
-                            ExpressiveShape.radius(ExpressiveShape.large),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLowest,
+                        borderRadius: ExpressiveShape.radius(
+                          ExpressiveShape.large,
+                        ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -393,7 +408,8 @@ class _XrayMuxSection extends ConsumerWidget {
                               child: _XrayCoreTextField(
                                 key: ValueKey('mux_c_${core.muxConcurrency}'),
                                 label: l10n.settingsXrayMuxConcurrency,
-                                hint: '${XrayCoreSettings.defaultMuxConcurrency}',
+                                hint:
+                                    '${XrayCoreSettings.defaultMuxConcurrency}',
                                 initialValue: '${core.muxConcurrency}',
                                 keyboardType: TextInputType.number,
                                 // Пустое или нечисловое поле — не повод отдать
@@ -403,7 +419,8 @@ class _XrayMuxSection extends ConsumerWidget {
                                   ref,
                                   settings,
                                   core.copyWith(
-                                    muxConcurrency: int.tryParse(v.trim()) ??
+                                    muxConcurrency:
+                                        int.tryParse(v.trim()) ??
                                         XrayCoreSettings.defaultMuxConcurrency,
                                   ),
                                 ),
@@ -424,7 +441,8 @@ class _XrayMuxSection extends ConsumerWidget {
                                   ref,
                                   settings,
                                   core.copyWith(
-                                    muxXudpConcurrency: int.tryParse(v.trim()) ??
+                                    muxXudpConcurrency:
+                                        int.tryParse(v.trim()) ??
                                         XrayCoreSettings
                                             .defaultMuxXudpConcurrency,
                                   ),
@@ -440,10 +458,9 @@ class _XrayMuxSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
                       l10n.settingsXrayMuxUdp443Title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(color: AppTheme.text(context)),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: AppTheme.text(context),
+                      ),
                     ),
                   ),
                   RadioGroup<String>(
@@ -505,18 +522,20 @@ class _XrayXmuxSection extends ConsumerWidget {
       // центрирует, и без stretch карточки схлопнулись бы по содержимому.
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _XrayCoreSectionHeader(icon: Icons.merge_type_rounded, title: l10n.settingsXrayXmuxSection),
+        _XrayCoreSectionHeader(
+          icon: Icons.merge_type_rounded,
+          title: l10n.settingsXrayXmuxSection,
+        ),
         _xraySettingsCard(
           context,
           children: [
             SwitchListTile(
               value: core.xmuxEnabled,
-              onChanged: (v) => _saveXrayCore(ref, settings, core.copyWith(xmuxEnabled: v)),
+              onChanged: (v) =>
+                  _saveXrayCore(ref, settings, core.copyWith(xmuxEnabled: v)),
               activeThumbColor: accent,
               title: Text(l10n.settingsXrayXmuxEnable),
-              subtitle: Text(
-                l10n.settingsXrayXmuxEnableHint,
-              ),
+              subtitle: Text(l10n.settingsXrayXmuxEnableHint),
             ),
             AnimatedCrossFade(
               firstChild: const SizedBox.shrink(),
@@ -530,15 +549,11 @@ class _XrayXmuxSection extends ConsumerWidget {
                       children: [
                         Text(
                           l10n.settingsXrayXmuxParamsTitle,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: AppTheme.text(context)),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          l10n.settingsXrayXmuxParamsHint,
-                        ),
+                        Text(l10n.settingsXrayXmuxParamsHint),
                       ],
                     ),
                   ),
@@ -550,11 +565,12 @@ class _XrayXmuxSection extends ConsumerWidget {
                     // а тональной ступеньки для вложенности достаточно.
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerLowest,
-                        borderRadius:
-                            ExpressiveShape.radius(ExpressiveShape.large),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLowest,
+                        borderRadius: ExpressiveShape.radius(
+                          ExpressiveShape.large,
+                        ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -565,11 +581,14 @@ class _XrayXmuxSection extends ConsumerWidget {
                               children: [
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_mc_${core.xmuxMaxConcurrency}'),
+                                    key: ValueKey(
+                                      'xmux_mc_${core.xmuxMaxConcurrency}',
+                                    ),
                                     label: l10n.settingsXrayXmuxMaxConcurrency,
                                     hint: '16-32',
                                     initialValue: core.xmuxMaxConcurrency,
-                                    onSave: (v) => _saveXrayCore(ref, 
+                                    onSave: (v) => _saveXrayCore(
+                                      ref,
                                       settings,
                                       core.copyWith(xmuxMaxConcurrency: v),
                                     ),
@@ -578,11 +597,14 @@ class _XrayXmuxSection extends ConsumerWidget {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_mconn_${core.xmuxMaxConnections}'),
+                                    key: ValueKey(
+                                      'xmux_mconn_${core.xmuxMaxConnections}',
+                                    ),
                                     label: l10n.settingsXrayXmuxMaxConnections,
                                     hint: '0',
                                     initialValue: core.xmuxMaxConnections,
-                                    onSave: (v) => _saveXrayCore(ref, 
+                                    onSave: (v) => _saveXrayCore(
+                                      ref,
                                       settings,
                                       core.copyWith(xmuxMaxConnections: v),
                                     ),
@@ -595,11 +617,14 @@ class _XrayXmuxSection extends ConsumerWidget {
                               children: [
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_reuse_${core.xmuxCMaxReuseTimes}'),
+                                    key: ValueKey(
+                                      'xmux_reuse_${core.xmuxCMaxReuseTimes}',
+                                    ),
                                     label: l10n.settingsXrayXmuxCMaxReuseTimes,
                                     hint: '64-128',
                                     initialValue: core.xmuxCMaxReuseTimes,
-                                    onSave: (v) => _saveXrayCore(ref, 
+                                    onSave: (v) => _saveXrayCore(
+                                      ref,
                                       settings,
                                       core.copyWith(xmuxCMaxReuseTimes: v),
                                     ),
@@ -608,11 +633,15 @@ class _XrayXmuxSection extends ConsumerWidget {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_hreq_${core.xmuxHMaxRequestTimes}'),
-                                    label: l10n.settingsXrayXmuxHMaxRequestTimes,
+                                    key: ValueKey(
+                                      'xmux_hreq_${core.xmuxHMaxRequestTimes}',
+                                    ),
+                                    label:
+                                        l10n.settingsXrayXmuxHMaxRequestTimes,
                                     hint: '600-900',
                                     initialValue: core.xmuxHMaxRequestTimes,
-                                    onSave: (v) => _saveXrayCore(ref, 
+                                    onSave: (v) => _saveXrayCore(
+                                      ref,
                                       settings,
                                       core.copyWith(xmuxHMaxRequestTimes: v),
                                     ),
@@ -625,11 +654,15 @@ class _XrayXmuxSection extends ConsumerWidget {
                               children: [
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_hsec_${core.xmuxHMaxReusableSecs}'),
-                                    label: l10n.settingsXrayXmuxHMaxReusableSecs,
+                                    key: ValueKey(
+                                      'xmux_hsec_${core.xmuxHMaxReusableSecs}',
+                                    ),
+                                    label:
+                                        l10n.settingsXrayXmuxHMaxReusableSecs,
                                     hint: '1800-3000',
                                     initialValue: core.xmuxHMaxReusableSecs,
-                                    onSave: (v) => _saveXrayCore(ref, 
+                                    onSave: (v) => _saveXrayCore(
+                                      ref,
                                       settings,
                                       core.copyWith(xmuxHMaxReusableSecs: v),
                                     ),
@@ -638,8 +671,11 @@ class _XrayXmuxSection extends ConsumerWidget {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: _XrayCoreTextField(
-                                    key: ValueKey('xmux_keep_${core.xmuxHKeepAlivePeriod}'),
-                                    label: l10n.settingsXrayXmuxHKeepAlivePeriod,
+                                    key: ValueKey(
+                                      'xmux_keep_${core.xmuxHKeepAlivePeriod}',
+                                    ),
+                                    label:
+                                        l10n.settingsXrayXmuxHKeepAlivePeriod,
                                     hint: '0',
                                     initialValue: core.xmuxHKeepAlivePeriod > 0
                                         ? '${core.xmuxHKeepAlivePeriod}'
@@ -647,7 +683,8 @@ class _XrayXmuxSection extends ConsumerWidget {
                                     keyboardType: TextInputType.number,
                                     onSave: (v) {
                                       final n = int.tryParse(v.trim()) ?? 0;
-                                      _saveXrayCore(ref, 
+                                      _saveXrayCore(
+                                        ref,
                                         settings,
                                         core.copyWith(xmuxHKeepAlivePeriod: n),
                                       );
@@ -705,13 +742,14 @@ class _XrayFragmentSection extends ConsumerWidget {
           children: [
             SwitchListTile(
               value: core.fragmentEnabled,
-              onChanged: (v) =>
-                  _saveXrayCore(ref, settings, core.copyWith(fragmentEnabled: v)),
+              onChanged: (v) => _saveXrayCore(
+                ref,
+                settings,
+                core.copyWith(fragmentEnabled: v),
+              ),
               activeThumbColor: accent,
               title: Text(l10n.settingsXrayFragmentEnable),
-              subtitle: Text(
-                l10n.settingsXrayFragmentEnableHint,
-              ),
+              subtitle: Text(l10n.settingsXrayFragmentEnableHint),
             ),
             AnimatedCrossFade(
               firstChild: const SizedBox.shrink(),
@@ -722,17 +760,20 @@ class _XrayFragmentSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Text(
                       l10n.settingsXrayFragmentPacketsTitle,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(color: AppTheme.text(context)),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: AppTheme.text(context),
+                      ),
                     ),
                   ),
                   RadioGroup<String>(
                     groupValue: core.fragmentPackets,
                     onChanged: (v) {
                       if (v != null) {
-                        _saveXrayCore(ref, settings, core.copyWith(fragmentPackets: v));
+                        _saveXrayCore(
+                          ref,
+                          settings,
+                          core.copyWith(fragmentPackets: v),
+                        );
                       }
                     },
                     child: Column(
@@ -742,8 +783,8 @@ class _XrayFragmentSection extends ConsumerWidget {
                             context: context,
                             value: mode,
                             accent: accent,
-                            title: mode ==
-                                    XrayCoreSettings.fragmentPacketsTlsHello
+                            title:
+                                mode == XrayCoreSettings.fragmentPacketsTlsHello
                                 ? l10n.settingsXrayFragmentPacketsTlsHello
                                 : l10n.settingsXrayFragmentPacketsFirst,
                             subtitle: mode,
@@ -758,15 +799,11 @@ class _XrayFragmentSection extends ConsumerWidget {
                       children: [
                         Text(
                           l10n.settingsXrayFragmentParamsTitle,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: AppTheme.text(context)),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          l10n.settingsXrayFragmentParamsHint,
-                        ),
+                        Text(l10n.settingsXrayFragmentParamsHint),
                       ],
                     ),
                   ),
@@ -774,11 +811,12 @@ class _XrayFragmentSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerLowest,
-                        borderRadius:
-                            ExpressiveShape.radius(ExpressiveShape.large),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLowest,
+                        borderRadius: ExpressiveShape.radius(
+                          ExpressiveShape.large,
+                        ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -793,7 +831,8 @@ class _XrayFragmentSection extends ConsumerWidget {
                                 label: l10n.settingsXrayFragmentLength,
                                 hint: XrayCoreSettings.defaultFragmentLength,
                                 initialValue: core.fragmentLength,
-                                onSave: (v) => _saveXrayCore(ref, 
+                                onSave: (v) => _saveXrayCore(
+                                  ref,
                                   settings,
                                   core.copyWith(fragmentLength: v),
                                 ),
@@ -806,10 +845,10 @@ class _XrayFragmentSection extends ConsumerWidget {
                                   'fragment_int_${core.fragmentInterval}',
                                 ),
                                 label: l10n.settingsXrayFragmentInterval,
-                                hint:
-                                    XrayCoreSettings.defaultFragmentInterval,
+                                hint: XrayCoreSettings.defaultFragmentInterval,
                                 initialValue: core.fragmentInterval,
-                                onSave: (v) => _saveXrayCore(ref, 
+                                onSave: (v) => _saveXrayCore(
+                                  ref,
                                   settings,
                                   core.copyWith(fragmentInterval: v),
                                 ),
@@ -842,7 +881,8 @@ class _XrayFragmentSection extends ConsumerWidget {
 class _XrayNoiseSection extends ConsumerWidget {
   const _XrayNoiseSection();
 
-  static String _kindLabel(AppLocalizations l10n, String kind) => switch (kind) {
+  static String _kindLabel(AppLocalizations l10n, String kind) =>
+      switch (kind) {
         XrayCoreSettings.noiseStr => l10n.settingsXrayNoiseKindStr,
         XrayCoreSettings.noiseHex => l10n.settingsXrayNoiseKindHex,
         XrayCoreSettings.noiseBase64 => l10n.settingsXrayNoiseKindBase64,
@@ -884,10 +924,9 @@ class _XrayNoiseSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Text(
                       l10n.settingsXrayNoiseKindTitle,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(color: AppTheme.text(context)),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: AppTheme.text(context),
+                      ),
                     ),
                   ),
                   RadioGroup<String>(
@@ -922,11 +961,12 @@ class _XrayNoiseSection extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerLowest,
-                        borderRadius:
-                            ExpressiveShape.radius(ExpressiveShape.large),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLowest,
+                        borderRadius: ExpressiveShape.radius(
+                          ExpressiveShape.large,
+                        ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -975,7 +1015,9 @@ class _XrayNoiseSection extends ConsumerWidget {
                               )
                             else
                               _XrayCoreTextField(
-                                key: ValueKey('noise_packet_${core.noisePacket}'),
+                                key: ValueKey(
+                                  'noise_packet_${core.noisePacket}',
+                                ),
                                 label: l10n.settingsXrayNoisePacket,
                                 hint: '',
                                 initialValue: core.noisePacket,
@@ -1061,7 +1103,10 @@ class _XrayGeneralSection extends ConsumerWidget {
       // центрирует, и без stretch карточки схлопнулись бы по содержимому.
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _XrayCoreSectionHeader(icon: Icons.tune_rounded, title: l10n.settingsXrayGeneralSection),
+        _XrayCoreSectionHeader(
+          icon: Icons.tune_rounded,
+          title: l10n.settingsXrayGeneralSection,
+        ),
         _xraySettingsCard(
           context,
           children: [
@@ -1069,16 +1114,17 @@ class _XrayGeneralSection extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
                 l10n.settingsXrayLogLevel,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppTheme.text(context)),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: AppTheme.text(context)),
               ),
             ),
             RadioGroup<String>(
               groupValue: core.logLevel,
               onChanged: (v) {
-                if (v != null) _saveXrayCore(ref, settings, core.copyWith(logLevel: v));
+                if (v != null) {
+                  _saveXrayCore(ref, settings, core.copyWith(logLevel: v));
+                }
               },
               child: Column(
                 children: [
@@ -1096,22 +1142,26 @@ class _XrayGeneralSection extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(
                 l10n.settingsXrayDomainStrategy,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppTheme.text(context)),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: AppTheme.text(context)),
               ),
             ),
             RadioGroup<String>(
               groupValue: core.routingDomainStrategy,
               onChanged: (v) {
                 if (v != null) {
-                  _saveXrayCore(ref, settings, core.copyWith(routingDomainStrategy: v));
+                  _saveXrayCore(
+                    ref,
+                    settings,
+                    core.copyWith(routingDomainStrategy: v),
+                  );
                 }
               },
               child: Column(
                 children: [
-                  for (final strategy in XrayCoreSettings.routingDomainStrategies)
+                  for (final strategy
+                      in XrayCoreSettings.routingDomainStrategies)
                     _xrayChoiceTile(
                       context: context,
                       value: strategy,
@@ -1124,7 +1174,8 @@ class _XrayGeneralSection extends ConsumerWidget {
             SwitchListTile(
               value: core.sniffingEnabled,
               onChanged: (v) {
-                _saveXrayCore(ref, 
+                _saveXrayCore(
+                  ref,
                   settings,
                   core.copyWith(
                     sniffingEnabled: v,
@@ -1134,9 +1185,7 @@ class _XrayGeneralSection extends ConsumerWidget {
               },
               activeThumbColor: accent,
               title: Text(l10n.settingsXraySniffing),
-              subtitle: Text(
-                l10n.settingsXraySniffingHint,
-              ),
+              subtitle: Text(l10n.settingsXraySniffingHint),
             ),
             AnimatedOpacity(
               opacity: core.sniffingEnabled ? 1 : 0.45,
@@ -1144,13 +1193,15 @@ class _XrayGeneralSection extends ConsumerWidget {
               child: SwitchListTile(
                 value: core.sniffingRouteOnly,
                 onChanged: core.sniffingEnabled
-                    ? (v) => _saveXrayCore(ref, settings, core.copyWith(sniffingRouteOnly: v))
+                    ? (v) => _saveXrayCore(
+                        ref,
+                        settings,
+                        core.copyWith(sniffingRouteOnly: v),
+                      )
                     : null,
                 activeThumbColor: accent,
                 title: Text(l10n.settingsXraySniffingRouteOnly),
-                subtitle: Text(
-                  l10n.settingsXraySniffingRouteOnlyHint,
-                ),
+                subtitle: Text(l10n.settingsXraySniffingRouteOnlyHint),
               ),
             ),
           ],
@@ -1189,24 +1240,23 @@ class _XrayTunSection extends ConsumerWidget {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                l10n.settingsTunSectionNote,
-              ),
+              child: Text(l10n.settingsTunSectionNote),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Text(
                 l10n.settingsTunStackTitle,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppTheme.text(context)),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: AppTheme.text(context)),
               ),
             ),
             RadioGroup<String>(
               groupValue: tun.stack,
               onChanged: (v) {
-                if (v != null) _saveXrayTun(ref, settings, tun.copyWith(stack: v));
+                if (v != null) {
+                  _saveXrayTun(ref, settings, tun.copyWith(stack: v));
+                }
               },
               child: Column(
                 children: [
@@ -1249,7 +1299,8 @@ class _XrayTunSection extends ConsumerWidget {
                       onSave: (v) {
                         final n = int.tryParse(v.trim());
                         if (n == null) return;
-                        _saveXrayTun(ref, 
+                        _saveXrayTun(
+                          ref,
                           settings,
                           tun.copyWith(mtu: TunSettings.clampMtu(n)),
                         );
@@ -1267,7 +1318,8 @@ class _XrayTunSection extends ConsumerWidget {
                       onSave: (v) {
                         final n = int.tryParse(v.trim());
                         if (n == null) return;
-                        _saveXrayTun(ref, 
+                        _saveXrayTun(
+                          ref,
                           settings,
                           tun.copyWith(
                             udpTimeoutSec: TunSettings.clampUdpTimeout(n),
@@ -1284,17 +1336,9 @@ class _XrayTunSection extends ConsumerWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      l10n.settingsTunMtuHint,
-                    ),
-                  ),
+                  Expanded(child: Text(l10n.settingsTunMtuHint)),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      l10n.settingsTunUdpTimeoutHint,
-                    ),
-                  ),
+                  Expanded(child: Text(l10n.settingsTunUdpTimeoutHint)),
                 ],
               ),
             ),
@@ -1302,17 +1346,14 @@ class _XrayTunSection extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Text(
                 l10n.settingsTunStrictRouteTitle,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: AppTheme.text(context)),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(color: AppTheme.text(context)),
               ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              child: Text(
-                l10n.settingsTunStrictRouteHint,
-              ),
+              child: Text(l10n.settingsTunStrictRouteHint),
             ),
             RadioGroup<String>(
               groupValue: tun.strictRoute,
@@ -1351,16 +1392,15 @@ class _XrayTunSection extends ConsumerWidget {
               child: SwitchListTile(
                 value: tun.endpointIndependentNat,
                 onChanged: tun.stack != TunSettings.stackSystem
-                    ? (v) => _saveXrayTun(ref, 
-                          settings,
-                          tun.copyWith(endpointIndependentNat: v),
-                        )
+                    ? (v) => _saveXrayTun(
+                        ref,
+                        settings,
+                        tun.copyWith(endpointIndependentNat: v),
+                      )
                     : null,
                 activeThumbColor: accent,
                 title: Text(l10n.settingsTunEin),
-                subtitle: Text(
-                  l10n.settingsTunEinHint,
-                ),
+                subtitle: Text(l10n.settingsTunEinHint),
               ),
             ),
             SwitchListTile(
@@ -1369,9 +1409,7 @@ class _XrayTunSection extends ConsumerWidget {
                   _saveXrayTun(ref, settings, tun.copyWith(autoRoute: v)),
               activeThumbColor: accent,
               title: Text(l10n.settingsTunAutoRoute),
-              subtitle: Text(
-                l10n.settingsTunAutoRouteHint,
-              ),
+              subtitle: Text(l10n.settingsTunAutoRouteHint),
             ),
             SwitchListTile(
               value: tun.blockIpv6Leak,
@@ -1379,9 +1417,7 @@ class _XrayTunSection extends ConsumerWidget {
                   _saveXrayTun(ref, settings, tun.copyWith(blockIpv6Leak: v)),
               activeThumbColor: accent,
               title: Text(l10n.settingsTunIpv6),
-              subtitle: Text(
-                l10n.settingsTunIpv6Hint,
-              ),
+              subtitle: Text(l10n.settingsTunIpv6Hint),
             ),
           ],
         ),
@@ -1421,9 +1457,7 @@ class _XrayMihomoSection extends ConsumerWidget {
               onChanged: (v) => _saveMihomoFakeIp(ref, settings, v),
               activeThumbColor: accent,
               title: Text(l10n.settingsMihomoFakeIp),
-              subtitle: Text(
-                l10n.settingsMihomoFakeIpHint,
-              ),
+              subtitle: Text(l10n.settingsMihomoFakeIpHint),
             ),
           ],
         ),
@@ -1431,7 +1465,6 @@ class _XrayMihomoSection extends ConsumerWidget {
     );
   }
 }
-
 
 /// Поле со списком DNS-серверов. Оно многострочное (`maxLines > 1`), а такой
 /// TextField не шлёт onSubmitted/onEditingComplete — Enter вставляет перенос
@@ -1504,10 +1537,9 @@ class _DnsServersFieldState extends State<_DnsServersField> {
       controller: _ctrl,
       focusNode: _focus,
       maxLines: 4,
-      style: Theme.of(context)
-          .textTheme
-          .bodyMedium
-          ?.copyWith(color: AppTheme.text(context)),
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(color: AppTheme.text(context)),
       decoration: InputDecoration(
         labelText: widget.label,
         hintText: 'https+local://1.1.1.1/dns-query',
@@ -1578,18 +1610,22 @@ class _XrayCoreTextFieldState extends State<_XrayCoreTextField> {
       child: TextField(
         controller: _ctrl,
         keyboardType: widget.keyboardType,
-        style: Theme.of(context)
-          .textTheme
-          .bodyMedium
-          ?.copyWith(color: AppTheme.text(context)),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: AppTheme.text(context)),
         decoration: InputDecoration(
           labelText: widget.label,
           hintText: widget.hint,
           isDense: true,
           filled: true,
           fillColor: AppTheme.card(context),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(ExpressiveShape.medium)),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(ExpressiveShape.medium),
+          ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(ExpressiveShape.medium),
             borderSide: BorderSide(color: AppTheme.divider(context)),
@@ -1607,7 +1643,8 @@ String _xrayCoreSettingsSubtitle(AppLocalizations l10n, AppSettings? settings) {
   final current = settings ?? defaults;
   final core = current.xrayCore;
   final tun = current.tun;
-  final customPorts = current.localPort != defaults.localPort ||
+  final customPorts =
+      current.localPort != defaults.localPort ||
       current.httpPort != defaults.httpPort;
   if (core == const XrayCoreSettings() && tun.isDefault && !customPorts) {
     return l10n.settingsXrayCoreSubtitle;

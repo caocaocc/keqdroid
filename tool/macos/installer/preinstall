@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+runtime='/Library/Application Support/io.github.caocaocc.keqdroid'
+incoming="${runtime}.incoming"
+backup="${runtime}.previous"
+daemon='/Library/LaunchDaemons/io.github.caocaocc.keqdroid.network-service.plist'
+app='/Applications/KEQDIS.app'
+
+fail() { echo "KEQDIS: $*" >&2; exit 1; }
+[[ "${3:-/}" == / ]] || fail 'Install on the current startup disk only.'
+[[ $(id -u) == 0 ]] || fail 'Administrator installation is required.'
+for location in "$runtime" "$incoming" "$backup" "$app" "${app}.previous" "$daemon"; do
+  [[ ! -L "$location" ]] || fail "Refusing symbolic link: $location"
+done
+[[ ! -e "$backup" && ! -e "${app}.previous" ]] || fail 'A previous interrupted upgrade needs recovery; see MACOS.md.'
+# An old running GUI must not retain a connection to a replaced helper.
+if pgrep -x KEQDIS >/dev/null; then
+  fail 'Quit KEQDIS from its menu before installing or upgrading.'
+fi
+if [[ -e "$runtime" ]]; then
+  [[ -d "$runtime" && $(stat -f %u "$runtime") == 0 ]] || fail 'The installed runtime is not a root-owned directory.'
+  [[ -x "$runtime/bin/keqdis-network-service" && ! -L "$runtime/bin/keqdis-network-service" ]] || fail 'The old recovery service is missing. Restore its installer first.'
+fi
+# Payload extraction can still fail after preinstall. The old service remains
+# available until postinstall has validated the complete replacement payload.
+if [[ -e "$incoming" ]]; then
+  [[ -d "$incoming" && $(stat -f %u "$incoming") == 0 ]] || fail 'Invalid installer staging directory.'
+  rm -rf "$incoming"
+fi
+# Protect the extraction directory before Installer writes any executable into
+# it; inherited ACLs must not expose staged payloads to ordinary accounts.
+mkdir "$incoming"
+chown root:wheel "$incoming"
+chmod -RN "$incoming"
+chmod 700 "$incoming"
+exit 0

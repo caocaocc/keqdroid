@@ -1,0 +1,26 @@
+diff --git a/features/dns/localdns/client.go b/features/dns/localdns/client.go
+--- a/features/dns/localdns/client.go
++++ b/features/dns/localdns/client.go
+@@ -2,6 +2,8 @@
+ 
+ import (
+ 	"context"
++	"os"
++	"runtime"
+ 	"syscall"
+ 	"time"
+ 
+@@ -101,6 +103,13 @@
+ 		},
+ 	}
+ 
++	// A controller-owned resolver would otherwise recurse into the TUN DNS.
++	if runtime.GOOS == "darwin" {
++		if _, enabled := os.LookupEnv("KEQDIS_BOOTSTRAP_DNS"); enabled {
++			r = net.DefaultResolver
++		}
++	}
++
+ 	return &Client{
+ 		d: d,
+ 		r: r,

@@ -23,6 +23,7 @@ class TunnelSessionRequest {
   final String? serverName;
   final bool systemProxy;
   final bool killSwitch;
+  final bool blockIpv6Leak;
 
   /// Ядро: `chain` (xray → sing-box) или `keqrnel` (единое ядро). Дефолт `chain`.
   final String coreEngine;
@@ -48,6 +49,7 @@ class TunnelSessionRequest {
     this.serverName,
     this.systemProxy = true,
     this.killSwitch = false,
+    this.blockIpv6Leak = false,
     this.coreEngine = 'chain',
     this.debugMode = false,
   });
@@ -55,26 +57,25 @@ class TunnelSessionRequest {
   Map<String, dynamic> toMethodChannelArgs({
     required String socksUsername,
     required String socksPassword,
-  }) =>
-      {
-        'connectionMode': mode.storageValue,
-        'vpnBackend': vpnBackend.wireValue,
-        'xrayConfig': xrayConfig,
-        if (awgConfig != null && awgConfig!.isNotEmpty) 'awgConfig': awgConfig,
-        if (mihomoConfig != null && mihomoConfig!.isNotEmpty)
-          'mihomoConfig': mihomoConfig,
-        'socksPort': socksPort,
-        if (singboxConfig != null && singboxConfig!.isNotEmpty)
-          'singboxConfig': singboxConfig,
-        'socksUsername': socksUsername,
-        'socksPassword': socksPassword,
-        'excludePackages': excludePackages,
-        'includePackages': includePackages,
-        'excludeProcesses': excludeProcesses,
-        'includeProcesses': includeProcesses,
-        'systemProxy': systemProxy,
-        'killSwitch': killSwitch,
-        'coreEngine': coreEngine,
-        if (serverName != null && serverName!.isNotEmpty) 'serverName': serverName,
-      };
+  }) => {
+    'connectionMode': mode.storageValue,
+    'vpnBackend': vpnBackend.wireValue,
+    'xrayConfig': xrayConfig,
+    if (awgConfig != null && awgConfig!.isNotEmpty) 'awgConfig': awgConfig,
+    if (mihomoConfig != null && mihomoConfig!.isNotEmpty)
+      'mihomoConfig': mihomoConfig,
+    'socksPort': socksPort,
+    if (singboxConfig != null && singboxConfig!.isNotEmpty)
+      'singboxConfig': singboxConfig,
+    'socksUsername': socksUsername,
+    'socksPassword': socksPassword,
+    'excludePackages': excludePackages,
+    'includePackages': includePackages,
+    'excludeProcesses': excludeProcesses,
+    'includeProcesses': includeProcesses,
+    'systemProxy': systemProxy,
+    'killSwitch': killSwitch,
+    'coreEngine': coreEngine,
+    if (serverName != null && serverName!.isNotEmpty) 'serverName': serverName,
+  };
 }

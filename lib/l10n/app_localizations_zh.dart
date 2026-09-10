@@ -2469,4 +2469,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => '无法读取该图片。';
+
+  @override
+  String get macosSplitProcessHint => '规则匹配应用及其包内辅助进程的可执行文件路径。部分共享系统服务无法归属到具体应用。';
+
+  @override
+  String get macosAppNeedsMatching => '当前列表中未找到此应用；如已移动或删除，请重新选择。';
+
+  @override
+  String get macosNetworkServiceTitle => '网络服务';
+
+  @override
+  String get macosNetworkServiceHint => '授权当前账户管理系统代理和 TUN。每个已安装版本首次授权时，macOS 会请求管理员许可。';
+
+  @override
+  String get macosNetworkServiceMissing => '请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。';
+
+  @override
+  String get macosAuthorizeAccount => '授权当前账户';
 }

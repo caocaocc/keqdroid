@@ -2471,4 +2471,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Could not read this image.';
+
+  @override
+  String get macosSplitProcessHint => 'Rules match executable paths, including helpers inside the selected app. Shared system services may not be attributable to an app.';
+
+  @override
+  String get macosAppNeedsMatching => 'App not found in this list. Locate it again if it moved or was removed.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Network service';
+
+  @override
+  String get macosNetworkServiceHint => 'Authorize this account to control the system proxy and TUN. macOS asks for administrator permission once per installed version.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Install or update KEQDIS using the complete PKG installer to enable the network service.';
+
+  @override
+  String get macosAuthorizeAccount => 'Authorize this account';
 }

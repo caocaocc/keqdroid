@@ -2476,4 +2476,22 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Не удалось прочитать эту картинку.';
+
+  @override
+  String get macosSplitProcessHint => 'Правила учитывают пути процессов и помощников внутри приложения. Общие системные службы не всегда можно связать с приложением.';
+
+  @override
+  String get macosAppNeedsMatching => 'Приложение не найдено в списке. Выберите его заново, если оно перемещено или удалено.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Сетевая служба';
+
+  @override
+  String get macosNetworkServiceHint => 'Разрешите этому аккаунту управлять системным прокси и TUN. macOS запросит права администратора один раз для установленной версии.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Установите или обновите KEQDIS полным пакетом PKG, чтобы включить сетевую службу.';
+
+  @override
+  String get macosAuthorizeAccount => 'Разрешить этому аккаунту';
 }

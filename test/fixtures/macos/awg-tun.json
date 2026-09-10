@@ -1,0 +1,164 @@
+{
+  "apiPort": 23000,
+  "apiSecret": "test-secret-12345678",
+  "blockIpv6Leak": false,
+  "configurations": {
+    "keqrnel": {
+      "dns": {
+        "final": "proxy-dns",
+        "rules": [
+          {
+            "domain_suffix": [
+              "ru",
+              "yandex.ru",
+              "vk.com"
+            ],
+            "server": "local-dns"
+          }
+        ],
+        "servers": [
+          {
+            "tag": "local-dns",
+            "type": "local"
+          },
+          {
+            "detour": "proxy",
+            "server": "1.1.1.1",
+            "tag": "proxy-dns",
+            "type": "https"
+          }
+        ],
+        "strategy": "ipv4_only"
+      },
+      "experimental": {
+        "clash_api": {
+          "external_controller": "127.0.0.1:23000",
+          "secret": "test-secret-12345678"
+        }
+      },
+      "inbounds": [
+        {
+          "address": [
+            "172.19.0.1/30"
+          ],
+          "auto_route": true,
+          "mtu": 9000,
+          "stack": "gvisor",
+          "tag": "tun-in",
+          "type": "tun"
+        }
+      ],
+      "log": {
+        "level": "info",
+        "timestamp": true
+      },
+      "outbounds": [
+        {
+          "server": "127.0.0.1",
+          "server_port": 2080,
+          "tag": "proxy",
+          "type": "socks",
+          "version": "5"
+        },
+        {
+          "tag": "direct",
+          "type": "direct"
+        },
+        {
+          "tag": "block",
+          "type": "block"
+        }
+      ],
+      "route": {
+        "default_domain_resolver": "proxy-dns",
+        "default_interface": "en0",
+        "final": "proxy",
+        "find_process": true,
+        "rules": [
+          {
+            "outbound": "direct",
+            "process_path": [
+              "/Applications/KEQDIS.app/Contents/MacOS/KEQDIS",
+              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/keqrnel",
+              "/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel",
+              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo",
+              "/Applications/KEQDIS.app/Contents/Resources/cores/mihomo",
+              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/wireproxy",
+              "/Applications/KEQDIS.app/Contents/Resources/cores/wireproxy"
+            ]
+          },
+          {
+            "action": "sniff",
+            "inbound": [
+              "tun-in"
+            ]
+          },
+          {
+            "action": "hijack-dns",
+            "protocol": "dns"
+          },
+          {
+            "action": "hijack-dns",
+            "port": 53
+          },
+          {
+            "outbound": "direct",
+            "protocol": "icmp"
+          },
+          {
+            "ip_cidr": [
+              "172.19.0.0/30"
+            ],
+            "outbound": "direct"
+          },
+          {
+            "outbound": "direct",
+            "process_name": [
+              "keqrnel",
+              "mihomo",
+              "xray",
+              "sing-box",
+              "wireproxy"
+            ]
+          },
+          {
+            "outbound": "direct",
+            "process_name": [
+              "tailscaled",
+              "wireguard",
+              "openvpn"
+            ]
+          },
+          {
+            "domain_suffix": [
+              "ru",
+              "yandex.ru",
+              "vk.com"
+            ],
+            "outbound": "direct"
+          },
+          {
+            "ip_cidr": [
+              "10.0.0.0/8",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "127.0.0.0/8"
+            ],
+            "outbound": "direct"
+          }
+        ]
+      }
+    },
+    "wireproxy": "[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAllowedIPs = 0.0.0.0/0\nEndpoint = node.example.com:51820\n\n[Socks5]\nBindAddress = 127.0.0.1:2080\n\n[http]\nBindAddress = 127.0.0.1:2081\n"
+  },
+  "connectionMode": "tun",
+  "contextId": "test-network",
+  "core": "awg",
+  "dnsAddress": "172.19.0.2",
+  "httpPort": 2081,
+  "protocolVersion": 1,
+  "sessionId": "awg-tun",
+  "socksPort": 2080,
+  "systemProxy": false,
+  "wireproxyInfoPort": 23001
+}

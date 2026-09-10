@@ -1046,5 +1046,11 @@
   "cardImageRejectAspect": "图片对卡片来说太高了，请选择宽幅图片，约 3:2 到 5:1。",
   "cardImageRejectSmall": "图片太小：宽度至少 {width} px。",
   "cardImageRejectLarge": "图片太大：宽度最多 {width} px。",
-  "cardImageRejectUnreadable": "无法读取该图片。"
+  "cardImageRejectUnreadable": "无法读取该图片。",
+  "macosSplitProcessHint": "规则匹配应用及其包内辅助进程的可执行文件路径。部分共享系统服务无法归属到具体应用。",
+  "macosAppNeedsMatching": "当前列表中未找到此应用；如已移动或删除，请重新选择。",
+  "macosNetworkServiceTitle": "网络服务",
+  "macosNetworkServiceHint": "授权当前账户管理系统代理和 TUN。每个已安装版本首次授权时，macOS 会请求管理员许可。",
+  "macosNetworkServiceMissing": "请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。",
+  "macosAuthorizeAccount": "授权当前账户"
 }

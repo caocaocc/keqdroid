@@ -83,7 +83,6 @@ class MihomoConfigGen {
   /// в обоих генераторах читаются одинаково.
   static const proxyName = 'proxy';
 
-
   /// Имена LAN-инбаундов и их набора правил. Совпадают по смыслу с тегами
   /// `socks-lan`/`http-lan` у xray, но с префиксом: имя листенера у mihomo
   /// попадает в метаданные соединения и видно на экране «Соединения».
@@ -103,26 +102,29 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
-  }) =>
-      const JsonEncoder.withIndent('  ').convert(
-        build(
-          input,
-          settings,
-          socksPort: socksPort,
-          httpPort: httpPort,
-          resolvedServerIp: resolvedServerIp,
-          localInboundsNoAuth: localInboundsNoAuth,
-          apiPort: apiPort,
-          apiSecret: apiSecret,
-          tun: tun,
-          routingMode: routingMode,
-          managedProcessNames: managedProcessNames,
-          appProcessName: appProcessName,
-          windows: windows,
-        ),
-      );
+  }) => const JsonEncoder.withIndent('  ').convert(
+    build(
+      input,
+      settings,
+      socksPort: socksPort,
+      httpPort: httpPort,
+      resolvedServerIp: resolvedServerIp,
+      localInboundsNoAuth: localInboundsNoAuth,
+      apiPort: apiPort,
+      apiSecret: apiSecret,
+      tun: tun,
+      routingMode: routingMode,
+      managedProcessNames: managedProcessNames,
+      managedProcessPaths: managedProcessPaths,
+      appProcessName: appProcessName,
+      appProcessPath: appProcessPath,
+      windows: windows,
+    ),
+  );
 
   /// [apiPort]/[apiSecret] — RESTful API ядра для экрана «Соединения».
   /// Поднимается только когда порт передали: пингу и спидтесту он не нужен.
@@ -148,7 +150,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
   }) {
     // Правила по процессам умеет только та сторона, где ядро способно найти
@@ -198,7 +202,9 @@ class MihomoConfigGen {
         tun: tun,
         routingMode: effectiveRoutingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         processRules: processRules,
         fakeIp: fakeIp,
         windows: windows,
@@ -241,7 +247,9 @@ class MihomoConfigGen {
         resolvedServerIp: resolvedServerIp,
         routingMode: effectiveRoutingMode,
         managedProcessNames: processRules ? managedProcessNames : const [],
+        managedProcessPaths: processRules ? managedProcessPaths : const [],
         appProcessName: processRules ? appProcessName : '',
+        appProcessPath: processRules ? appProcessPath : '',
         tunOwned: tun != null,
         fakeIp: fakeIp,
         windows: windows,
@@ -292,7 +300,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool processRules = false,
     bool fakeIp = false,
     bool? windows,
@@ -320,7 +330,9 @@ class MihomoConfigGen {
           ...buildProcessRules(
             routingMode: routingMode,
             managedProcessNames: managedProcessNames,
+            managedProcessPaths: managedProcessPaths,
             appProcessName: appProcessName,
+            appProcessPath: appProcessPath,
             proxyTarget: clash.primaryTarget,
             windows: windows,
           ),
@@ -405,21 +417,21 @@ class MihomoConfigGen {
   /// Порты только строками, включая одиночные: у ядра это список строк, и число
   /// `80` роняет конфиг целиком с «cannot unmarshal !!int into string».
   static Map<String, dynamic> buildSniffer(XrayCoreSettings core) => {
-        'enable': core.sniffingEnabled,
-        'parse-pure-ip': true,
-        'override-destination': !core.sniffingRouteOnly,
-        'sniff': {
-          'HTTP': {
-            'ports': ['80', '8080-8880'],
-          },
-          'TLS': {
-            'ports': ['443', '8443'],
-          },
-          'QUIC': {
-            'ports': ['443', '8443'],
-          },
-        },
-      };
+    'enable': core.sniffingEnabled,
+    'parse-pure-ip': true,
+    'override-destination': !core.sniffingRouteOnly,
+    'sniff': {
+      'HTTP': {
+        'ports': ['80', '8080-8880'],
+      },
+      'TLS': {
+        'ports': ['443', '8443'],
+      },
+      'QUIC': {
+        'ports': ['443', '8443'],
+      },
+    },
+  };
 
   // ────────────────────────── LAN-раздача ──────────────────────────
 
@@ -494,9 +506,9 @@ class MihomoConfigGen {
   /// [target] — куда уходит трафик из LAN-инбаундов: у ссылки это наш узел, у
   /// готового конфига — его группа.
   static List<String> buildLanRules({String target = proxyName}) => [
-        for (final range in _lanSourceRanges) 'SRC-IP-CIDR,$range,$target',
-        'MATCH,REJECT',
-      ];
+    for (final range in _lanSourceRanges) 'SRC-IP-CIDR,$range,$target',
+    'MATCH,REJECT',
+  ];
 
   // ──────────────────────────────── замер ────────────────────────────────
 
@@ -556,16 +568,16 @@ class MihomoConfigGen {
   /// живой сервер краснел бы из-за резолва, а не из-за себя. `#DIRECT` —
   /// «мимо правил»: в туннель, которого ещё нет, DNS уходить не должен.
   static Map<String, dynamic> _pingDns() => <String, dynamic>{
-        'enable': true,
-        'ipv6': false,
-        'enhanced-mode': 'normal',
-        'default-nameserver': const ['https://1.1.1.1/dns-query'],
-        'nameserver': const [
-          'https://1.1.1.1/dns-query#DIRECT',
-          'https://8.8.8.8/dns-query#DIRECT',
-          'system',
-        ],
-      };
+    'enable': true,
+    'ipv6': false,
+    'enhanced-mode': 'normal',
+    'default-nameserver': const ['https://1.1.1.1/dns-query'],
+    'nameserver': const [
+      'https://1.1.1.1/dns-query#DIRECT',
+      'https://8.8.8.8/dns-query#DIRECT',
+      'system',
+    ],
+  };
 
   // ─────────────────────────────── DNS ───────────────────────────────
 
@@ -740,7 +752,9 @@ class MihomoConfigGen {
     if (lower.startsWith('hysteria2://') || lower.startsWith('hy2://')) {
       return _hysteria2(link);
     }
-    final scheme = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*):').firstMatch(link)?.group(1);
+    final scheme = RegExp(
+      r'^([a-zA-Z][a-zA-Z0-9+.-]*):',
+    ).firstMatch(link)?.group(1);
     throw ArgumentError(
       'mihomo: unsupported protocol${scheme != null ? ' ($scheme)' : ''}',
     );
@@ -761,7 +775,11 @@ class MihomoConfigGen {
   }
 
   static List<String>? _alpn(String raw) {
-    final list = raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final list = raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     return list.isEmpty ? null : list;
   }
 
@@ -797,9 +815,7 @@ class MihomoConfigGen {
         };
       case 'grpc':
         out['network'] = 'grpc';
-        out['grpc-opts'] = {
-          'grpc-service-name': _param(uri, 'serviceName'),
-        };
+        out['grpc-opts'] = {'grpc-service-name': _param(uri, 'serviceName')};
       case 'http' || 'h2':
         out['network'] = 'h2';
         out['h2-opts'] = {
@@ -909,11 +925,10 @@ class MihomoConfigGen {
   /// при нескольких значениях не пиним вовсе: имя проверяется правильное,
   /// цепочка — по системным корням.
   static void _applyCertPinning(Map<String, dynamic> out, Uri uri) {
-    List<String> values(String key) => _param(uri, key)
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    List<String> values(String key) => _param(
+      uri,
+      key,
+    ).split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
     final names = values('vcn');
     if (names.length == 1) out['name-cert-verify'] = names.first;
@@ -1056,19 +1071,20 @@ class MihomoConfigGen {
   /// Пара целиком, как и в xray: одиночный `h2` — осознанный выбор.
   static List<String> _alpnForTrojan(String network, List<String> alpn) =>
       network == 'ws' &&
-              alpn.length == 2 &&
-              alpn[0] == 'h2' &&
-              alpn[1] == 'http/1.1'
-          ? const ['http/1.1']
-          : alpn;
+          alpn.length == 2 &&
+          alpn[0] == 'h2' &&
+          alpn[1] == 'http/1.1'
+      ? const ['http/1.1']
+      : alpn;
 
   static Map<String, dynamic> _shadowsocks(String link) {
     // sip002 и старая форма: ss://base64(method:pass)@host:port и
     // ss://base64(method:pass@host:port).
     final withoutScheme = link.substring('ss://'.length).trim();
     final hashIdx = withoutScheme.indexOf('#');
-    final beforeHash =
-        hashIdx >= 0 ? withoutScheme.substring(0, hashIdx) : withoutScheme;
+    final beforeHash = hashIdx >= 0
+        ? withoutScheme.substring(0, hashIdx)
+        : withoutScheme;
     final queryIdx = beforeHash.indexOf('?');
     final core = queryIdx >= 0 ? beforeHash.substring(0, queryIdx) : beforeHash;
 
@@ -1113,7 +1129,9 @@ class MihomoConfigGen {
   static Map<String, dynamic> _hysteria2(String link) {
     final uri = _parse(link);
     var password = uri.userInfo;
-    if (password.isEmpty) password = _param(uri, 'password', _param(uri, 'auth'));
+    if (password.isEmpty) {
+      password = _param(uri, 'password', _param(uri, 'auth'));
+    }
     if (password.isEmpty) throw ArgumentError('Hysteria2 requires password');
 
     final sni = _param(uri, 'sni', uri.host);
@@ -1148,9 +1166,16 @@ class MihomoConfigGen {
 
   /// Приватные и спец-диапазоны — всегда DIRECT. Тот же список, что у xray.
   static const _privateRanges = [
-    '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8',
-    '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16',
-    '192.0.0.0/24', '198.51.100.0/24', '203.0.113.0/24',
+    '0.0.0.0/8',
+    '10.0.0.0/8',
+    '100.64.0.0/10',
+    '127.0.0.0/8',
+    '169.254.0.0/16',
+    '172.16.0.0/12',
+    '192.168.0.0/16',
+    '192.0.0.0/24',
+    '198.51.100.0/24',
+    '203.0.113.0/24',
   ];
 
   /// Правила mihomo: `тип,значение,цель[,no-resolve]`.
@@ -1173,7 +1198,9 @@ class MihomoConfigGen {
     String proxyTarget = proxyName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool tunOwned = false,
     bool fakeIp = false,
     bool? windows,
@@ -1182,7 +1209,9 @@ class MihomoConfigGen {
       ...buildProcessRules(
         routingMode: routingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         proxyTarget: proxyTarget,
         windows: windows,
       ),
@@ -1210,7 +1239,10 @@ class MihomoConfigGen {
     var finalTarget = switch (routingMode) {
       AppRoutingMode.onlySelected => 'DIRECT',
       AppRoutingMode.allExceptSelected => proxyTarget,
-      AppRoutingMode.allProxy => _finalTarget(settings.finalOutbound, proxyTarget),
+      AppRoutingMode.allProxy => _finalTarget(
+        settings.finalOutbound,
+        proxyTarget,
+      ),
     };
 
     // Kill switch осмыслен только при глобал-прокси: гоним весь IP-трафик в
@@ -1269,12 +1301,19 @@ class MihomoConfigGen {
   static List<String> buildProcessRules({
     required AppRoutingMode routingMode,
     required List<String> managedProcessNames,
+    List<String> managedProcessPaths = const [],
     required String appProcessName,
+    String appProcessPath = '',
     String proxyTarget = proxyName,
     bool? windows,
   }) {
     final app = appProcessName.trim();
-    if (app.isEmpty && managedProcessNames.isEmpty) return const [];
+    if (app.isEmpty &&
+        appProcessPath.isEmpty &&
+        managedProcessNames.isEmpty &&
+        managedProcessPaths.isEmpty) {
+      return const [];
+    }
 
     // Целевая ОС параметром, а не из `Platform`: три имени ниже несут `.exe`
     // только на Windows, и снятая там фикстура иначе падала бы на linux-раннере,
@@ -1285,6 +1324,7 @@ class MihomoConfigGen {
       // Наши собственные сокеты (tcp-пинг, спидтест, апдейтер) — мимо туннеля,
       // иначе пинг мерил бы локальный конец туннеля вместо сервера.
       if (app.isNotEmpty) 'PROCESS-NAME,$app,DIRECT',
+      if (appProcessPath.isNotEmpty) 'PROCESS-PATH,$appProcessPath,DIRECT',
       // Чужие VPN-клиенты: их собственный транспорт обязан идти мимо нашего
       // туннеля, иначе получается туннель в туннеле и оба перестают работать.
       // Только в режиме «весь трафик»: при пер-аппном сплите пользователь
@@ -1295,6 +1335,19 @@ class MihomoConfigGen {
         'PROCESS-NAME,openvpn$exe,DIRECT',
       ],
     ];
+
+    for (final path in managedProcessPaths) {
+      if (!path.startsWith('/') || path.contains(RegExp(r'[,\r\n\x00]'))) {
+        throw const FormatException(
+          'Invalid executable path in application routing.',
+        );
+      }
+      if (routingMode == AppRoutingMode.onlySelected) {
+        rules.add('PROCESS-PATH,$path,$proxyTarget');
+      } else if (routingMode == AppRoutingMode.allExceptSelected) {
+        rules.add('PROCESS-PATH,$path,DIRECT');
+      }
+    }
 
     for (final process in managedProcessNames) {
       final name = process.trim();
@@ -1347,13 +1400,12 @@ class MihomoConfigGen {
   }) {
     final rules = <String>[];
 
-    final hasUserIpRules = [
-      settings.blockedRules,
-      settings.directRules,
-      settings.proxyRules,
-    ].any((raw) => splitGeoipTokens(
-          splitDomainsAndIps(_parseList(raw)).ips,
-        ).plainIps.isNotEmpty);
+    final hasUserIpRules =
+        [settings.blockedRules, settings.directRules, settings.proxyRules].any(
+          (raw) => splitGeoipTokens(
+            splitDomainsAndIps(_parseList(raw)).ips,
+          ).plainIps.isNotEmpty,
+        );
     // С fake-ip назначение и вовсе перестаёт быть адресом: ядро выдало системе
     // подменный, а перед выбором правила стирает его (`preHandleMetadata`
     // чистит `DstIP` для fake-адресов) и восстанавливает домен. Правило с
@@ -1412,7 +1464,9 @@ class MihomoConfigGen {
     if (lower.startsWith('geosite:')) {
       return 'GEOSITE,${v.substring('geosite:'.length)}';
     }
-    if (lower.startsWith('full:')) return 'DOMAIN,${v.substring('full:'.length)}';
+    if (lower.startsWith('full:')) {
+      return 'DOMAIN,${v.substring('full:'.length)}';
+    }
     if (lower.startsWith('domain:')) {
       return 'DOMAIN-SUFFIX,${v.substring('domain:'.length)}';
     }

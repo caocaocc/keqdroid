@@ -23,6 +23,7 @@ import '../models/xray_core_settings.dart';
 import '../services/app_icon_cache.dart';
 import '../services/card_image_service.dart';
 import '../services/geo_asset_service.dart';
+import '../services/macos_app_routing_store.dart';
 import '../services/notification_service.dart';
 import '../services/ping_service.dart';
 import '../services/storage_service.dart';
@@ -33,6 +34,7 @@ import '../services/vpn_engine.dart';
 import '../platform/vpn_native_bridge.dart';
 import '../tunnel/app_routing_mode.dart';
 import '../tunnel/local_port_plan.dart';
+import '../tunnel/macos_tunnel_backend.dart';
 import '../tunnel/vpn_backend.dart';
 import '../utils/app_locale.dart';
 import '../utils/awg_profile.dart';
@@ -268,4 +270,3 @@ final updateInfoProvider = FutureProvider<UpdateInfo?>((ref) async {
     httpPort: ActiveLocalPorts().httpPortOr(settings.httpPort),
   );
 });
-

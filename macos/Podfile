@@ -1,0 +1,60 @@
+platform :osx, '12.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'ephemeral', 'Flutter-Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure \"flutter pub get\" is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Flutter-Generated.xcconfig, then run \"flutter pub get\""
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_macos_podfile_setup
+
+# This product initializes Firebase only on Android and does not expose camera
+# scanning or background mobile work on macOS. Do not link their native SDKs.
+# MacOSPluginRegistrant.swift uses the matching supported plugin set.
+alias keqdis_all_flutter_plugins flutter_get_plugins_list
+def flutter_get_plugins_list(dependencies_hash, platform)
+  plugins = keqdis_all_flutter_plugins(dependencies_hash, platform)
+  return plugins unless platform == 'macos'
+  plugins.reject { |plugin| %w[firebase_core firebase_crashlytics mobile_scanner workmanager_apple].include?(plugin['name']) }
+end
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_macos_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_macos_build_settings(target)
+    target.build_configurations.each do |config|
+      minimum = config.build_settings['MACOSX_DEPLOYMENT_TARGET']
+      if minimum && Gem::Version.new(minimum) > Gem::Version.new('12.0')
+        raise "#{target.name} requires macOS #{minimum}; review compatibility before upgrading"
+      end
+      config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '12.0'
+      config.build_settings['CODE_SIGN_IDENTITY'] = '-'
+    end
+  end
+end

@@ -127,18 +127,25 @@ class SingBoxTunConfigGen {
     required String serverIpToExclude,
     required AppSettings settings,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
+
     /// AmneziaWG: wireproxy SOCKS5 без auth — не шлём username/password в outbound.
     bool localSocksNoAuth = false,
+
     /// this app's own exe (e.g. keqdroid.exe). routed direct so our tcp/url ping
     /// sockets measure latency from the local pc, not through the active server.
     String appProcessName = '',
+    String appProcessPath = '',
+
     /// Целевая ОС. По умолчанию текущая — в бою иначе не бывает. Параметром она
     /// стала ради golden-тестов: три места ниже читают `Platform.isWindows`, и
     /// снятая на Windows фикстура падала на linux-раннере, ничего не сообщая о
     /// генераторе. Ср. [TunSettings.strictRouteEnabled], где платформа уже входит
     /// аргументом.
     bool? windows,
+    bool? macos,
+
     /// Есть ли у машины глобальный IPv6 (см. `utils/host_ipv6.dart`). Только
     /// вместе с [TunSettings.blockIpv6Leak] это включает захват IPv6: адрес на
     /// интерфейсе там, где IPv6 в системе выключен, — это не «лишняя строка в
@@ -146,6 +153,7 @@ class SingBoxTunConfigGen {
     bool hostHasIpv6 = false,
   }) {
     final isWindows = windows ?? Platform.isWindows;
+    final isMacOS = macos ?? (windows == null && Platform.isMacOS);
     // Разделители — и запятая, и перевод строки: UI обещает «по одному в
     // строке или через запятую», сплит только по ',' склеивал построчные
     // записи в один несрабатывающий токен.
@@ -163,11 +171,11 @@ class SingBoxTunConfigGen {
       // прокси умирали с "read response: EOF" — браузер получал "server not
       // found" при живом туннеле. DoH на 443 неотличим от обычного HTTPS.
       Map<String, dynamic> defaultDoh() => {
-            'tag': 'proxy-dns',
-            'type': 'https',
-            'server': '1.1.1.1',
-            'detour': 'proxy',
-          };
+        'tag': 'proxy-dns',
+        'type': 'https',
+        'server': '1.1.1.1',
+        'detour': 'proxy',
+      };
 
       if (customDns.isEmpty) return defaultDoh();
 
@@ -185,11 +193,8 @@ class SingBoxTunConfigGen {
       return defaultDoh();
     }
 
-    ({
-      List<String> domain,
-      List<String> domainSuffix,
-      List<String> domainRegex,
-    }) classifyDomains(List<String> domains) {
+    ({List<String> domain, List<String> domainSuffix, List<String> domainRegex})
+    classifyDomains(List<String> domains) {
       final exact = <String>[];
       final suffix = <String>[];
       final regex = <String>[];
@@ -338,7 +343,10 @@ class SingBoxTunConfigGen {
       {'port': 53, 'action': 'hijack-dns'},
       // icmp can't go over socks; route it locally
       {'protocol': 'icmp', 'outbound': 'direct'},
-      {'ip_cidr': ['172.19.0.0/30'], 'outbound': 'direct'},
+      {
+        'ip_cidr': ['172.19.0.0/30'],
+        'outbound': 'direct',
+      },
     ];
 
     // bypass tun for the cores and this app itself so they go direct:
@@ -375,10 +383,13 @@ class SingBoxTunConfigGen {
       // сервера. Пользовательские правила сплит-туннеля так и делают.
       ...processNameMatchVariants(appProcessName.trim()),
     }.toList();
-    rules.add({
-      'process_name': bypassProcessNames,
-      'outbound': 'direct',
-    });
+    if (appProcessPath.isNotEmpty) {
+      rules.add({
+        'process_path': [appProcessPath],
+        'outbound': 'direct',
+      });
+    }
+    rules.add({'process_name': bypassProcessNames, 'outbound': 'direct'});
 
     if (routingMode == AppRoutingMode.allProxy) {
       rules.add({
@@ -398,23 +409,27 @@ class SingBoxTunConfigGen {
           for (final process in managedProcessNames) {
             final variants = processNameMatchVariants(process);
             if (variants.isEmpty) continue;
-            rules.add({
-              'process_name': variants,
-              'outbound': 'proxy',
-            });
+            rules.add({'process_name': variants, 'outbound': 'proxy'});
           }
         case AppRoutingMode.allExceptSelected:
           for (final process in managedProcessNames) {
             final variants = processNameMatchVariants(process);
             if (variants.isEmpty) continue;
-            rules.add({
-              'process_name': variants,
-              'outbound': 'direct',
-            });
+            rules.add({'process_name': variants, 'outbound': 'direct'});
           }
         case AppRoutingMode.allProxy:
           break;
       }
+    }
+
+    if (managedProcessPaths.isNotEmpty &&
+        routingMode != AppRoutingMode.allProxy) {
+      rules.add({
+        'process_path': managedProcessPaths,
+        'outbound': routingMode == AppRoutingMode.onlySelected
+            ? 'proxy'
+            : 'direct',
+      });
     }
 
     if (blockedDomains.isNotEmpty) {
@@ -494,7 +509,10 @@ class SingBoxTunConfigGen {
     // — тогда как отправленное в прокси оно висело бы до таймаута на сервере
     // без IPv6. Локальный IPv6 сюда не попадает: он ушёл в `direct` выше.
     if (captureIpv6) {
-      rules.add({'ip_cidr': ['::/0'], 'outbound': 'block'});
+      rules.add({
+        'ip_cidr': ['::/0'],
+        'outbound': 'block',
+      });
     }
 
     // Финальное действие (catch-all). При per-app сплите режим сам диктует финал
@@ -566,8 +584,7 @@ class SingBoxTunConfigGen {
               directDnsParts.domainSuffix.isNotEmpty ||
               directDnsParts.domainRegex.isNotEmpty))
         {
-          if (directDnsParts.domain.isNotEmpty)
-            'domain': directDnsParts.domain,
+          if (directDnsParts.domain.isNotEmpty) 'domain': directDnsParts.domain,
           if (directDnsParts.domainSuffix.isNotEmpty)
             'domain_suffix': directDnsParts.domainSuffix,
           if (directDnsParts.domainRegex.isNotEmpty)
@@ -583,12 +600,15 @@ class SingBoxTunConfigGen {
       'mtu': tun.mtu,
       // Второй адрес — это и есть «забрать IPv6 в туннель»: sing-box ставит
       // IPv6-маршруты только на интерфейс, у которого IPv6-адрес есть.
-      'address': [kTunInterfacePrefix, if (captureIpv6) kTunInterfaceIpv6Prefix],
+      'address': [
+        kTunInterfacePrefix,
+        if (captureIpv6) kTunInterfaceIpv6Prefix,
+      ],
       // без auto_route трафик в TUN не попадает; off — только для ручных маршрутов
       'auto_route': tun.autoRoute,
       // auto: on везде, кроме Windows — там strict_route breaks routing when
       // another vpn (e.g. tailscale) is active.
-      'strict_route': tun.strictRouteEnabled(windows: isWindows),
+      if (!isMacOS) 'strict_route': tun.strictRouteEnabled(windows: isWindows),
       'stack': tun.stack,
       // full-cone NAT считает только gvisor-netstack (в mixed он держит UDP)
       if (tun.endpointIndependentNat && tun.stack != TunSettings.stackSystem)
@@ -604,13 +624,10 @@ class SingBoxTunConfigGen {
     // OpenAdapter(имя) — мы молча забираем чужой адаптер и настраиваем на нём
     // свои адреса и маршруты. Отсюда и «TUN запустился, ошибок нет, трафика
     // нет», и падения через раз на машинах, где стоит второй такой клиент.
-    tunInbound['interface_name'] = kTunInterfaceName;
+    if (!isMacOS) tunInbound['interface_name'] = kTunInterfaceName;
 
     final map = <String, dynamic>{
-      'log': {
-        'level': 'info',
-        'timestamp': true,
-      },
+      'log': {'level': 'info', 'timestamp': true},
       'dns': {
         'servers': [
           {'tag': 'local-dns', 'type': 'local'},
@@ -653,12 +670,12 @@ class SingBoxTunConfigGen {
   /// когда переключатель выключен: список тогда не участвует вовсе.
   static List<String> customDnsList(AppSettings settings) =>
       !settings.xrayCore.dnsUseCustom
-          ? const <String>[]
-          : settings.xrayCore.dnsServers
-              .split(RegExp(r'[\n,]+'))
-              .map((e) => e.trim())
-              .where((e) => e.isNotEmpty)
-              .toList();
+      ? const <String>[]
+      : settings.xrayCore.dnsServers
+            .split(RegExp(r'[\n,]+'))
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
 
   /// Что из этого списка в TUN не сработает.
   ///
@@ -701,22 +718,28 @@ class SingBoxTunConfigGen {
     final lower = trimmed.toLowerCase();
 
     // Служебные xray-резолверы без сетевого upstream — их через прокси не гонишь.
-    if (lower == 'localhost' || lower == 'fakedns' || lower.startsWith('dhcp')) {
+    if (lower == 'localhost' ||
+        lower == 'fakedns' ||
+        lower.startsWith('dhcp')) {
       return null;
     }
 
     // Тег исторический: сервер зовётся `proxy-dns` и когда идёт напрямую —
     // на него смотрят `dns.final` и `default_domain_resolver`.
-    Map<String, dynamic> server(String type, String host, int? port,
-            {String? path, bool local = false}) =>
-        {
-          'tag': 'proxy-dns',
-          'type': type,
-          'server': host,
-          'server_port': ?port,
-          if (path != null && path.isNotEmpty && path != '/') 'path': path,
-          if (!local) 'detour': 'proxy',
-        };
+    Map<String, dynamic> server(
+      String type,
+      String host,
+      int? port, {
+      String? path,
+      bool local = false,
+    }) => {
+      'tag': 'proxy-dns',
+      'type': type,
+      'server': host,
+      'server_port': ?port,
+      if (path != null && path.isNotEmpty && path != '/') 'path': path,
+      if (!local) 'detour': 'proxy',
+    };
 
     // Схема вида `scheme://`. У xray scheme может нести суффикс (`https+local`,
     // `tcp+local`, …) — базой считаем часть до '+'.
@@ -758,7 +781,9 @@ class SingBoxTunConfigGen {
     // Без схемы: голый ip / host / host:port / [ipv6]:port → TCP:53 через прокси.
     String host = trimmed;
     int? port;
-    final bracketed = RegExp(r'^\[([0-9a-fA-F:]+)\]:(\d+)$').firstMatch(trimmed);
+    final bracketed = RegExp(
+      r'^\[([0-9a-fA-F:]+)\]:(\d+)$',
+    ).firstMatch(trimmed);
     if (bracketed != null) {
       host = bracketed.group(1)!;
       port = int.parse(bracketed.group(2)!);

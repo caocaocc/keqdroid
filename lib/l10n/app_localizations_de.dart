@@ -2471,4 +2471,22 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Bild konnte nicht gelesen werden.';
+
+  @override
+  String get macosSplitProcessHint => 'Regeln verwenden Programmpfade einschließlich interner Hilfsprozesse. Gemeinsame Systemdienste lassen sich nicht immer einer App zuordnen.';
+
+  @override
+  String get macosAppNeedsMatching => 'App nicht in der Liste gefunden. Nach Verschieben oder Entfernen erneut auswählen.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Netzwerkdienst';
+
+  @override
+  String get macosNetworkServiceHint => 'Dieses Konto darf Systemproxy und TUN verwalten. macOS fragt einmal pro installierter Version nach Administratorrechten.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.';
+
+  @override
+  String get macosAuthorizeAccount => 'Dieses Konto autorisieren';
 }

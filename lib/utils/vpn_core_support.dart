@@ -64,7 +64,10 @@ enum VpnCoreSkip {
 /// одного места правды: раньше «только Android» было записано в трёх файлах
 /// подряд, и снятие ограничения означало найти их все.
 bool get mihomoShipsHere =>
-    Platform.isAndroid || Platform.isWindows || Platform.isLinux;
+    Platform.isAndroid ||
+    Platform.isWindows ||
+    Platform.isLinux ||
+    Platform.isMacOS;
 
 /// Формат сервера по его конфигу. Порядок проверок — от дешёвых и однозначных
 /// к разбору.
@@ -94,12 +97,12 @@ final _linkScheme = RegExp(
 
 /// Ядра, способные исполнить этот формат, независимо от платформы.
 Set<VpnBackend> backendsForFormat(ServerFormat format) => switch (format) {
-      ServerFormat.link => const {VpnBackend.xray, VpnBackend.mihomo},
-      ServerFormat.xrayJson || ServerFormat.chain => const {VpnBackend.xray},
-      ServerFormat.clashYaml => const {VpnBackend.mihomo},
-      ServerFormat.amneziaWg => const {VpnBackend.awg},
-      ServerFormat.unknown => const {VpnBackend.xray},
-    };
+  ServerFormat.link => const {VpnBackend.xray, VpnBackend.mihomo},
+  ServerFormat.xrayJson || ServerFormat.chain => const {VpnBackend.xray},
+  ServerFormat.clashYaml => const {VpnBackend.mihomo},
+  ServerFormat.amneziaWg => const {VpnBackend.awg},
+  ServerFormat.unknown => const {VpnBackend.xray},
+};
 
 /// Итог выбора: чем сервер поедет и почему это не то, что просил пользователь.
 typedef VpnBackendChoice = ({
@@ -158,18 +161,18 @@ VpnBackendChoice resolveVpnBackend({
 }
 
 VpnCoreSkip _skipFor(ServerFormat format) => switch (format) {
-      ServerFormat.xrayJson => VpnCoreSkip.customConfig,
-      ServerFormat.chain => VpnCoreSkip.chain,
-      ServerFormat.clashYaml => VpnCoreSkip.clashConfig,
-      ServerFormat.amneziaWg => VpnCoreSkip.amneziaWg,
-      _ => VpnCoreSkip.customConfig,
-    };
+  ServerFormat.xrayJson => VpnCoreSkip.customConfig,
+  ServerFormat.chain => VpnCoreSkip.chain,
+  ServerFormat.clashYaml => VpnCoreSkip.clashConfig,
+  ServerFormat.amneziaWg => VpnCoreSkip.amneziaWg,
+  _ => VpnCoreSkip.customConfig,
+};
 
 /// Строка для лога (не для UI — тот берёт локализованный текст).
 String vpnCoreSkipLogReason(VpnCoreSkip skip) => switch (skip) {
-      VpnCoreSkip.customConfig => 'the server is a ready-made Xray JSON config',
-      VpnCoreSkip.chain => 'the server is a proxy chain',
-      VpnCoreSkip.amneziaWg => 'the server is an AmneziaWG profile',
-      VpnCoreSkip.clashConfig => 'the server is a ready-made Clash config',
-      VpnCoreSkip.platform => 'that core does not ship on this platform',
-    };
+  VpnCoreSkip.customConfig => 'the server is a ready-made Xray JSON config',
+  VpnCoreSkip.chain => 'the server is a proxy chain',
+  VpnCoreSkip.amneziaWg => 'the server is an AmneziaWG profile',
+  VpnCoreSkip.clashConfig => 'the server is a ready-made Clash config',
+  VpnCoreSkip.platform => 'that core does not ship on this platform',
+};

@@ -1,0 +1,16 @@
+{
+  "apiPort": 23000,
+  "apiSecret": "test-secret-12345678",
+  "blockIpv6Leak": false,
+  "configurations": {
+    "wireproxy": "[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAllowedIPs = 0.0.0.0/0\nEndpoint = node.example.com:51820\n\n[Socks5]\nBindAddress = 127.0.0.1:2080\n\n[http]\nBindAddress = 127.0.0.1:2081\n"
+  },
+  "connectionMode": "proxy",
+  "core": "awg",
+  "httpPort": 2081,
+  "protocolVersion": 1,
+  "sessionId": "awg-proxy",
+  "socksPort": 2080,
+  "systemProxy": true,
+  "wireproxyInfoPort": 23001
+}

@@ -38,7 +38,8 @@ class _PermissionsScreenState extends ConsumerState<_PermissionsScreen>
   AndroidFlutterLocalNotificationsPlugin? get _androidNotif =>
       FlutterLocalNotificationsPlugin()
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
+            AndroidFlutterLocalNotificationsPlugin
+          >();
 
   Future<void> _refreshNotifStatus() async {
     if (!Platform.isAndroid) return;
@@ -73,6 +74,7 @@ class _PermissionsScreenState extends ConsumerState<_PermissionsScreen>
       children: [
         if (Platform.isAndroid) ..._androidPermissions(l10n),
         if (Platform.isLinux) ..._linuxPermissions(l10n),
+        if (Platform.isMacOS) const _MacOSNetworkPermissionTile(),
       ],
     );
   }
@@ -125,7 +127,9 @@ class _PermissionsScreenState extends ConsumerState<_PermissionsScreen>
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
         child: Text(
           l10n.settingsPermRevokeHint,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context)),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context)),
         ),
       ),
     ];
@@ -156,8 +160,108 @@ class _PermissionsScreenState extends ConsumerState<_PermissionsScreen>
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Text(
-        granted ? l10n.settingsPermStatusGranted : l10n.settingsPermStatusDenied,
+        granted
+            ? l10n.settingsPermStatusGranted
+            : l10n.settingsPermStatusDenied,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(color: color),
+      ),
+    );
+  }
+}
+
+class _MacOSNetworkPermissionTile extends StatefulWidget {
+  const _MacOSNetworkPermissionTile();
+
+  @override
+  State<_MacOSNetworkPermissionTile> createState() =>
+      _MacOSNetworkPermissionTileState();
+}
+
+class _MacOSNetworkPermissionTileState
+    extends State<_MacOSNetworkPermissionTile> {
+  static const _network = MethodChannel('io.github.caocaocc.keqdroid/network');
+  Map<String, dynamic> _status = {};
+  Object? _error;
+  bool _busy = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh({bool authorize = false}) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await _network.invokeMapMethod<String, dynamic>(
+        authorize ? 'authorize' : 'getServiceStatus',
+      );
+      if (mounted) setState(() => _status = result ?? {});
+    } catch (error) {
+      if (mounted) setState(() => _error = error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final installed = _status['installed'] == true;
+    final authorized = _status['authorized'] == true;
+    return ExpressiveCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.macosNetworkServiceTitle,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            installed
+                ? l10n.macosNetworkServiceHint
+                : l10n.macosNetworkServiceMissing,
+          ),
+          if (installed)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                authorized
+                    ? l10n.settingsPermStatusGranted
+                    : l10n.settingsPermStatusDenied,
+              ),
+            ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SelectableText('$_error'),
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (installed && !authorized)
+                FilledButton(
+                  onPressed: _busy ? null : () => _refresh(authorize: true),
+                  child: Text(l10n.macosAuthorizeAccount),
+                ),
+              TextButton(
+                onPressed: _busy ? null : _refresh,
+                child: const Icon(Icons.refresh_rounded),
+              ),
+              if (_busy)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -182,7 +286,11 @@ class _PermissionInfoTile extends StatelessWidget {
       leading: Icon(icon, color: AppTheme.textLight(context)),
       title: Text(title),
       subtitle: Text(subtitle),
-      trailing: Icon(Icons.open_in_new_rounded, size: 18, color: AppTheme.textLight(context)),
+      trailing: Icon(
+        Icons.open_in_new_rounded,
+        size: 18,
+        color: AppTheme.textLight(context),
+      ),
       onTap: onTap,
     );
   }
@@ -228,8 +336,8 @@ class _LinuxTunPasswordlessTileState
         content: Text(
           ok
               ? (enable
-                  ? l10n.tunRememberInstalled
-                  : l10n.settingsPermTunDisabled)
+                    ? l10n.tunRememberInstalled
+                    : l10n.settingsPermTunDisabled)
               : l10n.tunRememberFailed,
         ),
         backgroundColor: ok ? AppTheme.green(context) : AppTheme.red(context),
