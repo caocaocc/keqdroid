@@ -28,8 +28,7 @@ ConnectInFlightAction connectInFlightAction(
   }
   return switch (status) {
     VpnStatus.connected ||
-    VpnStatus.disconnected =>
-      ConnectInFlightAction.applyAndFinish,
+    VpnStatus.disconnected => ConnectInFlightAction.applyAndFinish,
     VpnStatus.error => ConnectInFlightAction.apply,
     _ => ConnectInFlightAction.ignore,
   };
@@ -81,6 +80,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       return;
     }
     state = AsyncData(s);
+    if (Platform.isMacOS &&
+        !_cancelRequested &&
+        MacOSTunnelBackend.activeInstance?.takeNetworkChangeRequest() == true) {
+      unawaited(reconnectToActiveServer());
+    }
   }
 
   /// Порт HTTP-инбаунда живой сессии — на диск, для фоновых изолятов.
@@ -133,8 +137,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     _credsRestoreInFlight = true;
     unawaited(() async {
       try {
-        final creds =
-            await ref.read(vpnEngineProvider).fetchActiveSocksCredentials();
+        final creds = await ref
+            .read(vpnEngineProvider)
+            .fetchActiveSocksCredentials();
         if (creds != null) {
           Socks5Credentials().init(creds.username, creds.password);
           AppLogger.instance.info(
@@ -278,16 +283,20 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 
   Future<void> connect({bool autostartTunFallback = false}) async {
     if (_connectInFlight) {
-      AppLogger.instance.debug('VPN connect() ignored: connect already in progress');
+      AppLogger.instance.debug(
+        'VPN connect() ignored: connect already in progress',
+      );
       return;
     }
 
     final server = ref.read(serversProvider).activeServer;
     if (server == null) {
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: 'No active server selected',
-      ));
+      state = AsyncData(
+        VpnState(
+          status: VpnStatus.error,
+          errorMessage: 'No active server selected',
+        ),
+      );
       return;
     }
 
@@ -336,9 +345,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // (иначе они не «не сработают», а не дадут ядру подняться). Пользователю
       // это видно только по тому, что его DNS «не применился» — говорим прямо.
       if (settings.xrayCore.dnsUseCustom) {
-        final dropped =
-            XrayCoreSettings.xrayDnsServers(settings.xrayCore.dnsServers)
-                .dropped;
+        final dropped = XrayCoreSettings.xrayDnsServers(
+          settings.xrayCore.dnsServers,
+        ).dropped;
         if (dropped.isNotEmpty) {
           AppLogger.instance.warn(
             'Custom DNS: ${dropped.length} address(es) dropped — the core '
@@ -352,7 +361,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       final split = ref.read(splitTunnelingProvider);
       final excludePkgs = split.excludePackages.toList();
       final includePkgs = split.includePackages.toList();
-      final routingMode = routingModeFromSplit(
+      var routingMode = routingModeFromSplit(
         includePackages: split.includePackages,
         excludePackages: split.excludePackages,
       );
@@ -363,6 +372,21 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             )
           : const <String>[];
 
+      final macRouting = Platform.isMacOS
+          ? await MacOSAppRoutingStore.load()
+          : null;
+      if (macRouting != null) routingMode = macRouting.mode;
+      if (Platform.isMacOS &&
+          autostartTunFallback &&
+          engine.usesMacOSNetworkService) {
+        final service = await MacOSTunnelBackend.serviceStatus();
+        if (service['installed'] != true || service['authorized'] != true) {
+          throw const VpnPermissionDeniedException(
+            'Automatic connection requires the installed macOS network service. Open the application to authorize it.',
+          );
+        }
+      }
+
       var connectionMode = TunnelSessionBuilder.resolveMode(settings);
 
       // Разрешение на VPN — только если сессия и правда поднимет интерфейс.
@@ -372,7 +396,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         final permitted = await engine.requestVpnPermission();
         if (!permitted) throw const VpnPermissionDeniedException();
       }
-      if ((Platform.isWindows || Platform.isLinux) &&
+      if ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
           connectionMode == ConnectionMode.proxy &&
           routingMode != AppRoutingMode.allProxy) {
         // Не «сплит не сработал», а «сессия идёт как весь-трафик»: без туннеля
@@ -396,7 +420,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             // Персистим фактический режим, чтобы sidebar/tray показывали Proxy,
             // а не TUN. Иначе UI остаётся в TUN, и повторный выбор TUN не
             // срабатывает (next == current), вынуждая делать proxy→tun вручную.
-            await ref.read(settingsNotifierProvider.notifier).save(
+            await ref
+                .read(settingsNotifierProvider.notifier)
+                .save(
                   settings.copyWith(
                     connectionMode: ConnectionMode.proxy.storageValue,
                   ),
@@ -420,7 +446,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Ставить это раньше нельзя: выше есть ветка, которая сохраняет
       // `settings` в хранилище (автостарт без прав → Proxy), и подменённые
       // порты уехали бы в постоянные настройки.
-      if (Platform.isWindows || Platform.isLinux) {
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         final portPlan = await LocalPortResolver.resolve(settings);
         for (final change in portPlan.changes) {
           AppLogger.instance.warn(change.describe());
@@ -431,6 +457,16 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
           httpPort: portPlan.httpPort,
         );
       }
+
+      final processPaths =
+          macRouting != null && connectionMode == ConnectionMode.tun
+          ? await MacOSAppRoutingStore.resolvePaths(
+              macRouting,
+              routingMode == AppRoutingMode.allProxy
+                  ? const []
+                  : await engine.getInstalledApps(includeSystem: true),
+            )
+          : const <String>[];
 
       // 1. забираем SOCKS5-креды у нативного сервиса
       final creds = await engine.fetchSocksCredentials();
@@ -446,10 +482,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         if (user.isEmpty || pass.isEmpty) {
           user = randomProxyToken(12);
           pass = randomProxyToken(20);
-          settings = settings.copyWith(proxyModeUser: user, proxyModePass: pass);
-          await ref
-              .read(settingsNotifierProvider.notifier)
-              .save(settings);
+          settings = settings.copyWith(
+            proxyModeUser: user,
+            proxyModePass: pass,
+          );
+          await ref.read(settingsNotifierProvider.notifier).save(settings);
         }
         Socks5Credentials().init(user, pass);
       } else {
@@ -458,8 +495,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 
       // 2. резолвим домен сервера заранее, чтобы direct-правило роутинга
       //    шло по IP, а не по домену (важно когда DNS сам идёт через прокси)
-      final serverIp =
-          await _resolveFirstAddress(server.address) ?? server.address;
+      // Darwin core bootstrap uses the physical DNS snapshot. Keep endpoint
+      // domains intact rather than consulting the already redirected OS DNS.
+      final serverIp = Platform.isMacOS
+          ? server.address
+          : await _resolveFirstAddress(server.address) ?? server.address;
 
       // Desktop system/Firefox proxy config — Windows wininet, GNOME gsettings,
       // Firefox user.js — has no field for SOCKS/HTTP credentials, so password
@@ -476,7 +516,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // password` на каждое соединение.
       // На десктопе auth в прокси-режиме невозможен всегда (системный прокси и
       // Firefox кред не шлют), на Android — настройка.
-      final proxyModeNoAuth = connectionMode == ConnectionMode.proxy &&
+      final proxyModeNoAuth =
+          connectionMode == ConnectionMode.proxy &&
           (!Platform.isAndroid || !settings.proxyModeAuth);
 
       // Ядро выбирает формат сервера, а настройка — только там, где формат
@@ -527,11 +568,12 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         );
       } else if (connectionMode == ConnectionMode.tun) {
         mihomoTun = MihomoTunOptions(
-          device: kTunInterfaceName,
+          device: Platform.isMacOS ? null : kTunInterfaceName,
           stack: settings.tun.stack,
           mtu: settings.tun.mtu,
           autoRoute: settings.tun.autoRoute,
           strictRoute:
+              !Platform.isMacOS &&
               settings.tun.strictRouteEnabled(windows: Platform.isWindows),
         );
       } else {
@@ -558,11 +600,14 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
               routingMode: routingMode,
               managedProcessNames: switch (routingMode) {
                 AppRoutingMode.onlySelected ||
-                AppRoutingMode.allExceptSelected =>
-                  processNames,
+                AppRoutingMode.allExceptSelected => processNames,
                 AppRoutingMode.allProxy => const <String>[],
               },
-              appProcessName: Platform.isAndroid
+              managedProcessPaths: processPaths,
+              appProcessPath: Platform.isMacOS
+                  ? Platform.resolvedExecutable
+                  : '',
+              appProcessName: Platform.isAndroid || Platform.isMacOS
                   ? ''
                   : p.basename(Platform.resolvedExecutable),
             )
@@ -571,8 +616,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Готовый конфиг несёт свои geo-правила: неизвестный ядру код уронил бы
       // разбор целиком (для списков настроек это уже сделал
       // GeoAssetService.sanitizeRules выше).
-      final customGeoIndex =
-          server.protocol == 'custom' ? await GeoAssetService.index() : null;
+      final customGeoIndex = server.protocol == 'custom'
+          ? await GeoAssetService.index()
+          : null;
       // Чистка молчит, а выброшенное авторское правило меняет смысл конфига:
       // его трафик проваливается в наш `final`, и с «остальной трафик = блок»
       // перестаёт ходить вовсе. Снаружи это «приложение блокирует то, что
@@ -614,8 +660,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             'code, so the rules cannot be kept. Their traffic now falls '
             'through to "unmatched traffic" in Settings → Routing'
             '${blocked ? ', which is set to BLOCK — that traffic will not '
-                'connect at all. Set it to Proxy or Bypass, or replace the '
-                'codes in the config.' : '.'}',
+                      'connect at all. Set it to Proxy or Bypass, or replace the '
+                      'codes in the config.' : '.'}',
           );
         }
       }
@@ -643,8 +689,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // IPv6-адрес на TUN-интерфейсе там, где IPv6 в системе выключен, роняет
       // sing-box на старте («set ipv6 dns: Access is denied»), то есть чинил бы
       // утечку ценой неработающего TUN. См. [TunSettings.blockIpv6Leak].
-      final hostHasIpv6 = connectionMode == ConnectionMode.tun &&
-              (Platform.isWindows || Platform.isLinux) &&
+      final hostHasIpv6 =
+          connectionMode == ConnectionMode.tun &&
+              (Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
               settings.tun.blockIpv6Leak &&
               !mihomoPicked
           ? await hostHasGlobalIpv6(excludeInterfaceName: kTunInterfaceName)
@@ -654,8 +701,13 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       if (mihomoPicked &&
           connectionMode == ConnectionMode.tun &&
           settings.tun.blockIpv6Leak &&
-          (Platform.isWindows || Platform.isLinux) &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
           await hostHasGlobalIpv6(excludeInterfaceName: kTunInterfaceName)) {
+        if (Platform.isMacOS) {
+          throw const VpnStartException(
+            'Mihomo on macOS cannot guarantee IPv6 leak protection. Select the keqrnel core before connecting.',
+          );
+        }
         AppLogger.instance.warn(
           'This machine has global IPv6, but the tunnel here belongs to the '
           'mihomo core, which keeps its own IPv6 handling — the TUN option '
@@ -699,6 +751,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             ? processNames
             : const [],
         routingMode: routingMode,
+        managedProcessPaths: processPaths,
         serverName: server.displayName,
         modeOverride: connectionMode,
         hostHasIpv6: hostHasIpv6,
@@ -710,7 +763,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         // Отмена пришла, пока сессия поднималась — гасим её и выходим тихо.
         try {
           await engine.stopVpn();
-        } catch (_) {}
+        } catch (_) {
+          if (engine.usesMacOSNetworkService) rethrow;
+        }
         state = const AsyncData(VpnState(status: VpnStatus.disconnected));
         return;
       }
@@ -720,7 +775,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         sessionState = await _awaitNativeConnectOutcome(engine);
       }
       if (_cancelRequested) {
-        state = const AsyncData(VpnState(status: VpnStatus.disconnected));
+        state = AsyncData(
+          engine.usesMacOSNetworkService
+              ? await engine.getCurrentState()
+              : VpnState.disconnected,
+        );
         return;
       }
       if (sessionState.status == VpnStatus.connected) {
@@ -730,14 +789,24 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         // error-эмиты из стрима (_serverSwitchInProgress), а на десктопе нет
         // поллинга — без этого UI навсегда застревал в «подключается».
         state = AsyncData(sessionState);
+      } else if (engine.usesMacOSNetworkService) {
+        state = AsyncData(sessionState);
+        throw const VpnStartException(
+          'The macOS service did not confirm an active connection.',
+        );
       } else {
-        state = AsyncData(VpnState(
-          status: VpnStatus.connected,
-          activeMode: sessionState.activeMode,
-        ));
+        state = AsyncData(
+          VpnState(
+            status: VpnStatus.connected,
+            activeMode: sessionState.activeMode,
+          ),
+        );
       }
     } catch (e, st) {
-      if (_cancelRequested) {
+      if (_cancelRequested &&
+          !(ref.read(vpnEngineProvider).usesMacOSNetworkService &&
+              MacOSTunnelBackend.activeInstance?.currentState.status !=
+                  VpnStatus.disconnected)) {
         // Ошибка спровоцирована самой отменой (ядро убито стопом) —
         // это не сбой подключения, показываем спокойный «отключён».
         state = const AsyncData(VpnState(status: VpnStatus.disconnected));
@@ -748,10 +817,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: e.toString(),
-      ));
+      state = AsyncData(
+        VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+      );
       Error.throwWithStackTrace(e, st);
     } finally {
       _connectInFlight = false;
@@ -785,6 +853,12 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
+      if (Platform.isMacOS) {
+        state = AsyncData(
+          VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+        );
+        Error.throwWithStackTrace(e, st);
+      }
     }
   }
 
@@ -802,10 +876,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: e.toString(),
-      ));
+      state = AsyncData(
+        VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+      );
       Error.throwWithStackTrace(e, st);
     }
   }
@@ -863,5 +936,6 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 }
 
 /// true пока переподключаемся при смене сервера — чтобы не показывать ложные ошибки
-final vpnStateProvider =
-    AsyncNotifierProvider<VpnStateNotifier, VpnState>(VpnStateNotifier.new);
+final vpnStateProvider = AsyncNotifierProvider<VpnStateNotifier, VpnState>(
+  VpnStateNotifier.new,
+);

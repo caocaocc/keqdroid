@@ -108,7 +108,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
   }) =>
       const JsonEncoder.withIndent('  ').convert(
@@ -124,7 +126,9 @@ class MihomoConfigGen {
           tun: tun,
           routingMode: routingMode,
           managedProcessNames: managedProcessNames,
+          managedProcessPaths: managedProcessPaths,
           appProcessName: appProcessName,
+          appProcessPath: appProcessPath,
           windows: windows,
         ),
       );
@@ -153,7 +157,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
   }) {
     // Правила по процессам умеет только та сторона, где ядро способно найти
@@ -203,7 +209,9 @@ class MihomoConfigGen {
         tun: tun,
         routingMode: effectiveRoutingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         processRules: processRules,
         fakeIp: fakeIp,
         windows: windows,
@@ -246,7 +254,9 @@ class MihomoConfigGen {
         resolvedServerIp: resolvedServerIp,
         routingMode: effectiveRoutingMode,
         managedProcessNames: processRules ? managedProcessNames : const [],
+        managedProcessPaths: processRules ? managedProcessPaths : const [],
         appProcessName: processRules ? appProcessName : '',
+        appProcessPath: processRules ? appProcessPath : '',
         tunOwned: tun != null,
         fakeIp: fakeIp,
         windows: windows,
@@ -297,7 +307,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool processRules = false,
     bool fakeIp = false,
     bool? windows,
@@ -325,7 +337,9 @@ class MihomoConfigGen {
           ...buildProcessRules(
             routingMode: routingMode,
             managedProcessNames: managedProcessNames,
+            managedProcessPaths: managedProcessPaths,
             appProcessName: appProcessName,
+            appProcessPath: appProcessPath,
             proxyTarget: clash.primaryTarget,
             windows: windows,
           ),
@@ -1943,7 +1957,9 @@ class MihomoConfigGen {
     String proxyTarget = proxyName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool tunOwned = false,
     bool fakeIp = false,
     bool? windows,
@@ -1952,7 +1968,9 @@ class MihomoConfigGen {
       ...buildProcessRules(
         routingMode: routingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         proxyTarget: proxyTarget,
         windows: windows,
       ),
@@ -2039,12 +2057,19 @@ class MihomoConfigGen {
   static List<String> buildProcessRules({
     required AppRoutingMode routingMode,
     required List<String> managedProcessNames,
+    List<String> managedProcessPaths = const [],
     required String appProcessName,
+    String appProcessPath = '',
     String proxyTarget = proxyName,
     bool? windows,
   }) {
     final app = appProcessName.trim();
-    if (app.isEmpty && managedProcessNames.isEmpty) return const [];
+    if (app.isEmpty &&
+        appProcessPath.isEmpty &&
+        managedProcessNames.isEmpty &&
+        managedProcessPaths.isEmpty) {
+      return const [];
+    }
 
     // Целевая ОС параметром, а не из `Platform`: три имени ниже несут `.exe`
     // только на Windows, и снятая там фикстура иначе падала бы на linux-раннере,
@@ -2055,6 +2080,7 @@ class MihomoConfigGen {
       // Наши собственные сокеты (tcp-пинг, спидтест, апдейтер) — мимо туннеля,
       // иначе пинг мерил бы локальный конец туннеля вместо сервера.
       if (app.isNotEmpty) 'PROCESS-NAME,$app,DIRECT',
+      if (appProcessPath.isNotEmpty) 'PROCESS-PATH,$appProcessPath,DIRECT',
       // Чужие VPN-клиенты: их собственный транспорт обязан идти мимо нашего
       // туннеля, иначе получается туннель в туннеле и оба перестают работать.
       // Только в режиме «весь трафик»: при пер-аппном сплите пользователь
@@ -2065,6 +2091,19 @@ class MihomoConfigGen {
         'PROCESS-NAME,openvpn$exe,DIRECT',
       ],
     ];
+
+    for (final path in managedProcessPaths) {
+      if (!path.startsWith('/') || path.contains(RegExp(r'[,\r\n\x00]'))) {
+        throw const FormatException(
+          'Invalid executable path in application routing.',
+        );
+      }
+      if (routingMode == AppRoutingMode.onlySelected) {
+        rules.add('PROCESS-PATH,$path,$proxyTarget');
+      } else if (routingMode == AppRoutingMode.allExceptSelected) {
+        rules.add('PROCESS-PATH,$path,DIRECT');
+      }
+    }
 
     for (final process in managedProcessNames) {
       final name = process.trim();

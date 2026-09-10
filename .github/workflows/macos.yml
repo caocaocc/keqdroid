@@ -1,0 +1,82 @@
+name: macOS development packages
+
+on:
+  push:
+    branches: [dev]
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      fault_injection:
+        description: Fail this packaging job on attempt 1, then verify failed-job rerun
+        type: choice
+        options: [none, arm64, x64]
+        default: none
+
+permissions:
+  contents: read
+  actions: read
+
+# Stable independent jobs let an architecture finish even when the other fails.
+# No cancelling concurrency group: earlier runs keep their completed components.
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  keqrnel-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: keqrnel, arch: arm64, runner: macos-15}
+  mihomo-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: mihomo, arch: arm64, runner: macos-15}
+  wireproxy-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: wireproxy, arch: arm64, runner: macos-15}
+  helper-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: helper, arch: arm64, runner: macos-15}
+  app-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: app, arch: arm64, runner: macos-15}
+
+  keqrnel-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: keqrnel, arch: x64, runner: macos-15-intel}
+  mihomo-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: mihomo, arch: x64, runner: macos-15-intel}
+  wireproxy-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: wireproxy, arch: x64, runner: macos-15-intel}
+  helper-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: helper, arch: x64, runner: macos-15-intel}
+  app-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: app, arch: x64, runner: macos-15-intel}
+
+  package-arm64:
+    needs: [checks, keqrnel-arm64, mihomo-arm64, wireproxy-arm64, helper-arm64, app-arm64]
+    uses: ./.github/workflows/macos-package.yml
+    with:
+      arch: arm64
+      runner: macos-15
+      fault_injection: ${{ inputs.fault_injection || 'none' }}
+      keqrnel_artifact: ${{ needs.keqrnel-arm64.outputs.artifact-name }}
+      mihomo_artifact: ${{ needs.mihomo-arm64.outputs.artifact-name }}
+      wireproxy_artifact: ${{ needs.wireproxy-arm64.outputs.artifact-name }}
+      helper_artifact: ${{ needs.helper-arm64.outputs.artifact-name }}
+      app_artifact: ${{ needs.app-arm64.outputs.artifact-name }}
+
+  package-x64:
+    needs: [checks, keqrnel-x64, mihomo-x64, wireproxy-x64, helper-x64, app-x64]
+    uses: ./.github/workflows/macos-package.yml
+    with:
+      arch: x64
+      runner: macos-15-intel
+      fault_injection: ${{ inputs.fault_injection || 'none' }}
+      keqrnel_artifact: ${{ needs.keqrnel-x64.outputs.artifact-name }}
+      mihomo_artifact: ${{ needs.mihomo-x64.outputs.artifact-name }}
+      wireproxy_artifact: ${{ needs.wireproxy-x64.outputs.artifact-name }}
+      helper_artifact: ${{ needs.helper-x64.outputs.artifact-name }}
+      app_artifact: ${{ needs.app-x64.outputs.artifact-name }}

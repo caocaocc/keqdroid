@@ -430,7 +430,7 @@ void main() {
     ));
     expect(inbound['stack'], 'gvisor');
     expect(inbound['mtu'], 9000);
-    expect(inbound['strict_route'], isTrue);
+    expect(inbound['strict_route'], Platform.isMacOS ? isNull : isTrue);
     expect(inbound['endpoint_independent_nat'], isTrue);
     // sing-box 1.13 (keqrnel): badoption.Duration — строка вида "60s"
     expect(inbound['udp_timeout'], '60s');
@@ -444,16 +444,16 @@ void main() {
     expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
   });
 
-  test('strict route on/off overrides the platform default', () {
+  test('strict route on/off is honored on platforms that implement it', () {
     final on = tunInboundFor(const AppSettings(
       tun: TunSettings(strictRoute: TunSettings.strictRouteOn),
     ));
-    expect(on['strict_route'], isTrue);
+    expect(on['strict_route'], Platform.isMacOS ? isNull : isTrue);
 
     final off = tunInboundFor(const AppSettings(
       tun: TunSettings(strictRoute: TunSettings.strictRouteOff),
     ));
-    expect(off['strict_route'], isFalse);
+    expect(off['strict_route'], Platform.isMacOS ? isNull : isFalse);
   });
 
   test('auto_route can be disabled for manual route management', () {

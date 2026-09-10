@@ -89,6 +89,56 @@ void main() {
         'keqdroid-0.5.1-x86_64.AppImage',
       );
     });
+
+    test('macOS never falls back to another platform', () {
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          assets,
+          'macos',
+          architecture: 'arm64',
+        ),
+        isNull,
+      );
+    });
+
+    test('macOS matches the complete platform and architecture suffix', () {
+      final mixed = [
+        ...assets,
+        {'name': 'keqdroid-0.5.1-macos-x64.dmg'},
+        {'name': 'keqdroid-0.5.1-macos-arm64.dmg.sha256'},
+        {'name': 'keqdroid-0.5.1-macos-arm64.dmg'},
+      ];
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'arm64',
+        ),
+        'keqdroid-0.5.1-macos-arm64.dmg',
+      );
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'x64',
+        ),
+        'keqdroid-0.5.1-macos-x64.dmg',
+      );
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'unknown',
+        ),
+        isNull,
+      );
+    });
+
+    test('only macOS uses the fork release source', () {
+      expect(UpdateService.releaseOwnerForPlatform('macos'), 'caocaocc');
+      expect(UpdateService.releaseOwnerForPlatform('windows'), 'Lemonochka');
+      expect(UpdateService.releaseOwnerForPlatform('android'), 'Lemonochka');
+    });
   });
 
   group('UpdateService.extractSha256', () {

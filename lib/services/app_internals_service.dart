@@ -8,8 +8,8 @@ import 'package:path/path.dart' as p;
 import '../models/app_internals.dart';
 import '../models/app_settings.dart';
 import '../platform/vpn_native_bridge.dart';
-import '../tunnel/linux_core_paths.dart';
-import '../tunnel/linux_tunnel_backend.dart';
+import '../tunnel/desktop_core_paths.dart';
+import '../tunnel/desktop_runtime.dart';
 import '../tunnel/tunnel_state.dart';
 import '../tunnel/windows_core_paths.dart';
 import '../tunnel/windows_tunnel_backend.dart';
@@ -77,26 +77,36 @@ class AppInternalsService {
     }
     if (Platform.isWindows) {
       return [
-        await _core(await WindowsCorePaths.keqrnelExecutable(), 'keqrnel.exe',
-            CoreRole.core),
+        await _core(
+          await WindowsCorePaths.keqrnelExecutable(),
+          'keqrnel.exe',
+          CoreRole.core,
+        ),
         // mihomo — второе ядро, а не довесок: в TUN-режиме оно владеет
         // адаптером само, и keqrnel в такой сессии не участвует вовсе.
         await _core(await WindowsCorePaths.mihomoExecutable(), 'mihomo.exe',
             CoreRole.core),
       ];
     }
-    if (Platform.isLinux) {
+    if (Platform.isLinux || Platform.isMacOS) {
       return [
         await _core(
-            await LinuxCorePaths.keqrnelExecutable(), 'keqrnel', CoreRole.core),
+          await DesktopCorePaths.keqrnelExecutable(),
+          'keqrnel',
+          CoreRole.core,
+        ),
         await _core(
-            await LinuxCorePaths.mihomoExecutable(), 'mihomo', CoreRole.core),
+            await DesktopCorePaths.mihomoExecutable(), 'mihomo', CoreRole.core),
       ];
     }
     return const [];
   }
 
-  static Future<CoreInfo> _core(String? path, String name, CoreRole role) async {
+  static Future<CoreInfo> _core(
+    String? path,
+    String name,
+    CoreRole role,
+  ) async {
     if (path == null) return CoreInfo.missing(name: name, role: role);
     final file = File(path);
     if (!file.existsSync()) return CoreInfo.missing(name: name, role: role);
@@ -153,8 +163,9 @@ class AppInternalsService {
     return '${pseudo.group(1)} · ${pseudo.group(3)}';
   }
 
-  static final _pseudoVersion =
-      RegExp(r'^(.*?)-(?:[\w.]+\.)?(\d{14})-([0-9a-f]{12})$');
+  static final _pseudoVersion = RegExp(
+    r'^(.*?)-(?:[\w.]+\.)?(\d{14})-([0-9a-f]{12})$',
+  );
 
   // ── Geo-базы ────────────────────────────────────────────────────────────
 
@@ -219,10 +230,10 @@ class AppInternalsService {
           // На Android API поднимает mihomo — у xray его нет вовсе, и там
           // строка честно отсутствует, а не показывает чужой порт.
           : Platform.isAndroid
-              ? MihomoApiSession().port
-              : Platform.isLinux
-                  ? LinuxTunnelBackend.activeInstance?.clashApiPort
-                  : null,
+          ? MihomoApiSession().port
+          : DesktopRuntime.supported
+          ? DesktopRuntime.clashApiPort
+          : null,
     );
   }
 
@@ -232,10 +243,8 @@ class AppInternalsService {
   /// знает: при живой mihomo-сессии панель показывала бы `keqrnel`, которого в
   /// ней нет. Спрашиваем поэтому у самой сессии — как и на Android.
   static String _desktopEngine(AppSettings settings) {
-    final pids = Platform.isWindows
-        ? WindowsTunnelBackend.activeInstance?.activeCorePids
-        : LinuxTunnelBackend.activeInstance?.activeCorePids;
-    if (pids != null && pids.keys.any((k) => k.startsWith('mihomo'))) {
+    final pids = DesktopRuntime.corePids;
+    if (pids.keys.any((k) => k.startsWith('mihomo'))) {
       return 'mihomo';
     }
     return settings.coreEngine;
@@ -253,16 +262,12 @@ class AppInternalsService {
   static Map<String, int> _corePids(Map<String, Object?> android) {
     if (Platform.isAndroid) {
       final core = android['xrayPid'] as int? ?? -1;
-      return {
-        if (core > 0) _androidCoreBinary(android): core,
-      };
+      return {if (core > 0) _androidCoreBinary(android): core};
     }
     if (Platform.isWindows) {
       return WindowsTunnelBackend.activeInstance?.activeCorePids ?? const {};
     }
-    if (Platform.isLinux) {
-      return LinuxTunnelBackend.activeInstance?.activeCorePids ?? const {};
-    }
+    if (DesktopRuntime.supported) return DesktopRuntime.corePids;
     return const {};
   }
 
@@ -296,7 +301,9 @@ class AppInternalsService {
     if (Platform.isAndroid) {
       final release = (android['release'] as String? ?? '').trim();
       final sdk = android['sdkInt'] as int?;
-      if (release.isEmpty && sdk == null) return Platform.operatingSystemVersion;
+      if (release.isEmpty && sdk == null) {
+        return Platform.operatingSystemVersion;
+      }
       final manufacturer = (android['manufacturer'] as String? ?? '').trim();
       final device = manufacturer.isEmpty ? '' : ' · $manufacturer';
       return 'Android $release (API $sdk)$device';
@@ -354,9 +361,11 @@ class AppInternalsService {
       ..writeln()
       ..writeln('## geo');
     for (final base in data.geoBases) {
-      out.writeln(base.missing
-          ? '${base.name}: missing'
-          : '${base.name}: ${base.codeCount} codes, ${base.sizeBytes} bytes');
+      out.writeln(
+        base.missing
+            ? '${base.name}: missing'
+            : '${base.name}: ${base.codeCount} codes, ${base.sizeBytes} bytes',
+      );
     }
 
     final session = data.session;

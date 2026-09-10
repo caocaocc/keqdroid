@@ -1,0 +1,116 @@
+#!/bin/bash
+set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+runtime='/Library/Application Support/io.github.caocaocc.keqdroid'
+incoming="${runtime}.incoming"
+backup="${runtime}.previous"
+daemon='/Library/LaunchDaemons/io.github.caocaocc.keqdroid.network-service.plist'
+app='/Applications/KEQDIS.app'
+old_runtime=0
+old_app=0
+new_runtime=0
+new_app=0
+state_moved=0
+old_service_loaded=0
+daemon_changed=0
+old_daemon=0
+saved_daemon="$incoming/rollback-network-service.plist"
+success=0
+
+fail() { echo "KEQDIS: $*" >&2; exit 1; }
+# Explicit failure branches are required: macOS Bash 3.2 does not consistently
+# apply errexit to a failed [[ ... ]] compound command.
+[[ $(id -u) == 0 && "${3:-/}" == / ]] || fail 'Install as administrator on the current startup disk only.'
+for location in "$runtime" "$incoming" "$backup" "$app" "${app}.previous" "$daemon"; do
+  [[ ! -L "$location" ]] || fail "Refusing symbolic link: $location"
+done
+[[ -d "$incoming/runtime" && ! -L "$incoming/runtime" && $(stat -f %u "$incoming") == 0 ]] || fail 'Invalid runtime payload.'
+[[ -d "$incoming/KEQDIS.app" && ! -L "$incoming/KEQDIS.app" ]] || fail 'Invalid application payload.'
+[[ ! -e "$backup" && ! -e "${app}.previous" ]] || fail 'An interrupted upgrade requires recovery first.'
+[[ ! -e "$daemon" || -f "$daemon" ]] || fail 'The launch service destination is not a regular file.'
+if pgrep -x KEQDIS >/dev/null; then fail 'Quit KEQDIS before installing or upgrading.'; fi
+if [[ -e "$runtime" ]]; then
+  [[ -d "$runtime" && $(stat -f %u "$runtime") == 0 ]] || fail 'The old runtime is not a root-owned directory.'
+  [[ -x "$runtime/bin/keqdis-network-service" && ! -L "$runtime/bin/keqdis-network-service" ]] || fail 'The old recovery service is missing.'
+  [[ -f "$runtime/network-service.plist" && ! -L "$runtime/network-service.plist" ]] || fail 'The old launch service configuration is missing.'
+fi
+if [[ -e "$app" ]]; then
+  [[ -d "$app" ]] || fail 'The application destination is not a directory.'
+  [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist") == io.github.caocaocc.keqdroid ]] || fail 'Another application occupies the installation path.'
+fi
+if launchctl print system/io.github.caocaocc.keqdroid.network-service >/dev/null 2>&1; then
+  [[ -d "$runtime" && -f "$daemon" ]] || fail 'A service without a runtime or launch configuration requires recovery first.'
+  old_service_loaded=1
+fi
+chown -R root:wheel "$incoming"
+chmod -RN "$incoming"
+chmod -R go-w "$incoming"
+/usr/bin/codesign --verify --deep --strict "$incoming/KEQDIS.app"
+"$incoming/runtime/bin/keqdis-network-service" --self-check
+if [[ -f "$daemon" ]]; then cp -p "$daemon" "$saved_daemon"; old_daemon=1; fi
+
+rollback() {
+  local result=$?
+  trap - EXIT
+  if [[ $success == 0 ]]; then
+    [[ $result != 0 ]] || result=1
+    if [[ $new_runtime == 1 ]]; then
+      launchctl bootout system/io.github.caocaocc.keqdroid.network-service >/dev/null 2>&1 || true
+      "$runtime/bin/keqdis-network-service" --recover || { echo 'KEQDIS: recovery failed; preserving runtime, journal and backups for repair.' >&2; exit 1; }
+      if [[ $state_moved == 1 ]]; then mv "$runtime/state" "$backup/state"; fi
+      rm -rf "$runtime"
+    fi
+    if [[ $new_app == 1 ]]; then rm -rf "$app"; fi
+    if [[ $old_app == 1 ]]; then mv "${app}.previous" "$app"; fi
+    if [[ $old_runtime == 1 ]]; then mv "$backup" "$runtime"; fi
+    if [[ $daemon_changed == 1 ]]; then
+      if [[ $old_daemon == 1 ]]; then
+        cp -p "$saved_daemon" "$daemon"
+      else
+        rm -f "$daemon"
+      fi
+    fi
+    if [[ $old_service_loaded == 1 ]]; then
+      launchctl bootstrap system "$daemon" || echo 'KEQDIS: previous files restored, but restarting the service needs repair.' >&2
+    fi
+    echo 'KEQDIS: installation failed; the previous installation was preserved or restored.' >&2
+  fi
+  exit "$result"
+}
+# Nothing above this point can stop the old service or remove installed files.
+trap rollback EXIT
+if [[ $old_service_loaded == 1 ]]; then
+  launchctl bootout system/io.github.caocaocc.keqdroid.network-service
+fi
+if [[ -d "$runtime" ]]; then
+  "$runtime/bin/keqdis-network-service" --recover
+  mv "$runtime" "$backup"; old_runtime=1
+fi
+if [[ -d "$app" ]]; then mv "$app" "${app}.previous"; old_app=1; fi
+mv "$incoming/runtime" "$runtime"; new_runtime=1
+mv "$incoming/KEQDIS.app" "$app"; new_app=1
+if [[ $old_runtime == 1 && -d "$backup/state" ]]; then
+  mv "$backup/state" "$runtime/state"; state_moved=1
+fi
+mkdir -p "$runtime/state" "$runtime/sessions"
+# Parent-directory ACL inheritance can grant write access despite root ownership
+# and POSIX mode bits. Remove ACLs from this product, including migrated state.
+chown -R root:wheel "$runtime" "$app"
+chmod -RN "$runtime" "$app"
+chmod -R go-w "$runtime" "$app"
+chmod 700 "$runtime/state"
+chmod 711 "$runtime/sessions"
+/usr/bin/codesign --verify --deep --strict "$app"
+daemon_changed=1
+cp "$runtime/network-service.plist" "$daemon"
+chown root:wheel "$daemon"
+chmod 644 "$daemon"
+launchctl bootstrap system "$daemon"
+sleep 2
+launchctl print system/io.github.caocaocc.keqdroid.network-service | /usr/bin/grep -q 'state = running'
+success=1
+if [[ $old_runtime == 1 ]]; then rm -rf "$backup" || echo 'KEQDIS: old runtime cleanup needs attention.' >&2; fi
+if [[ $old_app == 1 ]]; then rm -rf "${app}.previous" || echo 'KEQDIS: old application cleanup needs attention.' >&2; fi
+if [[ $old_daemon == 1 ]]; then rm -f "$saved_daemon" || echo 'KEQDIS: launch service backup cleanup needs attention.' >&2; fi
+rmdir "$incoming" || echo 'KEQDIS: installer staging cleanup needs attention.' >&2
+exit 0

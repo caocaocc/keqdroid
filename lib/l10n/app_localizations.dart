@@ -4804,6 +4804,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not read this image.'**
   String get cardImageRejectUnreadable;
+
+  /// No description provided for @macosSplitProcessHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Rules match executable paths, including helpers inside the selected app. Shared system services may not be attributable to an app.'**
+  String get macosSplitProcessHint;
+
+  /// No description provided for @macosAppNeedsMatching.
+  ///
+  /// In en, this message translates to:
+  /// **'App not found in this list. Locate it again if it moved or was removed.'**
+  String get macosAppNeedsMatching;
+
+  /// No description provided for @macosNetworkServiceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Network service'**
+  String get macosNetworkServiceTitle;
+
+  /// No description provided for @macosNetworkServiceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorize this account to control the system proxy and TUN. macOS asks for administrator permission once per installed version.'**
+  String get macosNetworkServiceHint;
+
+  /// No description provided for @macosNetworkServiceMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Install or update KEQDIS using the complete PKG installer to enable the network service.'**
+  String get macosNetworkServiceMissing;
+
+  /// No description provided for @macosAuthorizeAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorize this account'**
+  String get macosAuthorizeAccount;
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

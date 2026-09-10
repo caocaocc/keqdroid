@@ -45,9 +45,11 @@ class TunnelSessionBuilder {
     List<String> includePackages = const [],
     List<String> excludeProcesses = const [],
     List<String> includeProcesses = const [],
+    List<String> managedProcessPaths = const [],
     String? serverName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     ConnectionMode? modeOverride,
+
     /// Есть ли у машины глобальный IPv6 — решает, забирать ли IPv6 в туннель
     /// (см. [TunSettings.blockIpv6Leak]). Считает вызывающий: здесь нельзя,
     /// метод синхронный, а перечисление интерфейсов — нет.
@@ -58,7 +60,8 @@ class TunnelSessionBuilder {
     // TUN на десктопе: sing-box оборачивает tun → локальный SOCKS xray с auth.
     // В proxy-режиме sing-box не нужен (системный прокси).
     String? singboxConfig;
-    if ((Platform.isWindows || Platform.isLinux) && mode == ConnectionMode.tun) {
+    if ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
+        mode == ConnectionMode.tun) {
       final managed = switch (routingMode) {
         AppRoutingMode.onlySelected => includeProcesses,
         AppRoutingMode.allExceptSelected => excludeProcesses,
@@ -71,8 +74,13 @@ class TunnelSessionBuilder {
         serverIpToExclude: resolvedServerIp,
         settings: settings,
         managedProcessNames: managed,
+        managedProcessPaths: managedProcessPaths,
         routingMode: routingMode,
-        appProcessName: p.basename(Platform.resolvedExecutable),
+        appProcessName: Platform.isMacOS
+            ? ''
+            : p.basename(Platform.resolvedExecutable),
+        appProcessPath: Platform.isMacOS ? Platform.resolvedExecutable : '',
+        macos: Platform.isMacOS,
         hostHasIpv6: hostHasIpv6,
       );
     }
@@ -92,6 +100,7 @@ class TunnelSessionBuilder {
       serverName: serverName,
       systemProxy: settings.systemProxyEnabled,
       killSwitch: settings.killSwitch,
+      blockIpv6Leak: settings.tun.blockIpv6Leak,
       coreEngine: settings.coreEngine,
       debugMode: settings.debugMode,
     );

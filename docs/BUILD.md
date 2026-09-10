@@ -2,9 +2,10 @@
 
 <strong>English</strong> · <a href="#русский">Русский</a>
 
-The only developer document: how to get the project running locally, build it for every
-platform, run the tests and cut a release. Everything else lives in the code and its
-comments.
+How to get the project running locally, build it, run tests and cut a release.
+The macOS implementation, pinned toolchain, PKG/DMG packaging and required device
+acceptance are documented separately in [MACOS.md](MACOS.md). macOS development
+builds must pass that acceptance matrix before being marked supported.
 
 ## 1. Prerequisites
 

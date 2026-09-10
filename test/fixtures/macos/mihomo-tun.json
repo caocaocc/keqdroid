@@ -1,0 +1,128 @@
+{
+  "apiPort": 23000,
+  "apiSecret": "test-secret-12345678",
+  "blockIpv6Leak": false,
+  "configurations": {
+    "mihomo": {
+      "allow-lan": false,
+      "authentication": [
+        "test-user:test-password"
+      ],
+      "bind-address": "127.0.0.1",
+      "dns": {
+        "default-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "enable": true,
+        "enhanced-mode": "normal",
+        "ipv6": false,
+        "nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "proxy-server-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "respect-rules": true
+      },
+      "external-controller": "127.0.0.1:23000",
+      "find-process-mode": "strict",
+      "geo-auto-update": false,
+      "geodata-mode": true,
+      "interface-name": "en0",
+      "ipv6": false,
+      "log-level": "warning",
+      "mode": "rule",
+      "port": 2081,
+      "proxies": [
+        {
+          "client-fingerprint": "chrome",
+          "name": "proxy",
+          "network": "tcp",
+          "password": "test-password",
+          "port": 443,
+          "server": "node.example.com",
+          "sni": "node.example.com",
+          "type": "trojan",
+          "udp": true
+        }
+      ],
+      "rules": [
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/MacOS/KEQDIS,DIRECT",
+        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/keqrnel,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel,DIRECT",
+        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/mihomo,DIRECT",
+        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/wireproxy,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/wireproxy,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/MacOS/KEQDIS,DIRECT",
+        "PROCESS-NAME,tailscaled,DIRECT",
+        "PROCESS-NAME,wireguard,DIRECT",
+        "PROCESS-NAME,openvpn,DIRECT",
+        "DOMAIN,node.example.com,DIRECT",
+        "IP-CIDR,198.18.0.0/30,DIRECT,no-resolve",
+        "DOMAIN-KEYWORD,ru,DIRECT",
+        "DOMAIN-SUFFIX,yandex.ru,DIRECT",
+        "DOMAIN-SUFFIX,vk.com,DIRECT",
+        "IP-CIDR,0.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+        "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+        "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,192.0.0.0/24,DIRECT,no-resolve",
+        "IP-CIDR,198.51.100.0/24,DIRECT,no-resolve",
+        "IP-CIDR,203.0.113.0/24,DIRECT,no-resolve",
+        "MATCH,proxy"
+      ],
+      "secret": "test-secret-12345678",
+      "sniffer": {
+        "enable": true,
+        "override-destination": true,
+        "parse-pure-ip": true,
+        "sniff": {
+          "HTTP": {
+            "ports": [
+              "80",
+              "8080-8880"
+            ]
+          },
+          "QUIC": {
+            "ports": [
+              "443",
+              "8443"
+            ]
+          },
+          "TLS": {
+            "ports": [
+              "443",
+              "8443"
+            ]
+          }
+        }
+      },
+      "socks-port": 2080,
+      "tun": {
+        "auto-detect-interface": true,
+        "auto-route": true,
+        "dns-hijack": [
+          "any:53"
+        ],
+        "enable": true,
+        "stack": "gvisor"
+      }
+    }
+  },
+  "connectionMode": "tun",
+  "contextId": "test-network",
+  "core": "mihomo",
+  "dnsAddress": "198.18.0.2",
+  "httpPort": 2081,
+  "protocolVersion": 1,
+  "sessionId": "mihomo-tun",
+  "socksPort": 2080,
+  "systemProxy": false
+}

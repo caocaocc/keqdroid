@@ -1,0 +1,231 @@
+name: macOS reusable component
+
+on:
+  workflow_call:
+    inputs:
+      component: {type: string, required: true}
+      arch: {type: string, required: true}
+      runner: {type: string, required: true}
+    outputs:
+      artifact-name:
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: ${{ inputs.component }}-${{ inputs.arch }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      COCOAPODS_DISABLE_STATS: 'true'
+      COMPONENT: ${{ inputs.component }}
+      ARCH: ${{ inputs.arch }}
+    outputs:
+      artifact-name: ${{ steps.identity.outputs.artifact-name }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p build/ci-logs build/ci-archives
+      - name: Identify exact component inputs
+        id: fingerprint
+        run: python3 tool/macos/ci_artifacts.py fingerprint --component "$COMPONENT" --arch "$ARCH" --github-output "$GITHUB_OUTPUT"
+      - id: identity
+        env:
+          PREFIX: ${{ steps.fingerprint.outputs.artifact-prefix }}
+        run: echo "artifact-name=$PREFIX-attempt${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+      - name: Restore exact compiled component cache
+        id: component-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/ci-archives/${{ inputs.component }}-${{ inputs.arch }}.tar*
+          key: macos-component-${{ inputs.component }}-${{ inputs.arch }}-${{ steps.fingerprint.outputs.fingerprint }}
+      - name: Verify cached component
+        id: cache-verify
+        if: steps.component-cache.outputs.cache-hit == 'true'
+        continue-on-error: true
+        run: >-
+          python3 tool/macos/ci_artifacts.py restore --component "$COMPONENT" --arch "$ARCH"
+          --archive "build/ci-archives/$COMPONENT-$ARCH.tar" --destination "build/ci-components/$COMPONENT"
+          2>&1 | tee build/ci-logs/restore.log
+      - name: Recover a matching trusted dev artifact
+        id: previous
+        if: steps.cache-verify.outcome != 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tool/macos/ci_artifacts.py fetch --component "$COMPONENT" --arch "$ARCH"
+          --destination "build/ci-components/$COMPONENT" --archive "build/ci-archives/$COMPONENT-$ARCH.tar" --github-output "$GITHUB_OUTPUT"
+          2>&1 | tee build/ci-logs/fetch.log
+      - name: Select build or reuse
+        id: source
+        env:
+          CACHE_VALID: ${{ steps.cache-verify.outcome }}
+          ARTIFACT_HIT: ${{ steps.previous.outputs.hit }}
+        run: |
+          if [[ "$CACHE_VALID" == success || "$ARTIFACT_HIT" == true ]]; then
+            echo 'build=false' >> "$GITHUB_OUTPUT"
+            echo 'Verified precompiled component; compilation skipped.' | tee build/ci-logs/source.log
+          else
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+            echo 'No reusable component; compiling exact inputs.' | tee build/ci-logs/source.log
+          fi
+      - name: Restore pinned Go toolchain shared by host architecture
+        id: toolchain-cache
+        if: steps.source.outputs.build == 'true' && inputs.component != 'helper' && inputs.component != 'app'
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/keqdroid-tools/toolchains
+          key: macos-go-toolchain-${{ inputs.arch }}-${{ hashFiles('tool/macos/core-manifest.json') }}
+          restore-keys: macos-go-toolchain-${{ inputs.arch }}-
+      - name: Restore source downloads and modules shared by core
+        id: module-cache
+        if: steps.source.outputs.build == 'true' && inputs.component != 'helper' && inputs.component != 'app'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /tmp/keqdroid-tools/downloads
+            /tmp/keqdroid-tools/go-modcache
+          key: macos-go-modules-${{ inputs.component }}-${{ hashFiles('tool/macos/core-manifest.json', 'tool/patches/**/go.mod', 'tool/patches/**/go.sum') }}
+          restore-keys: macos-go-modules-${{ inputs.component }}-
+      - name: Restore Go compilation intermediates
+        id: go-cache
+        if: steps.source.outputs.build == 'true' && inputs.component != 'helper' && inputs.component != 'app'
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/keqdroid-tools/go-cache
+          key: macos-go-compile-${{ inputs.arch }}-${{ inputs.component }}-${{ steps.fingerprint.outputs.fingerprint }}
+          restore-keys: macos-go-compile-${{ inputs.arch }}-${{ inputs.component }}-
+      - name: Restore native build intermediates
+        id: native-cache
+        if: steps.source.outputs.build == 'true' && (inputs.component == 'helper' || inputs.component == 'app')
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/macos-helper/${{ inputs.arch }}
+            build/macos-desktop/${{ inputs.arch }}
+            build/macos/Build/Intermediates.noindex
+            macos/Pods
+          key: macos-native-${{ inputs.arch }}-${{ inputs.component }}-${{ steps.fingerprint.outputs.fingerprint }}
+          restore-keys: macos-native-${{ inputs.arch }}-${{ inputs.component }}-
+      - name: Verify pinned Xcode
+        if: steps.source.outputs.build == 'true' && (inputs.component == 'helper' || inputs.component == 'app')
+        run: xcodebuild -version 2>&1 | tee build/ci-logs/xcode.log
+      - uses: subosito/flutter-action@v2
+        if: steps.source.outputs.build == 'true' && inputs.component == 'app'
+        with:
+          flutter-version: '3.44.4'
+          cache: true
+      - uses: ruby/setup-ruby@v1
+        if: steps.source.outputs.build == 'true' && inputs.component == 'app'
+        with:
+          ruby-version: '3.3'
+      - name: Install pinned CocoaPods
+        if: steps.source.outputs.build == 'true' && inputs.component == 'app'
+        run: |
+          gem install cocoapods -v 1.16.2 --no-document 2>&1 | tee build/ci-logs/cocoapods.log
+          mkdir -p build/ci-tools
+          cat > build/ci-tools/pod <<'SH'
+          #!/bin/bash
+          exec ruby -r rubygems -e 'load Gem.activate_bin_path("cocoapods", "pod", "1.16.2")' -- "$@"
+          SH
+          chmod 755 build/ci-tools/pod
+          echo "$GITHUB_WORKSPACE/build/ci-tools" >> "$GITHUB_PATH"
+      - name: Build and test the selected component
+        if: steps.source.outputs.build == 'true'
+        run: |
+          case "$COMPONENT" in
+            app) bash tool/macos/build_app.sh "$ARCH" "build/ci-components/$COMPONENT" ;;
+            helper) bash tool/macos/build_helper.sh "$ARCH" "build/ci-components/$COMPONENT" ;;
+            *)
+              bash tool/build_macos_cores.sh --core "$COMPONENT" --arch "$ARCH" --output-dir "build/ci-core-work/$COMPONENT"
+              mkdir -p "build/ci-components/$COMPONENT"
+              cp "build/ci-core-work/$COMPONENT/$COMPONENT" "build/ci-components/$COMPONENT/"
+              cp "build/ci-core-work/$COMPONENT/$COMPONENT-provenance.json" "build/ci-components/$COMPONENT/"
+              ;;
+          esac 2>&1 | tee build/ci-logs/build.log
+      - name: Seal the reusable component archive
+        if: steps.source.outputs.build == 'true'
+        run: >-
+          python3 tool/macos/ci_artifacts.py pack --component "$COMPONENT" --arch "$ARCH"
+          --source "build/ci-components/$COMPONENT" --archive "build/ci-archives/$COMPONENT-$ARCH.tar"
+          --github-output "$GITHUB_OUTPUT" 2>&1 | tee build/ci-logs/archive.log
+      # Persist the result before optional cache maintenance can fail.
+      - name: Save successful component immediately
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.identity.outputs.artifact-name }}
+          path: build/ci-archives/${{ inputs.component }}-${{ inputs.arch }}.tar*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Cache the verified component
+        if: steps.component-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: build/ci-archives/${{ inputs.component }}-${{ inputs.arch }}.tar*
+          key: ${{ steps.component-cache.outputs.cache-primary-key }}
+      - name: Limit Go intermediate cache to 512 MiB
+        if: always() && steps.go-cache.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = sorted((p for p in Path('/tmp/keqdroid-tools/go-cache').rglob('*') if p.is_file()), key=lambda p: p.stat().st_mtime)
+          total = sum(p.stat().st_size for p in files)
+          for path in files:
+              if total <= 512 * 1024 * 1024:
+                  break
+              total -= path.stat().st_size
+              path.unlink()
+          PY
+      - name: Save pinned Go toolchain
+        if: always() && steps.toolchain-cache.outcome == 'success' && steps.toolchain-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/keqdroid-tools/toolchains
+          key: ${{ steps.toolchain-cache.outputs.cache-primary-key }}
+      - name: Save source and module downloads even after compilation failure
+        if: always() && steps.module-cache.outcome == 'success' && steps.module-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/keqdroid-tools/downloads
+            /tmp/keqdroid-tools/go-modcache
+          key: ${{ steps.module-cache.outputs.cache-primary-key }}
+      - name: Save Go intermediates even after compilation failure
+        if: always() && steps.go-cache.outcome == 'success' && steps.go-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/keqdroid-tools/go-cache
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+      - name: Save native intermediates even after compilation failure
+        if: always() && steps.native-cache.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/macos-helper/${{ inputs.arch }}
+            build/macos-desktop/${{ inputs.arch }}
+            build/macos/Build/Intermediates.noindex
+            macos/Pods
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - name: Preserve diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ inputs.component }}-${{ inputs.arch }}-attempt${{ github.run_attempt }}
+          path: |
+            build/ci-logs/
+            build/ci-core-work/**/logs/
+          retention-days: 30

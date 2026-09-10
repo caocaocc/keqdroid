@@ -30,6 +30,7 @@ class PingResult {
   final int? latencyMs;
   final bool success;
   final String error;
+
   /// метод, которым получили результат (нужен для порогов цвета)
   final PingType pingType;
 
@@ -152,17 +153,24 @@ class PingService {
       if (Platform.isWindows && safeHost) {
         // chcp 65001 → ping выводит UTF-8 (иначе на локализованной Windows вывод
         // в OEM-кодировке бьётся и единица "мс" не парсится → ложный 0 мс).
-        result = await Process.run(
-          'cmd',
-          ['/c', 'chcp 65001>nul & ping -n 1 -w $timeoutMs $host'],
-          stdoutEncoding: utf8,
-        ).timeout(Duration(seconds: timeoutSeconds + 3));
+        result = await Process.run('cmd', [
+          '/c',
+          'chcp 65001>nul & ping -n 1 -w $timeoutMs $host',
+        ], stdoutEncoding: utf8).timeout(Duration(seconds: timeoutSeconds + 3));
       } else {
         final args = Platform.isWindows
             ? ['-n', '1', '-w', '$timeoutMs', host]
-            : ['-c', '1', '-W', '$timeoutSeconds', host];
-        result = await Process.run('ping', args)
-            .timeout(Duration(seconds: timeoutSeconds + 3));
+            : [
+                '-c',
+                '1',
+                '-W',
+                '${Platform.isMacOS ? timeoutMs : timeoutSeconds}',
+                host,
+              ];
+        result = await Process.run(
+          'ping',
+          args,
+        ).timeout(Duration(seconds: timeoutSeconds + 3));
       }
       sw.stop();
       final out = '${result.stdout}\n${result.stderr}';
@@ -174,7 +182,10 @@ class PingService {
         caseSensitive: false,
       ).firstMatch(out);
       // TTL в выводе латиницей во всех локалях; либо распарсенное время = был ответ.
-      final hasTtl = RegExp(r'ttl[=:]\s*\d+', caseSensitive: false).hasMatch(out);
+      final hasTtl = RegExp(
+        r'ttl[=:]\s*\d+',
+        caseSensitive: false,
+      ).hasMatch(out);
 
       if (timeMatch != null || hasTtl) {
         final int ms;
@@ -227,7 +238,10 @@ class PingService {
     final udp = await _pingUdp(server, timeoutSeconds: timeoutSeconds);
     if (udp.success) return udp;
 
-    final tcp = await _pingTcpReachability(server, timeoutSeconds: timeoutSeconds);
+    final tcp = await _pingTcpReachability(
+      server,
+      timeoutSeconds: timeoutSeconds,
+    );
     if (tcp.success) {
       return PingResult(
         serverId: server.id,
@@ -322,8 +336,9 @@ class PingService {
 
     RawDatagramSocket? socket;
     try {
-      final targets = await InternetAddress.lookup(address)
-          .timeout(Duration(seconds: timeoutSeconds));
+      final targets = await InternetAddress.lookup(
+        address,
+      ).timeout(Duration(seconds: timeoutSeconds));
       if (targets.isEmpty) {
         return PingResult(
           serverId: server.id,
@@ -509,21 +524,20 @@ class PingService {
     AppSettings settings, {
     required int socksPort,
     String? resolvedServerIp,
-  }) =>
-      core == VpnBackend.mihomo
-          ? MihomoConfigGen.generatePingConfig(
-              serverConfig,
-              settings,
-              socksPort: socksPort,
-              httpInbound: !Platform.isAndroid,
-            )
-          : ConfigGeneratorV2.generatePingConfig(
-              serverConfig,
-              settings,
-              socksPort: socksPort,
-              resolvedServerIp: resolvedServerIp,
-              httpInbound: !Platform.isAndroid,
-            );
+  }) => core == VpnBackend.mihomo
+      ? MihomoConfigGen.generatePingConfig(
+          serverConfig,
+          settings,
+          socksPort: socksPort,
+          httpInbound: !Platform.isAndroid,
+        )
+      : ConfigGeneratorV2.generatePingConfig(
+          serverConfig,
+          settings,
+          socksPort: socksPort,
+          resolvedServerIp: resolvedServerIp,
+          httpInbound: !Platform.isAndroid,
+        );
 
   static Future<PingResult> _pingUrlSingle(
     ServerItem server,
@@ -670,8 +684,9 @@ class PingService {
     await Future.wait(
       servers.map((s) async {
         try {
-          final addresses = await InternetAddress.lookup(s.address)
-              .timeout(const Duration(seconds: 3));
+          final addresses = await InternetAddress.lookup(
+            s.address,
+          ).timeout(const Duration(seconds: 3));
           if (addresses.isNotEmpty) out[s.id] = addresses.first.address;
         } catch (_) {}
       }),
@@ -724,6 +739,7 @@ class PingService {
     PingType base, {
     required bool vpnConnected,
     required bool tunMode,
+
     /// платформа, где туннель всегда TUN; подменяется только в тестах
     bool? platformAlwaysTun,
   }) {

@@ -1047,5 +1047,11 @@
   "cardImageRejectAspect": "Das Bild ist zu hoch für eine Karte. Nimm ein breites — etwa 3:2 bis 5:1.",
   "cardImageRejectSmall": "Bild zu klein: mindestens {width} px breit.",
   "cardImageRejectLarge": "Bild zu groß: höchstens {width} px breit.",
-  "cardImageRejectUnreadable": "Bild konnte nicht gelesen werden."
+  "cardImageRejectUnreadable": "Bild konnte nicht gelesen werden.",
+  "macosSplitProcessHint": "Regeln verwenden Programmpfade einschließlich interner Hilfsprozesse. Gemeinsame Systemdienste lassen sich nicht immer einer App zuordnen.",
+  "macosAppNeedsMatching": "App nicht in der Liste gefunden. Nach Verschieben oder Entfernen erneut auswählen.",
+  "macosNetworkServiceTitle": "Netzwerkdienst",
+  "macosNetworkServiceHint": "Dieses Konto darf Systemproxy und TUN verwalten. macOS fragt einmal pro installierter Version nach Administratorrechten.",
+  "macosNetworkServiceMissing": "Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.",
+  "macosAuthorizeAccount": "Dieses Konto autorisieren"
 }

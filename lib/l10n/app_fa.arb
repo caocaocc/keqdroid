@@ -758,5 +758,11 @@
   "cardImageRejectAspect": "این تصویر برای کارت بلند است. تصویری عریض انتخاب کن — تقریباً از ۳:۲ تا ۵:۱.",
   "cardImageRejectSmall": "تصویر کوچک است: حداقل {width} پیکسل عرض.",
   "cardImageRejectLarge": "تصویر بزرگ است: حداکثر {width} پیکسل عرض.",
-  "cardImageRejectUnreadable": "خواندن این تصویر ممکن نشد."
+  "cardImageRejectUnreadable": "خواندن این تصویر ممکن نشد.",
+  "macosSplitProcessHint": "قواعد مسیر فایل اجرایی برنامه و پردازش‌های کمکی آن را تطبیق می‌دهند. سرویس‌های مشترک سیستم همیشه به یک برنامه قابل انتساب نیستند.",
+  "macosAppNeedsMatching": "برنامه در فهرست یافت نشد. اگر جابه‌جا یا حذف شده است، دوباره انتخاب کنید.",
+  "macosNetworkServiceTitle": "سرویس شبکه",
+  "macosNetworkServiceHint": "به این حساب اجازهٔ مدیریت پراکسی سیستم و TUN بدهید. macOS برای هر نسخهٔ نصب‌شده یک بار مجوز مدیر می‌خواهد.",
+  "macosNetworkServiceMissing": "برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.",
+  "macosAuthorizeAccount": "اجازه به این حساب"
 }

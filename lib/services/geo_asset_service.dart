@@ -4,8 +4,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/app_logger.dart';
 import '../models/app_settings.dart';
-import '../tunnel/linux_core_paths.dart';
-import '../tunnel/windows_core_paths.dart';
+import '../tunnel/desktop_core_paths.dart';
 import '../utils/geo_asset_index.dart';
 import '../utils/geo_rule_sanitizer.dart';
 
@@ -53,8 +52,7 @@ class GeoAssetService {
       // указывает ядру XRAY_LOCATION_ASSET; path_provider отдаёт этот каталог.
       return (await getApplicationSupportDirectory()).path;
     }
-    if (Platform.isWindows) return WindowsCorePaths.geoAssetDir();
-    if (Platform.isLinux) return LinuxCorePaths.geoAssetDir();
+    if (DesktopCorePaths.supported) return DesktopCorePaths.geoAssetDir();
     return null;
   }
 
@@ -67,14 +65,15 @@ class GeoAssetService {
     if (result.dropped.isNotEmpty) {
       // Отдельная подсказка про урезанную базу: «правило исчезло» и «страны в
       // базе нет, её надо догрузить» — разные диагнозы, а выглядят одинаково.
-      final trimmedBase = !assets.hasFullGeoip &&
+      final trimmedBase =
+          !assets.hasFullGeoip &&
           result.dropped.any((t) => t.toLowerCase().startsWith('geoip:'));
       AppLogger.instance.warn(
         'Routing rules: dropped ${result.dropped.length} geo entries missing '
         'from the bundled geoip/geosite databases (they would abort the core '
         'at config load): ${result.dropped.join(', ')}'
         '${trimmedBase ? ' — the bundled country database is the trimmed one; '
-            'download the full base in Settings -> About -> Internals' : ''}',
+                  'download the full base in Settings -> About -> Internals' : ''}',
       );
     }
     return result.settings;

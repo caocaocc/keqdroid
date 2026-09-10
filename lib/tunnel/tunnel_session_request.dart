@@ -20,6 +20,7 @@ class TunnelSessionRequest {
   final String? serverName;
   final bool systemProxy;
   final bool killSwitch;
+  final bool blockIpv6Leak;
 
   /// Ядро: `chain` (xray → sing-box) или `keqrnel` (единое ядро). Дефолт `chain`.
   final String coreEngine;
@@ -44,6 +45,7 @@ class TunnelSessionRequest {
     this.serverName,
     this.systemProxy = true,
     this.killSwitch = false,
+    this.blockIpv6Leak = false,
     this.coreEngine = 'chain',
     this.debugMode = false,
   });

@@ -2474,4 +2474,22 @@ class AppLocalizationsFa extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'خواندن این تصویر ممکن نشد.';
+
+  @override
+  String get macosSplitProcessHint => 'قواعد مسیر فایل اجرایی برنامه و پردازش‌های کمکی آن را تطبیق می‌دهند. سرویس‌های مشترک سیستم همیشه به یک برنامه قابل انتساب نیستند.';
+
+  @override
+  String get macosAppNeedsMatching => 'برنامه در فهرست یافت نشد. اگر جابه‌جا یا حذف شده است، دوباره انتخاب کنید.';
+
+  @override
+  String get macosNetworkServiceTitle => 'سرویس شبکه';
+
+  @override
+  String get macosNetworkServiceHint => 'به این حساب اجازهٔ مدیریت پراکسی سیستم و TUN بدهید. macOS برای هر نسخهٔ نصب‌شده یک بار مجوز مدیر می‌خواهد.';
+
+  @override
+  String get macosNetworkServiceMissing => 'برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.';
+
+  @override
+  String get macosAuthorizeAccount => 'اجازه به این حساب';
 }

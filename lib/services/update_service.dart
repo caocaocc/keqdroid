@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -60,8 +61,17 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const _owner = 'Lemonochka';
+  static String get _owner => releaseOwnerForPlatform(Platform.operatingSystem);
   static const _repo = 'keqdroid';
+
+  static String releaseOwnerForPlatform(String platform) =>
+      platform == 'macos' ? 'caocaocc' : 'Lemonochka';
+
+  static String? get _macOSArchitecture => switch (Abi.current()) {
+    Abi.macosArm64 => 'arm64',
+    Abi.macosX64 => 'x64',
+    _ => null,
+  };
 
   /// Единый semver-тег релиза: v0.1.0, v0.4.1 (Android + Windows в одном release).
   // Ведущая "v" опциональна: в репозитории есть теги обоих видов (`v0.5.1` и
@@ -118,8 +128,7 @@ class UpdateService {
   }) async {
     if (!force) {
       final last = _lastAutoCheckAt;
-      if (last != null &&
-          DateTime.now().difference(last) < _minAutoCheckGap) {
+      if (last != null && DateTime.now().difference(last) < _minAutoCheckGap) {
         return _cachedResultRespectingSkip();
       }
       // отмечаем до сети, чтобы параллельные ре-раны провайдера не прошли
@@ -305,17 +314,42 @@ class UpdateService {
   static Map<String, dynamic>? _findAssetForCurrentPlatform(List? assets) {
     if (Platform.isWindows) return _findWindowsAsset(assets);
     if (Platform.isLinux) return _findLinuxAsset(assets);
-    return _findApkAsset(assets);
+    if (Platform.isMacOS) return _findMacOSAsset(assets, _macOSArchitecture);
+    if (Platform.isAndroid) return _findApkAsset(assets);
+    return null;
   }
 
-  static String? findAssetNameForPlatform(List? assets, String platform) {
+  static String? findAssetNameForPlatform(
+    List? assets,
+    String platform, {
+    String? architecture,
+  }) {
     final asset = switch (platform) {
       'windows' => _findWindowsAsset(assets),
       'linux' => _findLinuxAsset(assets),
       'android' => _findApkAsset(assets),
+      'macos' => _findMacOSAsset(assets, architecture),
       _ => null,
     };
     return asset?['name']?.toString();
+  }
+
+  static Map<String, dynamic>? _findMacOSAsset(
+    List? assets,
+    String? architecture,
+  ) {
+    if (assets == null || !const {'arm64', 'x64'}.contains(architecture)) {
+      return null;
+    }
+    for (final asset in assets) {
+      if (asset is! Map<String, dynamic>) continue;
+      final name = (asset['name'] ?? '').toString().toLowerCase();
+      if (name.startsWith('keqdroid-') &&
+          name.endsWith('-macos-$architecture.dmg')) {
+        return asset;
+      }
+    }
+    return null;
   }
 
   static Map<String, dynamic>? _findWindowsAsset(List? assets) {
@@ -538,6 +572,19 @@ class UpdateService {
       } catch (_) {}
     }
 
+    if (Platform.isMacOS) {
+      if (ext != '.dmg') {
+        throw StateError('macOS updates require a DMG installer.');
+      }
+      await beforeRestart?.call();
+      final opened = await Process.run('/usr/bin/open', [file.path]);
+      if (opened.exitCode != 0) {
+        throw StateError(
+          'Could not open the macOS installer: ${opened.stderr}',
+        );
+      }
+      return false;
+    }
     await OpenFilex.open(file.path);
     return false;
   }
@@ -553,6 +600,7 @@ class UpdateService {
       '.msi',
       '.exe',
       '.apk',
+      '.dmg',
     ]) {
       if (path.endsWith(ext)) return ext;
     }

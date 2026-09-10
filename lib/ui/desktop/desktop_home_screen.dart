@@ -12,6 +12,7 @@ import '../../platform/vpn_native_bridge.dart';
 import '../../services/desktop_background_service.dart';
 import '../../services/hotkey_service.dart';
 import '../../services/linux_background_service.dart';
+import '../../services/macos_desktop_service.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/app_settings.dart';
@@ -64,6 +65,9 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
         if (mounted) unawaited(_maybeOfferTunRemember());
       });
     }
+    if (Platform.isMacOS) {
+      VpnNativeBridge.registerQuitHandler(_disconnectForQuit);
+    }
     VpnNativeBridge.registerAutostartHandler(
       () => _maybeAutostartConnect(force: true),
     );
@@ -108,9 +112,9 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
     final labels = failedActionIds
         .map((id) => HotkeyBinding.fromToken(hotkeys[id])?.label ?? id)
         .join(', ');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(l10n.hotkeyConflictTaken(labels))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.hotkeyConflictTaken(labels))));
   }
 
   /// Срабатывание хоткея: Windows — из натива (даже при скрытом окне),
@@ -130,6 +134,8 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
             await WindowsDesktopService.toggleMainWindow();
           } else if (Platform.isLinux) {
             await LinuxBackgroundService.instance.toggleWindowVisibility();
+          } else if (Platform.isMacOS) {
+            await MacOSDesktopService.toggleWindow();
           }
       }
     } catch (e, st) {
@@ -172,7 +178,12 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
       }
     }
     if (!mounted) return;
-    await applyDesktopConnectionMode(context, DesktopModeDeps.of(ref), settings, next);
+    await applyDesktopConnectionMode(
+      context,
+      DesktopModeDeps.of(ref),
+      settings,
+      next,
+    );
   }
 
   /// Переключиться на сервер с наименьшим пингом (speed-замеры не считаются).
@@ -205,29 +216,38 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     if (l10n == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message(l10n))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message(l10n))));
   }
 
   Future<void> _runWindowsStartupTasks() async {
-    if (!Platform.isWindows || _startupTasksDone) return;
+    if ((!Platform.isWindows && !Platform.isMacOS) || _startupTasksDone) return;
     _startupTasksDone = true;
 
     final storage = ref.read(storageProvider);
     final settings = await storage.getSettings();
-    await WindowsDesktopService.applySettings(settings);
+    if (Platform.isMacOS) {
+      await MacOSDesktopService.applySettings(settings);
+    } else {
+      await WindowsDesktopService.applySettings(settings);
+    }
 
     await _maybeAutostartConnect();
   }
 
   Future<void> _maybeAutostartConnect({bool force = false}) async {
-    if (!Platform.isWindows || _autostartConnectInFlight) return;
+    if ((!Platform.isWindows && !Platform.isMacOS) ||
+        _autostartConnectInFlight) {
+      return;
+    }
 
     _autostartConnectInFlight = true;
     try {
       if (!force) {
-        final isAutostart = await WindowsDesktopService.isAutostartLaunch();
+        final isAutostart = Platform.isMacOS
+            ? await MacOSDesktopService.isAutostartLaunch()
+            : await WindowsDesktopService.isAutostartLaunch();
         if (!isAutostart) return;
       }
 
@@ -252,9 +272,7 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
         return;
       }
 
-      AppLogger.instance.info(
-        'Autostart: connecting to ${active.displayName}',
-      );
+      AppLogger.instance.info('Autostart: connecting to ${active.displayName}');
       await ref
           .read(vpnStateProvider.notifier)
           .connect(autostartTunFallback: true);
@@ -276,6 +294,14 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
       await ref.read(vpnStateProvider.notifier).disconnect();
     } catch (e, st) {
       AppLogger.instance.warn('Exit cleanup failed', error: e, stackTrace: st);
+      if (Platform.isMacOS) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
+        }
+        rethrow;
+      }
     }
   }
 
@@ -297,12 +323,18 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
         backgroundColor: AppTheme.card(ctx),
         title: Row(
           children: [
-            Icon(Icons.lock_open_rounded, color: AppTheme.accent(ctx), size: 26),
+            Icon(
+              Icons.lock_open_rounded,
+              color: AppTheme.accent(ctx),
+              size: 26,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 l10n.tunRememberTitle,
-                style: Theme.of(ctx).textTheme.titleLarge?.copyWith(color: AppTheme.text(ctx)),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleLarge?.copyWith(color: AppTheme.text(ctx)),
               ),
             ),
           ],
@@ -318,7 +350,10 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
             const SizedBox(height: 12),
             Text(
               l10n.tunRememberWarning,
-              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppTheme.textLight(ctx), height: 1.4),
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                color: AppTheme.textLight(ctx),
+                height: 1.4,
+              ),
             ),
           ],
         ),
@@ -378,6 +413,7 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
     HardwareKeyboard.instance.removeHandler(_onGlobalKey);
     unawaited(_tunRememberSub?.cancel());
     if (Platform.isLinux) LinuxBackgroundService.instance.onQuit = null;
+    if (Platform.isMacOS) VpnNativeBridge.registerQuitHandler(null);
     HotkeyService.onPressed = null;
     VpnNativeBridge.registerAutostartHandler(null);
     VpnNativeBridge.registerWindowVisibilityHandler(null);
@@ -418,12 +454,12 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
       if (nextHotkeys == null) return;
       if (prevHotkeys != null && mapEquals(prevHotkeys, nextHotkeys)) return;
       unawaited(
-        HotkeyService.apply(HotkeyService.parseBindings(nextHotkeys)).then(
-          (failed) {
-            if (failed.isEmpty || !mounted) return;
-            _showHotkeyConflictSnack(failed, nextHotkeys);
-          },
-        ),
+        HotkeyService.apply(HotkeyService.parseBindings(nextHotkeys)).then((
+          failed,
+        ) {
+          if (failed.isEmpty || !mounted) return;
+          _showHotkeyConflictSnack(failed, nextHotkeys);
+        }),
       );
     });
 
@@ -462,7 +498,9 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 16),
-                  if (Platform.isWindows || Platform.isLinux) ...[
+                  if (Platform.isWindows ||
+                      Platform.isLinux ||
+                      Platform.isMacOS) ...[
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: MediaQuery.sizeOf(context).width >= 900
@@ -518,7 +556,8 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
   /// and so does anything opened on top of the tab — see the checks below.
   bool _onGlobalKey(KeyEvent event) {
     if (event is! KeyDownEvent || !mounted) return false;
-    final mod = HardwareKeyboard.instance.isControlPressed ||
+    final mod =
+        HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
     if (!mod || event.physicalKey != PhysicalKeyboardKey.keyV) return false;
     // Что-то открыто поверх вкладки — Ctrl+V принадлежит ему, а не нам.
@@ -627,7 +666,11 @@ class _SidebarTileState extends State<_SidebarTile>
         final t = _ctrl.value;
         final tc = t.clamp(0.0, 1.0);
 
-        final bg = Color.lerp(Colors.transparent, scheme.secondaryContainer, tc)!;
+        final bg = Color.lerp(
+          Colors.transparent,
+          scheme.secondaryContainer,
+          tc,
+        )!;
         final fg = Color.lerp(
           scheme.onSurfaceVariant,
           scheme.onSecondaryContainer,
@@ -647,10 +690,7 @@ class _SidebarTileState extends State<_SidebarTile>
             onTap: widget.onTap,
             borderRadius: shape,
             child: widget.compact
-                ? SizedBox(
-                    height: 48,
-                    child: Icon(widget.icon, color: fg),
-                  )
+                ? SizedBox(height: 48, child: Icon(widget.icon, color: fg))
                 : Padding(
                     padding: EdgeInsets.symmetric(
                       horizontal: 18,
@@ -667,7 +707,8 @@ class _SidebarTileState extends State<_SidebarTile>
                             style:
                                 (widget.selected
                                         ? textTheme.emphasized(
-                                            textTheme.labelLarge)
+                                            textTheme.labelLarge,
+                                          )
                                         : textTheme.labelLarge)
                                     ?.copyWith(color: fg),
                             overflow: TextOverflow.ellipsis,
@@ -705,8 +746,12 @@ class _ConnectionModeMenuButton extends ConsumerWidget {
         mode == ConnectionMode.tun ? Icons.vpn_lock_rounded : Icons.lan_rounded,
         size: 22,
       ),
-      onSelected: (next) =>
-          applyDesktopConnectionMode(context, DesktopModeDeps.of(ref), settings, next),
+      onSelected: (next) => applyDesktopConnectionMode(
+        context,
+        DesktopModeDeps.of(ref),
+        settings,
+        next,
+      ),
       itemBuilder: (context) => [
         CheckedPopupMenuItem(
           value: ConnectionMode.proxy,
@@ -759,8 +804,12 @@ class _ConnectionModeChip extends ConsumerWidget {
             ),
           ],
           selected: mode,
-          onChanged: (next) =>
-              applyDesktopConnectionMode(context, DesktopModeDeps.of(ref), settings, next),
+          onChanged: (next) => applyDesktopConnectionMode(
+            context,
+            DesktopModeDeps.of(ref),
+            settings,
+            next,
+          ),
         ),
       ],
     );

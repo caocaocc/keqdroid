@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'desktop_capabilities.dart';
 
 import '../services/desktop_background_service.dart';
 import '../services/windows_desktop_service.dart';
@@ -12,6 +13,5 @@ class PlatformBootstrap {
     }
   }
 
-  static bool get isDesktop =>
-      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  static bool get isDesktop => DesktopCapabilities.current.isDesktop;
 }

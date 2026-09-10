@@ -127,16 +127,19 @@ class SingBoxTunConfigGen {
     required String serverIpToExclude,
     required AppSettings settings,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     /// this app's own exe (e.g. keqdroid.exe). routed direct so our tcp/url ping
     /// sockets measure latency from the local pc, not through the active server.
     String appProcessName = '',
+    String appProcessPath = '',
     /// Целевая ОС. По умолчанию текущая — в бою иначе не бывает. Параметром она
     /// стала ради golden-тестов: три места ниже читают `Platform.isWindows`, и
     /// снятая на Windows фикстура падала на linux-раннере, ничего не сообщая о
     /// генераторе. Ср. [TunSettings.strictRouteEnabled], где платформа уже входит
     /// аргументом.
     bool? windows,
+    bool? macos,
     /// Есть ли у машины глобальный IPv6 (см. `utils/host_ipv6.dart`). Только
     /// вместе с [TunSettings.blockIpv6Leak] это включает захват IPv6: адрес на
     /// интерфейсе там, где IPv6 в системе выключен, — это не «лишняя строка в
@@ -144,6 +147,7 @@ class SingBoxTunConfigGen {
     bool hostHasIpv6 = false,
   }) {
     final isWindows = windows ?? Platform.isWindows;
+    final isMacOS = macos ?? (windows == null && Platform.isMacOS);
     // Разделители — и запятая, и перевод строки: UI обещает «по одному в
     // строке или через запятую», сплит только по ',' склеивал построчные
     // записи в один несрабатывающий токен.
@@ -371,6 +375,12 @@ class SingBoxTunConfigGen {
       // сервера. Пользовательские правила сплит-туннеля так и делают.
       ...processNameMatchVariants(appProcessName.trim()),
     }.toList();
+    if (appProcessPath.isNotEmpty) {
+      rules.add({
+        'process_path': [appProcessPath],
+        'outbound': 'direct',
+      });
+    }
     rules.add({
       'process_name': bypassProcessNames,
       'outbound': 'direct',
@@ -411,6 +421,16 @@ class SingBoxTunConfigGen {
         case AppRoutingMode.allProxy:
           break;
       }
+    }
+
+    if (managedProcessPaths.isNotEmpty &&
+        routingMode != AppRoutingMode.allProxy) {
+      rules.add({
+        'process_path': managedProcessPaths,
+        'outbound': routingMode == AppRoutingMode.onlySelected
+            ? 'proxy'
+            : 'direct',
+      });
     }
 
     if (blockedDomains.isNotEmpty) {
@@ -582,7 +602,7 @@ class SingBoxTunConfigGen {
       'auto_route': tun.autoRoute,
       // auto: on везде, кроме Windows — там strict_route breaks routing when
       // another vpn (e.g. tailscale) is active.
-      'strict_route': tun.strictRouteEnabled(windows: isWindows),
+      if (!isMacOS) 'strict_route': tun.strictRouteEnabled(windows: isWindows),
       'stack': tun.stack,
       // full-cone NAT считает только gvisor-netstack (в mixed он держит UDP)
       if (tun.endpointIndependentNat && tun.stack != TunSettings.stackSystem)
@@ -598,7 +618,7 @@ class SingBoxTunConfigGen {
     // OpenAdapter(имя) — мы молча забираем чужой адаптер и настраиваем на нём
     // свои адреса и маршруты. Отсюда и «TUN запустился, ошибок нет, трафика
     // нет», и падения через раз на машинах, где стоит второй такой клиент.
-    tunInbound['interface_name'] = kTunInterfaceName;
+    if (!isMacOS) tunInbound['interface_name'] = kTunInterfaceName;
 
     final map = <String, dynamic>{
       'log': {

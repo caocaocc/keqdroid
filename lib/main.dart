@@ -20,6 +20,7 @@ import 'package:keqdroid/services/vpn_engine.dart';
 import 'package:keqdroid/screens/subscriptions_tab.dart';
 import 'package:keqdroid/screens/settings_tab.dart';
 import 'package:keqdroid/services/linux_background_service.dart';
+import 'package:keqdroid/services/macos_desktop_service.dart';
 import 'package:keqdroid/services/storage_service.dart';
 import 'package:keqdroid/services/update_service.dart';
 import 'package:keqdroid/tunnel/linux_tunnel_backend.dart';
@@ -29,85 +30,93 @@ import 'package:keqdroid/shared/ui/update_dialog.dart';
 import 'package:keqdroid/ui/desktop/desktop_home_screen.dart';
 
 Future<void> main() async {
-  await runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
+  await runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
 
-    var crashlyticsReady = false;
-    if (Platform.isAndroid) {
-      try {
-        await Firebase.initializeApp();
-        crashlyticsReady = true;
-      } catch (e, st) {
-        AppLogger.instance.warn(
-          'Firebase is not configured. Crash reporting is disabled.',
-          error: e,
-          stackTrace: st,
-        );
-      }
-      await BackgroundService.init();
-      await BackgroundService.registerPeriodicTask();
-      await NotificationService.init();
-    } else if (Platform.isWindows) {
-      await PlatformBootstrap.initialize();
-    } else if (Platform.isLinux || Platform.isMacOS) {
-      await DesktopBackgroundService.init();
-      if (Platform.isLinux) {
-        // Single instance: a second launch just restores the running window.
-        final primary =
-            await LinuxBackgroundService.instance.ensureSingleInstance();
-        if (!primary) {
-          exit(0);
+      var crashlyticsReady = false;
+      if (Platform.isAndroid) {
+        try {
+          await Firebase.initializeApp();
+          crashlyticsReady = true;
+        } catch (e, st) {
+          AppLogger.instance.warn(
+            'Firebase is not configured. Crash reporting is disabled.',
+            error: e,
+            stackTrace: st,
+          );
         }
-        // Recover from an unclean previous exit: drop any stale system/Firefox
-        // proxy so the desktop isn't stuck routing to a dead local proxy.
-        await LinuxTunnelBackend.cleanupStaleState();
-        // Close-to-tray + background; the tunnel keeps running when hidden.
-        await LinuxBackgroundService.instance.initWindowAndTray();
+        await BackgroundService.init();
+        await BackgroundService.registerPeriodicTask();
+        await NotificationService.init();
+      } else if (Platform.isWindows) {
+        await PlatformBootstrap.initialize();
+      } else if (Platform.isLinux || Platform.isMacOS) {
+        await DesktopBackgroundService.init();
+        if (Platform.isMacOS) await MacOSDesktopService.initialize();
+        if (Platform.isLinux) {
+          // Single instance: a second launch just restores the running window.
+          final primary = await LinuxBackgroundService.instance
+              .ensureSingleInstance();
+          if (!primary) {
+            exit(0);
+          }
+          // Recover from an unclean previous exit: drop any stale system/Firefox
+          // proxy so the desktop isn't stuck routing to a dead local proxy.
+          await LinuxTunnelBackend.cleanupStaleState();
+          // Close-to-tray + background; the tunnel keeps running when hidden.
+          await LinuxBackgroundService.instance.initWindowAndTray();
+        }
       }
-    }
 
-    AppLogger.instance.setCrashlyticsEnabled(crashlyticsReady && !kDebugMode);
-    if (crashlyticsReady) {
-      FlutterError.onError = (details) {
-        unawaited(AppLogger.instance.recordError(
-          details.exception,
-          details.stack ?? StackTrace.current,
-          reason: 'Flutter framework error',
-        ));
-      };
-      PlatformDispatcher.instance.onError = (error, stack) {
-        unawaited(AppLogger.instance.recordError(
-          error,
-          stack,
-          reason: 'Platform dispatcher error',
-        ));
-        return true;
-      };
-    }
+      AppLogger.instance.setCrashlyticsEnabled(crashlyticsReady && !kDebugMode);
+      if (crashlyticsReady) {
+        FlutterError.onError = (details) {
+          unawaited(
+            AppLogger.instance.recordError(
+              details.exception,
+              details.stack ?? StackTrace.current,
+              reason: 'Flutter framework error',
+            ),
+          );
+        };
+        PlatformDispatcher.instance.onError = (error, stack) {
+          unawaited(
+            AppLogger.instance.recordError(
+              error,
+              stack,
+              reason: 'Platform dispatcher error',
+            ),
+          );
+          return true;
+        };
+      }
 
-    final storage = await StorageService.init();
-    // До первого кадра: список подписок рисует свои картинки синхронно, и без
-    // известного каталога выбранная картинка не показалась бы вовсе.
-    await CardImageService.warmUp();
+      final storage = await StorageService.init();
+      // До первого кадра: список подписок рисует свои картинки синхронно, и без
+      // известного каталога выбранная картинка не показалась бы вовсе.
+      await CardImageService.warmUp();
 
-    final home = Platform.isWindows || Platform.isLinux
-        ? const DesktopHomeScreen()
-        : const VpnHomeScreen();
+      final home = PlatformBootstrap.isDesktop
+          ? const DesktopHomeScreen()
+          : const VpnHomeScreen();
 
-    runApp(
-      ProviderScope(
-        overrides: [storageProvider.overrideWithValue(storage)],
-        child: KeqdisApp(home: home),
-      ),
-    );
-  }, (error, stack) async {
-    await AppLogger.instance.recordError(
-      error,
-      stack,
-      reason: 'runZonedGuarded unhandled error',
-      fatal: true,
-    );
-  });
+      runApp(
+        ProviderScope(
+          overrides: [storageProvider.overrideWithValue(storage)],
+          child: KeqdisApp(home: home),
+        ),
+      );
+    },
+    (error, stack) async {
+      await AppLogger.instance.recordError(
+        error,
+        stack,
+        reason: 'runZonedGuarded unhandled error',
+        fatal: true,
+      );
+    },
+  );
 }
 
 class VpnHomeScreen extends ConsumerStatefulWidget {
@@ -179,7 +188,9 @@ class _VpnHomeScreenState extends ConsumerState<VpnHomeScreen> {
     if ((index - _navIndex).abs() > 1) {
       _pageCtrl.jumpToPage(index);
       _lastServersVisible = index == 0;
-      ref.read(homeTabPageProvider.notifier).set(_lastServersVisible ? 0.0 : 1.0);
+      ref
+          .read(homeTabPageProvider.notifier)
+          .set(_lastServersVisible ? 0.0 : 1.0);
       setState(() => _navIndex = index);
       return;
     }
@@ -204,9 +215,7 @@ class _VpnHomeScreenState extends ConsumerState<VpnHomeScreen> {
     });
 
     final isConnected = ref.watch(
-      vpnStateProvider.select(
-        (a) => a.value?.status == VpnStatus.connected,
-      ),
+      vpnStateProvider.select((a) => a.value?.status == VpnStatus.connected),
     );
     return Scaffold(
       backgroundColor: AppTheme.bg(context),

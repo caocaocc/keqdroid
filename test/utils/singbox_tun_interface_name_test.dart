@@ -21,6 +21,7 @@ void main() {
         socksPassword: 'p',
         serverIpToExclude: '203.0.113.10',
         settings: const AppSettings(),
+        windows: true,
       ),
     ) as Map<String, dynamic>;
 

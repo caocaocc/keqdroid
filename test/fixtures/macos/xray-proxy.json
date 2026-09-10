@@ -1,0 +1,211 @@
+{
+  "apiPort": 23000,
+  "apiSecret": "test-secret-12345678",
+  "blockIpv6Leak": false,
+  "configurations": {
+    "keqrnel": {
+      "experimental": {
+        "clash_api": {
+          "external_controller": "127.0.0.1:23000",
+          "secret": "test-secret-12345678"
+        }
+      },
+      "inbounds": [
+        {
+          "listen": "127.0.0.1",
+          "listen_port": 2080,
+          "tag": "socks-in",
+          "type": "socks"
+        },
+        {
+          "listen": "127.0.0.1",
+          "listen_port": 2081,
+          "tag": "http-in",
+          "type": "http"
+        }
+      ],
+      "log": {
+        "level": "warn"
+      },
+      "outbounds": [
+        {
+          "tag": "proxy",
+          "type": "xray",
+          "xray": {
+            "dns": {
+              "queryStrategy": "UseIPv4",
+              "servers": [
+                {
+                  "address": "https+local://1.1.1.1/dns-query",
+                  "domains": [
+                    "full:node.example.com"
+                  ],
+                  "serveStale": true,
+                  "skipFallback": true,
+                  "timeoutMs": 2500
+                },
+                {
+                  "address": "localhost",
+                  "domains": [
+                    "full:node.example.com"
+                  ],
+                  "finalQuery": true,
+                  "serveStale": true,
+                  "skipFallback": true,
+                  "timeoutMs": 2500
+                },
+                {
+                  "address": "localhost",
+                  "domains": [
+                    "regexp:.*\\.ru$",
+                    "domain:yandex.ru",
+                    "domain:vk.com"
+                  ],
+                  "serveStale": true,
+                  "skipFallback": true,
+                  "timeoutMs": 2500
+                },
+                {
+                  "address": "https://1.1.1.1/dns-query",
+                  "serveStale": true,
+                  "timeoutMs": 2500
+                },
+                {
+                  "address": "https://8.8.8.8/dns-query",
+                  "serveStale": true,
+                  "timeoutMs": 2500
+                },
+                {
+                  "address": "localhost",
+                  "serveStale": true,
+                  "timeoutMs": 2500
+                }
+              ]
+            },
+            "log": {
+              "loglevel": "warning"
+            },
+            "outbounds": [
+              {
+                "protocol": "trojan",
+                "settings": {
+                  "address": "node.example.com",
+                  "level": 0,
+                  "password": "test-password",
+                  "port": 443
+                },
+                "streamSettings": {
+                  "network": "tcp",
+                  "security": "tls",
+                  "sockopt": {
+                    "domainStrategy": "UseIPv4"
+                  },
+                  "tlsSettings": {
+                    "serverName": "node.example.com"
+                  }
+                },
+                "tag": "proxy"
+              },
+              {
+                "protocol": "freedom",
+                "tag": "direct"
+              },
+              {
+                "protocol": "blackhole",
+                "tag": "block"
+              },
+              {
+                "protocol": "dns",
+                "settings": {
+                  "nonIPQuery": "reject"
+                },
+                "tag": "dns-out"
+              }
+            ],
+            "routing": {
+              "domainStrategy": "AsIs",
+              "rules": [
+                {
+                  "ip": [
+                    "169.254.0.0/16",
+                    "224.0.0.0/4",
+                    "255.255.255.255/32"
+                  ],
+                  "outboundTag": "block",
+                  "ruleTag": "block-special",
+                  "type": "field"
+                },
+                {
+                  "network": "tcp,udp",
+                  "outboundTag": "dns-out",
+                  "port": "53",
+                  "ruleTag": "dns-out",
+                  "type": "field"
+                },
+                {
+                  "domain": [
+                    "full:node.example.com"
+                  ],
+                  "outboundTag": "direct",
+                  "ruleTag": "server-domain",
+                  "type": "field"
+                },
+                {
+                  "domain": [
+                    "regexp:.*\\.ru$",
+                    "domain:yandex.ru",
+                    "domain:vk.com"
+                  ],
+                  "outboundTag": "direct",
+                  "ruleTag": "direct-domains",
+                  "type": "field"
+                },
+                {
+                  "ip": [
+                    "0.0.0.0/8",
+                    "10.0.0.0/8",
+                    "100.64.0.0/10",
+                    "127.0.0.0/8",
+                    "169.254.0.0/16",
+                    "172.16.0.0/12",
+                    "172.19.0.0/30",
+                    "192.0.0.0/24",
+                    "192.168.0.0/16",
+                    "198.51.100.0/24",
+                    "203.0.113.0/24",
+                    "::1/128",
+                    "fc00::/7",
+                    "fe80::/10"
+                  ],
+                  "outboundTag": "direct",
+                  "ruleTag": "direct-private",
+                  "type": "field"
+                },
+                {
+                  "network": "tcp,udp",
+                  "outboundTag": "proxy",
+                  "ruleTag": "final",
+                  "type": "field"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "tag": "direct",
+          "type": "direct"
+        }
+      ],
+      "route": {
+        "final": "proxy"
+      }
+    }
+  },
+  "connectionMode": "proxy",
+  "core": "keqrnel",
+  "httpPort": 2081,
+  "protocolVersion": 1,
+  "sessionId": "xray-proxy",
+  "socksPort": 2080,
+  "systemProxy": true
+}
