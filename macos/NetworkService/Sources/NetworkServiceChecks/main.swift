@@ -98,6 +98,23 @@ rejects("conditional IPv6 block rule") { var bad = ipv6; bad["route"] = ["rules"
 rejects("missing managed IPv6 address") { var bad = ipv6; bad["inbounds"] = [["type": "tun", "auto_route": true, "address": ["172.19.0.1/30"]]]; try validateIPv6(bad) }
 expect(keq_ipv6_route_uses_interface("2001:4860:4860::8888", "keqdis-nonexistent-interface") == 0, "IPv6 route verification fails closed for absent tunnel")
 expect(keq_ipv6_route_uses_interface("::1", "lo0") == 1, "read-only RTM_GET identifies real loopback IPv6 route")
+for tunnel in ["utun6", "ppp0", "ipsec0"] {
+    rejects("other VPN owns lower IPv4 half through \(tunnel)") { try IPv4RouteSnapshot(lowerHalf: tunnel, upperHalf: "en0").validateBeforeStarting(mode: "tun") }
+    rejects("other VPN owns upper IPv4 half through \(tunnel)") { try IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: tunnel).validateBeforeStarting(mode: "tun") }
+}
+do {
+    try IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: "en1").validateBeforeStarting(mode: "tun"); checks += 1
+    try IPv4RouteSnapshot(lowerHalf: "utun6", upperHalf: "utun6").validateBeforeStarting(mode: "proxy"); checks += 1
+    try IPv4RouteSnapshot(lowerHalf: nil, upperHalf: nil).validateBeforeStarting(mode: "proxy"); checks += 1
+} catch { fputs("FAIL: valid physical/Proxy routing policy \(error)\n", stderr); exit(1) }
+rejects("unknown IPv4 routes cannot start TUN") { try IPv4RouteSnapshot(lowerHalf: nil, upperHalf: "en0").validateBeforeStarting(mode: "tun") }
+expect(IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "utun9").usesTunnel("utun9"), "both IPv4 halves enter owned tunnel")
+expect(!IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "utun6").usesTunnel("utun9"), "foreign tunnel is not readiness")
+expect(!IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "en0").usesTunnel("utun9"), "half an IPv4 tunnel is not readiness")
+expect(!IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: nil).usesTunnel("utun9"), "missing IPv4 route fails closed")
+expect(!IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: "en0").usesTunnel("en0"), "physical interface is not an owned tunnel")
+expect(IPv4RouteSnapshot.interface(for: "127.0.0.1") == "lo0", "read-only IPv4 lookup skips host route and finds loopback subnet")
+expect(IPv4RouteSnapshot.interface(for: "not-an-ip") == nil, "IPv4 lookup rejects nonliteral input")
 let journal: [String: Any] = ["directory": UUID().uuidString, "processes": [["name": "keqrnel", "pid": 200, "startTime": UInt64(123456), "executable": ServicePaths.root.appendingPathComponent("bin/keqrnel").path]]]
 do { _ = try SessionRecoveryJournal(dictionary: journal, root: ServicePaths.root); checks += 1 } catch { fputs("FAIL: valid journal \(error)\n", stderr); exit(1) }
 rejects("missing process journal array") { _ = try SessionRecoveryJournal(dictionary: ["directory": UUID().uuidString], root: ServicePaths.root) }

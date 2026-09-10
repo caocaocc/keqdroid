@@ -19,6 +19,8 @@ permissions:
 
 # Stable independent jobs let an architecture finish even when the other fails.
 # No cancelling concurrency group: earlier runs keep their completed components.
+# The opt-in dev commit marker also exercises reruns before this workflow exists
+# on the default branch. macos-package.yml limits the failure to attempt 1.
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
@@ -61,7 +63,7 @@ jobs:
     with:
       arch: arm64
       runner: macos-15
-      fault_injection: ${{ inputs.fault_injection || 'none' }}
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-arm64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-arm64.outputs.artifact-name }}
       wireproxy_artifact: ${{ needs.wireproxy-arm64.outputs.artifact-name }}
@@ -74,7 +76,7 @@ jobs:
     with:
       arch: x64
       runner: macos-15-intel
-      fault_injection: ${{ inputs.fault_injection || 'none' }}
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-x64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-x64.outputs.artifact-name }}
       wireproxy_artifact: ${{ needs.wireproxy-x64.outputs.artifact-name }}

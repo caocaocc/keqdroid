@@ -21,13 +21,14 @@ public final class NetworkSettings {
     private var appliedDNS: (serviceIDs: [String], address: String)?
     public init(stateDirectory: URL) { journalURL = stateDirectory.appendingPathComponent("network-journal.json") }
 
-    public func prepare(uid: uid_t) throws -> NetworkContext {
+    public func prepare(uid: uid_t, forTUN: Bool = false) throws -> NetworkContext {
         guard let store = SCDynamicStoreCreate(nil, "KEQDIS context" as CFString, nil, nil),
               let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
               let primary = global["PrimaryInterface"] as? String, ["en", "bridge", "bond", "vlan"].contains(where: primary.hasPrefix),
               let primaryService = global["PrimaryService"] as? String else {
             throw ServiceFailure("physicalNetworkUnavailable", "No physical default network is available. Disconnect another VPN and retry.")
         }
+        if forTUN { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: "tun") }
         let preferences = try preferences()
         guard let current = SCNetworkSetCopyCurrent(preferences), let services = SCNetworkSetCopyServices(current) as? [SCNetworkService] else {
             throw ServiceFailure("networkSettingsUnavailable", "Cannot read current network services.")

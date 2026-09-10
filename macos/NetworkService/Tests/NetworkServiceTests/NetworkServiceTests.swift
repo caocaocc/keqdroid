@@ -43,4 +43,23 @@ final class NetworkServiceTests: XCTestCase {
         XCTAssertThrowsError(try ConfigPolicy.validateIPv6Protection(configurations: ["keqrnel": "{}"], core: "keqrnel", required: true))
         XCTAssertNoThrow(try ConfigPolicy.validateIPv6Protection(configurations: [:], core: "keqrnel", required: false))
     }
+    func testTUNRejectsBroadVPNRoutesEvenWithPhysicalDefault() {
+        for tunnel in ["utun6", "ppp0", "ipsec0"] {
+            XCTAssertThrowsError(try IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: tunnel).validateBeforeStarting(mode: "tun"))
+            XCTAssertThrowsError(try IPv4RouteSnapshot(lowerHalf: tunnel, upperHalf: "en0").validateBeforeStarting(mode: "tun"))
+        }
+        XCTAssertNoThrow(try IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: "en1").validateBeforeStarting(mode: "tun"))
+    }
+    func testProxyDoesNotClaimOrRequireGlobalIPv4Routes() {
+        XCTAssertNoThrow(try IPv4RouteSnapshot(lowerHalf: "utun6", upperHalf: "utun6").validateBeforeStarting(mode: "proxy"))
+        XCTAssertNoThrow(try IPv4RouteSnapshot(lowerHalf: nil, upperHalf: nil).validateBeforeStarting(mode: "proxy"))
+    }
+    func testTUNIPv4ReadinessRequiresBothHalvesOnItsExactInterface() {
+        XCTAssertTrue(IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "utun9").usesTunnel("utun9"))
+        XCTAssertFalse(IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "utun6").usesTunnel("utun9"))
+        XCTAssertFalse(IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: "en0").usesTunnel("utun9"))
+        XCTAssertFalse(IPv4RouteSnapshot(lowerHalf: "utun9", upperHalf: nil).usesTunnel("utun9"))
+        XCTAssertFalse(IPv4RouteSnapshot(lowerHalf: "en0", upperHalf: "en0").usesTunnel("en0"))
+        XCTAssertThrowsError(try IPv4RouteSnapshot(lowerHalf: nil, upperHalf: "en0").validateBeforeStarting(mode: "tun"))
+    }
 }
