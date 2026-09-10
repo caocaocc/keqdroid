@@ -1251,6 +1251,18 @@ class AppLocalizationsFa extends AppLocalizations {
   String get desktopModeShort => 'حالت';
 
   @override
+  String get macosLaunchAtLogin => 'اجرا هنگام ورود به سیستم';
+
+  @override
+  String get macosAutoConnectOnLogin => 'اتصال خودکار هنگام ورود به سیستم';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'هنگام اجرای برنامه پس از ورود به سیستم، به آخرین سرور انتخاب‌شده با حالت پنل کناری متصل می‌شود. برای TUN باید از قبل مجوز داده شود؛ بدون مجوز، اتصال خودکار انجام نمی‌شود. Proxy به مجوز مدیر نیاز ندارد.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'ابتدا «اجرا هنگام ورود به سیستم» را فعال کنید';
+
+  @override
   String get settingsDesktopTitle => 'ویندوز';
 
   @override

@@ -1251,6 +1251,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get desktopModeShort => '模式';
 
   @override
+  String get macosLaunchAtLogin => '登录时启动';
+
+  @override
+  String get macosAutoConnectOnLogin => '登录启动时自动连接';
+
+  @override
+  String get macosAutoConnectOnLoginHint => '登录启动时连接上次选择的服务器，使用侧栏中的模式。TUN 需提前授权；未授权时不会自动连接。Proxy 无需管理员授权。';
+
+  @override
+  String get macosAutoConnectRequiresLogin => '请先启用「登录时启动」';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override

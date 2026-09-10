@@ -2447,6 +2447,30 @@ abstract class AppLocalizations {
   /// **'Mode'**
   String get desktopModeShort;
 
+  /// No description provided for @macosLaunchAtLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Launch at login'**
+  String get macosLaunchAtLogin;
+
+  /// No description provided for @macosAutoConnectOnLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect automatically at login'**
+  String get macosAutoConnectOnLogin;
+
+  /// No description provided for @macosAutoConnectOnLoginHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the last selected server using the mode from the sidebar when launched at login. TUN requires prior authorization and will not connect automatically without it. Proxy requires no administrator authorization.'**
+  String get macosAutoConnectOnLoginHint;
+
+  /// No description provided for @macosAutoConnectRequiresLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable \"Launch at login\" first'**
+  String get macosAutoConnectRequiresLogin;
+
   /// No description provided for @settingsDesktopTitle.
   ///
   /// In en, this message translates to:

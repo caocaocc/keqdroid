@@ -1251,6 +1251,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get desktopModeShort => 'Modus';
 
   @override
+  String get macosLaunchAtLogin => 'Bei Anmeldung starten';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Bei Anmeldung automatisch verbinden';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'Verbindet beim Start zur Anmeldung mit dem zuletzt gewählten Server im Modus der Seitenleiste. TUN muss vorher autorisiert werden und verbindet sich ohne diese Freigabe nicht automatisch. Proxy benötigt keine Administratorfreigabe.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Zuerst „Bei Anmeldung starten“ aktivieren';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override

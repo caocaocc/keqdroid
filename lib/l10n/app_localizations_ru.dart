@@ -1253,6 +1253,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get desktopModeShort => 'Режим';
 
   @override
+  String get macosLaunchAtLogin => 'Запускать при входе в систему';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Подключаться автоматически при входе';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'При запуске после входа в систему подключается к последнему выбранному серверу в режиме из боковой панели. Для TUN нужно заранее предоставить разрешение; без него автоматического подключения не будет. Для Proxy разрешение администратора не требуется.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Сначала включите «Запускать при входе в систему»';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override

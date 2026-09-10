@@ -1251,6 +1251,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get desktopModeShort => 'Mode';
 
   @override
+  String get macosLaunchAtLogin => 'Launch at login';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Connect automatically at login';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'Connect to the last selected server using the mode from the sidebar when launched at login. TUN requires prior authorization and will not connect automatically without it. Proxy requires no administrator authorization.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Enable \"Launch at login\" first';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override
