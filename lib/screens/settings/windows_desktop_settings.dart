@@ -72,7 +72,7 @@ class _WindowsDesktopSettingsScreen extends ConsumerWidget {
     }
 
     return ExpressivePage(
-      title: l10n.settingsDesktopTitle,
+      title: Platform.isMacOS ? 'macOS' : l10n.settingsDesktopTitle,
       physics: const ClampingScrollPhysics(),
       children: [
         toggleRow(

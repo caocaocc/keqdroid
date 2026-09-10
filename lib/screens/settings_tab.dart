@@ -140,9 +140,13 @@ class SettingsTab extends ConsumerWidget {
                           const _SplitTunnelingSettingsCard(),
                           if (DesktopCapabilities.current.loginStartup)
                             _SettingsCard(
-                              title: l10n.settingsDesktopTitle,
+                              title: Platform.isMacOS
+                                  ? 'macOS'
+                                  : l10n.settingsDesktopTitle,
                               subtitle: l10n.settingsDesktopSubtitle,
-                              icon: Icons.desktop_windows_rounded,
+                              icon: Platform.isMacOS
+                                  ? Icons.desktop_mac_rounded
+                                  : Icons.desktop_windows_rounded,
                               accent: ExpressiveAccent.secondary,
                               onTap: () => Navigator.push(
                                 context,

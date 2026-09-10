@@ -96,8 +96,8 @@ class _HotkeySettingsScreenState extends ConsumerState<_HotkeySettingsScreen> {
     }
     if (event.logicalKey == LogicalKeyboardKey.backspace ||
         event.logicalKey == LogicalKeyboardKey.delete) {
-      unawaited(_saveBinding(action, null));
       _stopRecording();
+      unawaited(_saveBinding(action, null));
       return KeyEventResult.handled;
     }
 
@@ -118,8 +118,11 @@ class _HotkeySettingsScreenState extends ConsumerState<_HotkeySettingsScreen> {
       setState(() => _needsModifierHint = true);
       return KeyEventResult.handled;
     }
-    unawaited(_saveBinding(action, binding));
+    // SettingsNotifier publishes synchronously. Finish capture first: otherwise
+    // restoring the old bindings here overwrites the listener's new native
+    // registration, leaving the saved shortcut inactive until the next launch.
     _stopRecording();
+    unawaited(_saveBinding(action, binding));
     return KeyEventResult.handled;
   }
 
