@@ -91,3 +91,45 @@ cannot make an unsafe initial configuration safe.
 The tests exercise the real router constructor and authentication without
 starting a server. Forbidden capability tests use sentinel handlers so a
 regression cannot run an updater, open a TUN device, or perform network I/O.
+
+## Darwin route ownership
+
+`singtun-route-ownership.patch` pins the existing keqrnel dependency
+`github.com/sagernet/sing-tun` at `v0.8.12-0.20260810140523-7c73233bd0fb`;
+it does not upgrade the upstream version. The replacement also applies to
+the sing-box test module. Mihomo's separately pinned sing-tun implementation
+does not explicitly delete routes and does not use this replacement.
+
+An `EEXIST` response stops startup without changing the existing route.
+Every addition names the actual utun interface through `RTA_IFP`, waits for
+its matching process/sequence acknowledgement, then rereads the kernel table
+to verify the exact prefix, gateway, interface index and scope. A failed
+verification aborts startup and closes the session's own interface descriptor.
+
+Closing the descriptor lets the Darwin kernel detach that utun and remove
+routes still bound to that interface. The patch never sends `RTM_DELETE` or
+`RTM_CHANGE`; the routing socket entry point rejects every operation except
+`RTM_ADD` before touching the socket. This avoids comparing a route and then
+deleting a different route installed by another VPN between the two calls.
+Cleanup is idempotent, including a partial startup failure followed by the
+normal core shutdown path. Dynamic route updates return an explicit error
+requiring a new session; the helper must rebuild the session instead.
+
+The ownership check is for readiness, not permission to delete a prefix.
+The kernel teardown checks the actual route's `rt_ifp` while holding its
+routing lock, including static gateway routes; routes now bound to another
+interface are preserved. Relevant Apple sources are
+[`utun_ctl_disconnect`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_utun.c),
+[`if_rtproto_del` and `if_rtdel`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.c),
+and [`RTA_IFP` handling](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/rtsock.c).
+The same path exists in macOS 12's `xnu-8019.80.24`:
+[`if_proto_free`](https://github.com/apple-oss-distributions/xnu/blob/xnu-8019.80.24/bsd/net/dlil.c#L1672)
+calls the same [interface-specific route cleanup](https://github.com/apple-oss-distributions/xnu/blob/xnu-8019.80.24/bsd/net/if.c#L5293).
+Detach can complete asynchronously after the descriptor closes. The helper
+must wait for the session interface and its routes to disappear, and report
+incomplete recovery on timeout; it must not attempt prefix-based deletion.
+
+Tests use simulated route tables, serialized messages and an ordinary pipe
+for descriptor lifetime; they never create a TUN or change real routes.
+Live TUN and routing recovery validation must be performed manually on the
+target macOS versions and architectures.

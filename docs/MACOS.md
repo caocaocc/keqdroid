@@ -2,7 +2,7 @@
 
 本分支实现 macOS 桌面客户端的源代码、核心构建、安装打包和 CI。目标为 macOS 12 及以上、Apple Silicon 与 Intel，产品名 `KEQDIS`，Bundle ID 为 `io.github.caocaocc.keqdroid`。
 
-**当前为开发实现，尚未通过发布验收。** 本机只有 Command Line Tools，未安装完整 Xcode。核心和独立 Swift 服务可以编译；Flutter Runner、全部原生插件、最终 DMG、安装授权和真实网络路径仍需要完整 Xcode/独立测试设备验证。不能把新系统编译成功当作 macOS 12 已验证。
+**当前为开发实现，尚未通过发布验收。** 本机只有 Command Line Tools，完整应用改由 GitHub CI 构建；Runner 和原生插件已经完成两个架构的编译，安装包仍须通过实际最低系统版本与签名检查。安装授权和真实网络路径分别记录验收结果，不能把新系统编译成功当作 macOS 12 已验证。分段构建、复用和本机校验方法见 [MACOS_CI.md](MACOS_CI.md)。
 
 ## 工程结构与运行边界
 
@@ -73,6 +73,8 @@ keqrnel、Mihomo、AWG 均有 Proxy/TUN 请求路径；AWG TUN 使用 wireproxy 
 系统代理通过 SystemConfiguration 按网络服务 ID 操作，使用当前分配的 SOCKS/HTTP 端口；保存 HTTP、HTTPS、SOCKS、PAC、自动发现和绕过字段。Proxy 模式不改 DNS。修改系统设置前持久化 journal；恢复只处理仍等于本会话写入值的字段，保留连接期间用户/其他程序所做的修改。
 
 TUN DNS 使用核心虚拟端点：keqrnel/AWG 为 `172.19.0.2`，Mihomo 从运行配置推导（默认 `198.18.0.2`）。Swift 不在 `127.0.0.1:53` 新建 DNS 服务。先测试 UDP/TCP DNS，再修改系统 DNS，并复测系统解析路径。恢复 DNS/代理后才停止核心。
+
+提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由原有比较后恢复逻辑保留其修改。仅 TUN 使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；两次查询共享总计 5 秒期限，失败或超时不进入已连接状态。若用户规则屏蔽了整个 `example.com`，此项就绪检查可能失败，诊断会明确指出探测域，用户 DNS 规则不会被更改。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
 
 启动前保存物理 DNS 和出口，注入固定环境契约：
 
@@ -172,6 +174,8 @@ CI 只上传 `unvalidated` 开发产物，不自动发布 GitHub Release。新�
 
 网络场景还须覆盖 Wi-Fi/有线切换、睡眠唤醒、断网重连、IPv4/双栈、GUI/核心/helper 崩溃、连续快速连接断开和另一个全局 VPN 的冲突。macOS 12 Intel 与 Apple Silicon 是必测项；macOS 13、15、当前稳定版本补充覆盖。
 
-2026-09-10 本地已实际完成：Go 1.26.8 六个核心双架构编译和最低版本检查、DNS 补丁单元测试、Swift 原生服务双架构编译、无特权恢复策略/请求/DNS测试、桌面快捷键/登录配置/真实应用包枚举测试、Dart/native六类配置契约校验、CocoaPods锁文件解析、真实 Flutter 框架在 ad-hoc Hardened Runtime 下加载、无安装的测试 PKG 构建与展开检查。最终 `flutter analyze --no-pub` 无问题，全部 1235 项 Flutter 测试、71 项原生服务检查、15 项桌面检查和18项打包/安装脚本测试通过。Swift XCTest 仍因本机没有完整 Xcode 而未执行。未在本机安装服务、启动 VPN 或改动系统网络设置。
+2026-09-10 已实际完成 Flutter 分析及全部 1235 项测试，核心双架构编译、Darwin DNS/路由补丁回归、Swift 服务双架构编译、桌面与恢复策略检查。完整 Xcode 下的 XCTest 和应用构建通过 GitHub CI 执行；本机 CLT 检查与 CI XCTest 分开记录。
 
-完整应用构建已实际尝试，停在 Swift Package Manager 解析阶段：`xcrun: unable to find utility xcodebuild`。因此本次没有生成可安装的完整 Flutter DMG，没有运行 GitHub CI 或发布 Release。
+CI 演练已确认：仅修改安装脚本的提交中，两个架构共十个组件均恢复成功，所有编译步骤跳过；真实下载组件修改一字节后被校验拒绝。打包检查同时发现了 Flutter 原生资产默认最低 macOS 13 的问题，因此编译成功和符合 macOS 12 部署目标不是同一验收项，必须保留最终 Mach-O 检查。
+
+本机为 macOS 15.6、Apple Silicon。根据使用者要求，现有 VPN 保持连接，TUN 运行验收由使用者人工完成；自动验收聚焦安装、桌面和 Proxy。网络原始快照保存在本机私有目录，不能提交订阅凭据或本机网络详情。Intel 运行、macOS 12 两架构、AWG 节点及尚未执行的完整发布矩阵继续标为待验证。

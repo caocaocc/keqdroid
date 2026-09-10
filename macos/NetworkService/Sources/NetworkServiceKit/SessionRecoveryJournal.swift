@@ -11,6 +11,7 @@ public struct SessionRecoveryJournal {
     }
     public let directory: String
     public let processes: [ProcessIdentity]
+    public let tunnelInterface: TunnelInterfaceIdentity?
 
     public init(dictionary: [String: Any], root: URL) throws {
         guard let directory = dictionary["directory"] as? String, UUID(uuidString: directory) != nil,
@@ -33,5 +34,13 @@ public struct SessionRecoveryJournal {
         }
         self.directory = directory
         processes = identities
+        if let value = dictionary["tunnelInterface"] {
+            guard let record = value as? [String: Any] else {
+                throw ServiceFailure("recoveryFailed", "The session journal contains an invalid tunnel interface record.")
+            }
+            tunnelInterface = try TunnelInterfaceIdentity(dictionary: record)
+        } else {
+            tunnelInterface = nil // Older journals and Proxy sessions remain readable.
+        }
     }
 }

@@ -4,6 +4,7 @@ import Foundation
 import NetworkServiceKit
 import CNetworkXPC
 import Darwin
+import dnssd
 
 if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--validate-request" {
     do {
@@ -122,6 +123,62 @@ rejects("journal path traversal") { var bad = journal; bad["directory"] = "../..
 rejects("journal PID overflow") { var bad = journal; var records = journal["processes"] as! [[String: Any]]; records[0]["pid"] = Int.max; bad["processes"] = records; _ = try SessionRecoveryJournal(dictionary: bad, root: ServicePaths.root) }
 rejects("journal arbitrary executable") { var bad = journal; var records = journal["processes"] as! [[String: Any]]; records[0]["executable"] = "/bin/sh"; bad["processes"] = records; _ = try SessionRecoveryJournal(dictionary: bad, root: ServicePaths.root) }
 
+// Interface recovery uses synthetic snapshots and a virtual clock. Never create
+// a utun, stop another VPN, or issue a routing-table mutation in these checks.
+let tunnelIdentity = try TunnelInterfaceIdentity(name: "utun9", index: 42)
+let legacyJournal = try SessionRecoveryJournal(dictionary: journal, root: ServicePaths.root)
+expect(legacyJournal.tunnelInterface == nil, "old journal has no tunnel identity")
+var tunnelJournal = journal
+tunnelJournal["tunnelInterface"] = tunnelIdentity.dictionary
+let restoredTunnelJournal = try SessionRecoveryJournal(dictionary: tunnelJournal, root: ServicePaths.root)
+expect(restoredTunnelJournal.tunnelInterface == tunnelIdentity, "journal round-trips tunnel name and index")
+for invalid in [NSNull(), ["name": "en0", "index": 42], ["name": "utun9", "index": 0], ["name": "utun../9", "index": 42], ["name": "utun9"]] as [Any] {
+    rejects("corrupt tunnel identity") { var bad = journal; bad["tunnelInterface"] = invalid; _ = try SessionRecoveryJournal(dictionary: bad, root: ServicePaths.root) }
+}
+for index in [true, -1, Int.max, 1.5] as [Any] {
+    rejects("noninteger or out-of-range tunnel index") { var bad = journal; bad["tunnelInterface"] = ["name": "utun9", "index": index]; _ = try SessionRecoveryJournal(dictionary: bad, root: ServicePaths.root) }
+}
+var recoveryTime: TimeInterval = 0
+var interfaceSamples = [["utun9": UInt32(42), "utun6": UInt32(7)], ["utun9": UInt32(43), "utun6": UInt32(7)]]
+try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, timeout: 1, snapshot: { interfaceSamples.removeFirst() }, routes: { [43] }, now: { recoveryTime }, sleep: { recoveryTime += $0 })
+expect(interfaceSamples.isEmpty && recoveryTime > 0, "wait for own utun disappearance without waiting for same-name replacement")
+try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, snapshot: { ["utun6": 7] }, routes: { [7] })
+checks += 1
+try TunnelInterfaceRecovery.waitUntilRemoved(nil, snapshot: { fputs("FAIL: old journal queried interfaces\n", stderr); exit(1) })
+checks += 1
+recoveryTime = 0
+do {
+    try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, timeout: 0.2, snapshot: { ["utun9": 42] }, routes: { [] }, now: { recoveryTime }, sleep: { recoveryTime += $0 })
+    fputs("FAIL: live original utun passed recovery\n", stderr); exit(1)
+} catch { expect((error as? ServiceFailure)?.code == "recoveryFailed", "live original utun reports recovery failure") }
+expect(abs(recoveryTime - 0.2) < 0.001, "interface recovery has bounded wait")
+do {
+    try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, snapshot: { throw ServiceFailure("synthetic", "unavailable") })
+    fputs("FAIL: unreadable interface snapshot passed recovery\n", stderr); exit(1)
+} catch { expect((error as? ServiceFailure)?.code == "recoveryFailed", "snapshot errors fail recovery closed") }
+recoveryTime = 0
+var routeSamples: [Set<UInt32>] = [[42, 7], [42, 7], [7]]
+try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, timeout: 1, snapshot: { ["utun6": 7] }, routes: { routeSamples.removeFirst() }, now: { recoveryTime }, sleep: { recoveryTime += $0 })
+expect(routeSamples.isEmpty && abs(recoveryTime - 0.1) < 0.001, "interface disappearance alone does not acknowledge pending UP routes")
+rejects("old UP routes survive interface disappearance") { try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, timeout: 0, snapshot: { [:] }, routes: { [42] }) }
+rejects("unreadable route inventory") { try TunnelInterfaceRecovery.waitUntilRemoved(tunnelIdentity, snapshot: { [:] }, routes: { throw ServiceFailure("synthetic", "unavailable") }) }
+var routeHeader = rt_msghdr()
+routeHeader.rtm_msglen = UInt16(MemoryLayout<rt_msghdr>.size)
+routeHeader.rtm_version = UInt8(RTM_VERSION)
+routeHeader.rtm_type = UInt8(RTM_GET)
+routeHeader.rtm_index = 42
+routeHeader.rtm_flags = RTF_UP | RTF_STATIC | RTF_GATEWAY
+let routeBytes = withUnsafeBytes(of: &routeHeader) { Data($0) }
+let staticGatewayIndices = try TunnelInterfaceRecovery.routeInterfaceIndices(from: routeBytes)
+expect(staticGatewayIndices == [42], "RIB parser includes static gateway routes")
+rejects("truncated route dump") { _ = try TunnelInterfaceRecovery.routeInterfaceIndices(from: routeBytes.dropLast()) }
+routeHeader.rtm_flags = RTF_STATIC | RTF_GATEWAY
+let downIndices = try TunnelInterfaceRecovery.routeInterfaceIndices(from: withUnsafeBytes(of: &routeHeader) { Data($0) })
+expect(downIndices.isEmpty, "RIB parser ignores routes already down")
+let hostInterfaceIndices = try TunnelInterfaceRecovery.capture()
+let hostRouteIndices = try TunnelInterfaceRecovery.captureRouteInterfaceIndices()
+expect(hostInterfaceIndices["lo0"].map { hostRouteIndices.contains($0) } == true, "read-only kernel interface and route dumps identify loopback")
+
 // Exercise the real C TCP and UDP DNS probes against local protocol responders.
 func probeDNS(tcp: Bool, validReply: Bool) -> Bool {
     let fd = socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0)
@@ -171,4 +228,49 @@ expect(keq_remove_tree(session.path) == 0, "remove private session tree without 
 expect(FileManager.default.fileExists(atPath: outside.appendingPathComponent("sentinel").path), "session cleanup preserves symlink target")
 try FileManager.default.removeItem(at: cleanupRoot)
 expect(interfaceCounters("keqdis-nonexistent-interface") == nil, "unknown interface has no fabricated counters")
+let expectedDNSFields: [String: [String: Any]] = ["DNS": ["ServerAddresses": ["172.19.0.2"]]]
+let settingsReadiness = NetworkSettingsReadiness(primaryService: "primary", primaryInterface: "en0", serviceIDs: ["primary"], fields: expectedDNSFields)
+let committedDNS: [String: [String: Any]] = ["primary/DNS": ["ServerAddresses": ["172.19.0.2"]]]
+let pendingSettings = NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: committedDNS, enabled: ["primary/DNS"], effective: [:])
+let readySettings = NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: committedDNS, enabled: ["primary/DNS"], effective: expectedDNSFields)
+var settingsSamples = [pendingSettings, readySettings]
+var settingsTime: TimeInterval = 0
+try settingsReadiness.wait(timeout: 1, capture: { settingsSamples.removeFirst() }, now: { settingsTime }, sleep: { settingsTime += $0 })
+expect(settingsSamples.isEmpty && settingsTime == 0.05, "settings wait for effective state after commit")
+rejects("effective settings never activate") { try settingsReadiness.wait(timeout: 0, capture: { pendingSettings }) }
+let foreignDNS: [String: Any] = ["ServerAddresses": ["192.168.1.53"]]
+rejects("third-party committed DNS edit") { try settingsReadiness.wait(capture: { NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: ["primary/DNS": foreignDNS], enabled: ["primary/DNS"], effective: expectedDNSFields) }) }
+expect(restoreFields(current: foreignDNS, changes: ["ServerAddresses": FieldChange(before: nil, applied: ["172.19.0.2"])])["ServerAddresses"] as? [String] == ["192.168.1.53"], "failed readiness preserves third-party DNS edit")
+rejects("primary service changed before activation") { try settingsReadiness.wait(capture: { NetworkSettingsObservation(primaryService: "other", primaryInterface: "en1", committed: committedDNS, enabled: ["primary/DNS"], effective: expectedDNSFields) }) }
+rejects("committed DNS protocol disabled") { try settingsReadiness.wait(capture: { NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: committedDNS, enabled: [], effective: expectedDNSFields) }) }
+let proxyFields = NetworkSettingsReadiness.managedFields(proxyPorts: (32080, 32081), dnsAddress: nil)
+let proxyReadiness = NetworkSettingsReadiness(primaryService: "primary", primaryInterface: "en0", serviceIDs: ["primary"], fields: proxyFields)
+var effectiveProxy = proxyFields["Proxies"]!
+effectiveProxy.removeValue(forKey: "ProxyAutoConfigEnable"); effectiveProxy.removeValue(forKey: "ProxyAutoDiscoveryEnable")
+try proxyReadiness.wait(timeout: 0, capture: { NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: ["primary/Proxies": proxyFields["Proxies"]!], enabled: ["primary/Proxies"], effective: ["Proxies": effectiveProxy]) })
+checks += 1
+effectiveProxy["HTTPPort"] = 2081
+rejects("effective proxy uses stale default port") { try proxyReadiness.wait(timeout: 0, capture: { NetworkSettingsObservation(primaryService: "primary", primaryInterface: "en0", committed: ["primary/Proxies": proxyFields["Proxies"]!], enabled: ["primary/Proxies"], effective: ["Proxies": effectiveProxy]) }) }
+var systemDNSTime: TimeInterval = 0
+var queriedNames: [String] = []
+var queryDeadlines: [TimeInterval] = []
+try SystemDNSReadiness.verify(now: { systemDNSTime }, query: { name, remaining in
+    queriedNames.append(name); queryDeadlines.append(remaining); systemDNSTime += 2
+    return queriedNames.count == 1 ? .negative : .positive
+})
+expect(queriedNames.count == 2 && queriedNames[0].hasSuffix(".example.com.") && queriedNames[0] != "example.com." && queriedNames[1] == "example.com.", "negative random DNS probe requires positive reserved-domain fallback")
+expect(queryDeadlines == [5, 3], "system DNS queries share one five-second budget")
+rejects("negative fallback is not DNS health") { try SystemDNSReadiness.verify(query: { _, _ in .negative }) }
+rejects("system resolver failure") { try SystemDNSReadiness.verify(query: { _, _ in throw ServiceFailure("synthetic", "server failure") }) }
+systemDNSTime = 0
+var timedQueryCalls = 0
+rejects("expired DNS budget prevents another query") { try SystemDNSReadiness.verify(now: { systemDNSTime }, query: { _, _ in timedQueryCalls += 1; systemDNSTime = 5; return .negative }) }
+expect(timedQueryCalls == 1, "expired shared deadline cancels fallback")
+let positiveDNS = try SystemDNSReadiness.interpret(error: 0, added: true, type: 1, recordClass: 1, length: 4)
+expect(positiveDNS == .positive, "system DNS accepts valid positive A record")
+let negativeDNS = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_NoSuchRecord), added: false, type: 0, recordClass: 0, length: 0)
+expect(negativeDNS == .negative, "NoSuchRecord remains an ambiguous negative result")
+rejects("system DNS callback timeout") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Timeout), added: false, type: 0, recordClass: 0, length: 0) }
+rejects("system DNS callback server failure") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Transient), added: false, type: 0, recordClass: 0, length: 0) }
+rejects("malformed positive DNS record") { _ = try SystemDNSReadiness.interpret(error: 0, added: true, type: 1, recordClass: 1, length: 0) }
 print("Passed \(checks) native network service checks (no privileged operations).")

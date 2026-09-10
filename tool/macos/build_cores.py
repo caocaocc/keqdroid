@@ -22,7 +22,7 @@ OUTPUT = ROOT / "build/macos-cores"
 PATCHES = ROOT / "tool/patches"
 MANIFEST = ROOT / "tool/macos/core-manifest.json"
 CORES = ("keqrnel", "mihomo", "wireproxy")
-DEPENDENCIES = {"keqrnel": ("keqrnel", "xray", "singbox"),
+DEPENDENCIES = {"keqrnel": ("keqrnel", "xray", "singbox", "singtun"),
                 "mihomo": ("mihomo",), "wireproxy": ("wireproxy",)}
 OVERLAYS = {
     "keqrnel": (("bootstrapdns", "internal/keqdisdns"),),
@@ -33,6 +33,7 @@ OVERLAYS = {
     "xray": (("xray", "features/dns/localdns"),),
     "singbox": (("privilegedapi", "internal/keqdisapi"),
                 ("singbox_api", "experimental/clashapi")),
+    "singtun": (("singtun", "."),),
 }
 
 
@@ -265,6 +266,9 @@ def prepare_sources(manifest, go, env, cores=CORES):
             sources["keqrnel"], env, "replace-xray")
         run([go, "mod", "edit", "-replace", "github.com/sagernet/sing-box=../singbox"],
             sources["keqrnel"], env, "replace-singbox")
+        for name in ("keqrnel", "singbox"):
+            run([go, "mod", "edit", "-replace", "github.com/sagernet/sing-tun=../singtun"],
+                sources[name], env, "replace-singtun-" + name)
     return sources
 
 
@@ -305,6 +309,8 @@ def test_sources(cores, go, env, sources):
     if set(cores) & {"keqrnel", "mihomo"}:
         run([go, "test", "./..."], PATCHES / "macos/privilegedapi", env, "test-privileged-api-policy")
     if "keqrnel" in cores:
+        run([go, "test", "-tags", "with_gvisor", ".", "-run", "^TestKeqdisRoute"], sources["singtun"], env,
+            "test-singtun-route-ownership")
         run([go, "test", "./features/dns/localdns", "-run", "^TestKeqdis"], sources["xray"], env,
             "test-xray-bootstrap")
         run([go, "test", "-tags", "with_gvisor", "./core/localdns", "./internal/keqdisdns"],

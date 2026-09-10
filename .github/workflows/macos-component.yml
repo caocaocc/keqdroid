@@ -111,6 +111,7 @@ jobs:
             build/macos-helper/${{ inputs.arch }}
             build/macos-desktop/${{ inputs.arch }}
             build/macos/Build/Intermediates.noindex
+            .dart_tool/flutter_build
             macos/Pods
           key: macos-native-${{ inputs.arch }}-${{ inputs.component }}-${{ steps.fingerprint.outputs.fingerprint }}
           restore-keys: macos-native-${{ inputs.arch }}-${{ inputs.component }}-
@@ -118,6 +119,7 @@ jobs:
         if: steps.source.outputs.build == 'true' && (inputs.component == 'helper' || inputs.component == 'app')
         run: xcodebuild -version 2>&1 | tee build/ci-logs/xcode.log
       - uses: subosito/flutter-action@v2
+        id: flutter-sdk
         if: steps.source.outputs.build == 'true' && inputs.component == 'app'
         with:
           flutter-version: '3.44.4'
@@ -218,8 +220,24 @@ jobs:
             build/macos-helper/${{ inputs.arch }}
             build/macos-desktop/${{ inputs.arch }}
             build/macos/Build/Intermediates.noindex
+            .dart_tool/flutter_build
             macos/Pods
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      # flutter-action's own cache post-step only runs for successful jobs.
+      - name: Preserve Flutter SDK after a failed build
+        if: always() && steps.flutter-sdk.outcome == 'success' && steps.flutter-sdk.outputs.CACHE-HIT != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.flutter-sdk.outputs.CACHE-PATH }}
+          key: ${{ steps.flutter-sdk.outputs.CACHE-KEY }}
+      - name: Preserve Pub dependencies after a failed build
+        if: always() && steps.flutter-sdk.outcome == 'success' && steps.flutter-sdk.outputs.PUB-CACHE-HIT != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.flutter-sdk.outputs.PUB-CACHE-PATH }}
+          key: ${{ steps.flutter-sdk.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
       - name: Preserve diagnostics
         if: always()
         uses: actions/upload-artifact@v4

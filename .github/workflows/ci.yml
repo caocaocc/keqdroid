@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: mkdir -p build/ci-logs
       - uses: subosito/flutter-action@v2
+        id: flutter-sdk
         with:
           flutter-version: '3.44.4'
           cache: true
@@ -26,6 +27,20 @@ jobs:
       - run: flutter analyze 2>&1 | tee build/ci-logs/analyze.log
       - run: flutter test --reporter expanded 2>&1 | tee build/ci-logs/flutter-tests.log
       - run: python3 -m unittest discover -s tool/tests -v 2>&1 | tee build/ci-logs/python-tests.log
+      - name: Preserve Flutter SDK after failed checks
+        if: always() && steps.flutter-sdk.outcome == 'success' && steps.flutter-sdk.outputs.CACHE-HIT != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.flutter-sdk.outputs.CACHE-PATH }}
+          key: ${{ steps.flutter-sdk.outputs.CACHE-KEY }}
+      - name: Preserve Pub dependencies after failed checks
+        if: always() && steps.flutter-sdk.outcome == 'success' && steps.flutter-sdk.outputs.PUB-CACHE-HIT != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.flutter-sdk.outputs.PUB-CACHE-PATH }}
+          key: ${{ steps.flutter-sdk.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

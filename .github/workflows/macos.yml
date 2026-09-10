@@ -63,7 +63,7 @@ jobs:
     with:
       arch: arm64
       runner: macos-15
-      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || 'none' }}
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-arm64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-arm64.outputs.artifact-name }}
       wireproxy_artifact: ${{ needs.wireproxy-arm64.outputs.artifact-name }}
@@ -76,7 +76,7 @@ jobs:
     with:
       arch: x64
       runner: macos-15-intel
-      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || 'none' }}
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-x64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-x64.outputs.artifact-name }}
       wireproxy_artifact: ${{ needs.wireproxy-x64.outputs.artifact-name }}
