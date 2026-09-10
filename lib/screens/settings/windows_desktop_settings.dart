@@ -83,15 +83,21 @@ class _WindowsDesktopSettingsScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         toggleRow(
-          title: l10n.settingsLaunchAtStartup,
+          title: Platform.isMacOS
+              ? l10n.macosLaunchAtLogin
+              : l10n.settingsLaunchAtStartup,
           subtitle: l10n.settingsLaunchAtStartupHint,
           value: settings.launchAtStartup,
           onChanged: (v) => _save(ref, settings.copyWith(launchAtStartup: v)),
         ),
         const SizedBox(height: 12),
         toggleRow(
-          title: l10n.settingsAutoConnectOnAutostart,
-          subtitle: l10n.settingsAutoConnectOnAutostartHint,
+          title: Platform.isMacOS
+              ? l10n.macosAutoConnectOnLogin
+              : l10n.settingsAutoConnectOnAutostart,
+          subtitle: Platform.isMacOS
+              ? l10n.macosAutoConnectOnLoginHint
+              : l10n.settingsAutoConnectOnAutostartHint,
           value: settings.autoConnectLastServer,
           onChanged: settings.launchAtStartup
               ? (v) => _save(ref, settings.copyWith(autoConnectLastServer: v))
@@ -101,7 +107,9 @@ class _WindowsDesktopSettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
             child: Text(
-              l10n.settingsAutoConnectRequiresAutostart,
+              Platform.isMacOS
+                  ? l10n.macosAutoConnectRequiresLogin
+                  : l10n.settingsAutoConnectRequiresAutostart,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: AppTheme.textLight(context),
               ),
