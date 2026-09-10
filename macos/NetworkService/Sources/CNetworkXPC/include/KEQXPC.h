@@ -26,4 +26,7 @@ int keq_dns_ready(const char *address, uint16_t port, int tcp, int timeout_ms);
 // Read-only RTM_GET lookup. Returns 1 only when the IPv6 destination uses the
 // exact interface; errors or absent routes return 0. Never changes routing.
 int keq_ipv6_route_uses_interface(const char *address, const char *interface_name);
+// Read-only IPv4 route lookup, excluding /32 host bypasses when identifying
+// the underlying network route. Returns 0 on missing/rejected routes or errors.
+int keq_ipv4_route_interface(const char *address, char *interface_name, size_t length);
 #endif

@@ -115,7 +115,7 @@ public final class NetworkService {
             guard activeRequest == nil else { throw ServiceFailure("busy", "Disconnect before preparing a new physical network context.") }
             try requireRecovered()
             contexts = contexts.filter { Date().timeIntervalSince($0.value.created) < 60 }
-            let context = try settings.prepare(uid: identity.uid)
+            let context = try settings.prepare(uid: identity.uid, forTUN: true)
             contexts[context.id] = context
             return context.dictionary
         case "startSession":
@@ -144,6 +144,7 @@ public final class NetworkService {
                   Date().timeIntervalSince(prepared.created) < 60, !prepared.dnsServers.isEmpty, !settings.physicalNetworkChanged(prepared) else { throw ServiceFailure("staleNetworkContext", "The physical network changed. Prepare a new DNS context before connecting.") }
             context = prepared
             try validateContext(request, context: context)
+            try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode)
         } else { context = try settings.prepare(uid: identity.uid) }
         owner = identity; snapshotUID = identity.uid; activeRequest = request; activeContext = context; lastContact = Date()
         snapshot = ["sessionId": request.id, "status": "connecting", "connectionMode": request.mode, "core": request.core]
@@ -155,6 +156,9 @@ public final class NetworkService {
             try persistSession()
             let order = request.core == "awg" ? (request.mode == "tun" ? ["wireproxy", "keqrnel"] : ["wireproxy"]) : [request.core]
             for name in order {
+                // AWG's upstream may take seconds to start. Recheck before the
+                // actual TUN process can replace an existing broad route.
+                if request.mode == "tun" && name != "wireproxy" { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode) }
                 guard let config = request.configurations[name] else { throw ServiceFailure("invalidConfiguration", "Missing core configuration.") }
                 let process = try runtime.spawn(name: name, configuration: config, directory: directory, request: request, identity: identity, context: context)
                 processes.append(process)
@@ -171,9 +175,9 @@ public final class NetworkService {
                 var interface: String?
                 try waitUntilReady(timeout: 8) {
                     let candidates = networkInterfaces().subtracting(before).filter { $0.hasPrefix("utun") }
-                    guard candidates.count == 1 else { return false }
-                    interface = candidates.first
-                    return true
+                    guard candidates.count == 1, let candidate = candidates.first else { return false }
+                    interface = candidate
+                    return IPv4RouteSnapshot.capture().usesTunnel(candidate)
                 }
                 snapshot["interfaceName"] = interface
                 if request.blockIpv6Leak && context.hasIPv6 {
@@ -189,6 +193,9 @@ public final class NetworkService {
                 guard let dns = request.dnsAddress else { throw ServiceFailure("invalidDNS", "TUN DNS address is missing.") }
                 try waitUntilReady(timeout: 8) {
                     keq_dns_ready(dns, 53, 0, 500) == 1 && keq_dns_ready(dns, 53, 1, 500) == 1
+                }
+                guard let interface, IPv4RouteSnapshot.capture().usesTunnel(interface) else {
+                    throw ServiceFailure("ipv4RoutesUnavailable", "IPv4 traffic is not fully routed into the managed tunnel.")
                 }
             }
             // Never publish system proxy/DNS until processes, ports, utun, and
@@ -327,12 +334,14 @@ public final class NetworkService {
         for process in processes { process.collectOutput() }
         let exited = processes.first { !$0.isAlive }
         let networkChanged = resumedFromSleep || (activeContext.map(settings.physicalNetworkChanged) ?? false)
+        let tunnelRoutesChanged = exited == nil && activeRequest?.mode == "tun" && connectedAt != nil &&
+            !((snapshot["interfaceName"] as? String).map { IPv4RouteSnapshot.capture().usesTunnel($0) } ?? false)
         let expired = Date().timeIntervalSince(lastContact) > 30
-        if exited != nil || networkChanged || expired {
-            let reason = networkChanged ? "The physical network changed. Reconnect with a fresh DNS context." : (expired ? "The application connection expired." : "\(exited!.name) exited unexpectedly.")
+        if exited != nil || networkChanged || tunnelRoutesChanged || expired {
+            let reason = tunnelRoutesChanged ? "IPv4 routes no longer belong to this tunnel. The connection was stopped to restore network settings." : (networkChanged ? "The physical network changed. Reconnect with a fresh DNS context." : (expired ? "The application connection expired." : "\(exited!.name) exited unexpectedly."))
             do { try stop() } catch { snapshot["recoveryError"] = error.localizedDescription }
             snapshot["status"] = "error"; snapshot["error"] = reason
-            snapshot["errorCode"] = networkChanged ? "network_changed" : (expired ? "clientDisconnected" : "coreExited")
+            snapshot["errorCode"] = tunnelRoutesChanged ? "vpnRouteConflict" : (networkChanged ? "network_changed" : (expired ? "clientDisconnected" : "coreExited"))
             snapshot["requiresReconnect"] = networkChanged
         }
     }

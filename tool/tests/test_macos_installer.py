@@ -22,6 +22,12 @@ elif name == 'pgrep':
     sys.exit(0 if os.environ.get('FAKE_GUI') else 1)
 elif name == 'codesign':
     sys.exit(1 if os.environ.get('FAKE_BAD_SIGNATURE') else 0)
+elif name == 'chmod':
+    # Fixtures have no ACLs; GNU chmod cannot interpret Darwin's ACL removal.
+    # All ordinary mode changes still use the real tool on both platforms.
+    if args[0] == '-RN':
+        sys.exit(0)
+    os.execv('/bin/chmod', ['/bin/chmod', *args])
 elif name == 'PlistBuddy':
     print('wrong.application' if os.environ.get('FAKE_BAD_APP') else 'io.github.caocaocc.keqdroid')
 elif name == 'launchctl':
@@ -47,7 +53,7 @@ class InstallerTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.mock = self.root / 'tools'
         self.mock.mkdir()
-        for name in ('id', 'stat', 'pgrep', 'codesign', 'PlistBuddy', 'launchctl', 'chown', 'sleep', 'security', 'pkgutil'):
+        for name in ('id', 'stat', 'pgrep', 'codesign', 'PlistBuddy', 'launchctl', 'chown', 'chmod', 'sleep', 'security', 'pkgutil'):
             path = self.mock / name
             path.write_text(f'#!{sys.executable}\n' + MOCK)
             path.chmod(0o755)
@@ -140,6 +146,9 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((self.runtime / 'identity').read_text(), 'new')
         self.assertEqual((self.runtime / 'state/journal').read_text(), 'keep-recovery-journal')
         self.assertFalse(self.backup.exists())
+        self.assertIn('chmod -RN ', commands)
+        self.assertEqual((self.runtime / 'state').stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.runtime / 'sessions').stat().st_mode & 0o777, 0o711)
 
     def test_recovery_failure_keeps_old_runtime_and_restarts_service(self):
         result = self.execute('postinstall', FAKE_RECOVERY_FAIL='1')

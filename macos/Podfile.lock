@@ -61,17 +61,17 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/window_manager/macos
 
 SPEC CHECKSUMS:
-  dynamic_color: 4f4c0d2861eb7ff36a2a5e8e2d441e1b6c681ddf
-  file_picker: 70164d9778c42c47218d6cd79ce435de0856b11a
-  flutter_local_notifications: 1fc7ffb10a83d6a2eeeeddb152d43f1944b0aad0
+  dynamic_color: b0b28f4bc541eb1a011f49579adedf0ff836adee
+  file_picker: e81e2d2db6261a4e98febeae383bd2173ba8b396
+  flutter_local_notifications: 14e285ca39907db50704f7f46c9ab7a526bd7ead
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  package_info_plus: f0052d280d17aa382b932f399edf32507174e870
-  screen_retriever_macos: c5508cc3c66ff0d4db650480cf0ab691e220d933
-  share_plus: 510bf0af1a42cd602274b4629920c9649c52f4cc
-  shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
-  tray_manager: 19c369010e59c073f13b82354d78a35f7972d609
-  url_launcher_macos: f87a979182d112f911de6820aefddaf56ee9fbfd
-  window_manager: b729e31d38fb04905235df9ea896128991cad99e
+  package_info_plus: 12f1c5c2cfe8727ca46cbd0b26677728972d9a5b
+  screen_retriever_macos: 038d3f7b34a779b06f536842003e41e8ec1fb4b7
+  share_plus: 1fa619de8392a4398bfaf176d441853922614e89
+  shared_preferences_foundation: 5086985c1d43c5ba4d5e69a4e8083a389e2909e6
+  tray_manager: c2a678ee19e2a094f0c2d03660ee2c3e81cea8ab
+  url_launcher_macos: 175a54c831f4375a6cf895875f716ee5af3888ce
+  window_manager: e25faf20d88283a0d46e7b1a759d07261ca27575
 
 PODFILE CHECKSUM: 37241807211f7182689f4a7be3359c00a0a2d5d0
 

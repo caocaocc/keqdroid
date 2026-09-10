@@ -205,39 +205,116 @@ uint64_t keq_process_start_time(pid_t pid) {
     return info.pbi_start_tvsec * 1000000 + info.pbi_start_tvusec;
 }
 
-int keq_ipv6_route_uses_interface(const char *address, const char *interface_name) {
-    // Darwin's routing socket requires each sockaddr to be aligned to a
-    // 32-bit boundary (sockaddr_in6 is already 28 bytes on both architectures).
-    struct { struct rt_msghdr header; struct sockaddr_in6 destination; } request = {0};
-    request.destination.sin6_len = sizeof(request.destination);
-    request.destination.sin6_family = AF_INET6;
-    if (inet_pton(AF_INET6, address, &request.destination.sin6_addr) != 1) return 0;
-    unsigned int expected = if_nametoindex(interface_name);
-    if (!expected) return 0;
-    request.header.rtm_msglen = sizeof(request);
+static int ipv4RoutePrefix(const unsigned char *bytes, size_t length, const struct rt_msghdr *header) {
+    if (header->rtm_flags & RTF_HOST) return 32;
+    size_t offset = sizeof(*header);
+    for (int index = 0; index < RTAX_MAX; ++index) {
+        if (!(header->rtm_addrs & (1 << index))) continue;
+        if (offset + 2 > length) return -1;
+        size_t addressLength = bytes[offset];
+        size_t alignedLength = addressLength ? (addressLength + 3) & ~3 : 4;
+        if (offset + alignedLength > length) return -1;
+        if (index == RTAX_NETMASK) {
+            unsigned char mask[4] = {0};
+            size_t start = offsetof(struct sockaddr_in, sin_addr);
+            if (addressLength > start) memcpy(mask, bytes + offset + start, MIN(sizeof(mask), addressLength - start));
+            int prefix = 0, zeroSeen = 0;
+            for (int bit = 0; bit < 32; ++bit) {
+                if (mask[bit / 8] & (0x80 >> (bit % 8))) {
+                    if (zeroSeen) return -1;
+                    ++prefix;
+                } else zeroSeen = 1;
+            }
+            return prefix;
+        }
+        offset += alignedLength;
+    }
+    return -1;
+}
+
+static int routeLookup(int family, const char *address, int prefix, struct rt_msghdr *found) {
+    // Darwin requires 32-bit sockaddr alignment. Both IPv4 (16 bytes) and
+    // IPv6 (28 bytes) already satisfy it; omit unused bytes from the request.
+    struct { struct rt_msghdr header; unsigned char addresses[56]; } request = {0};
+    size_t destinationSize;
+    if (family == AF_INET) {
+        struct sockaddr_in destination = {0};
+        destination.sin_len = sizeof(destination); destination.sin_family = AF_INET;
+        if (inet_pton(AF_INET, address, &destination.sin_addr) != 1) return -1;
+        destinationSize = sizeof(destination);
+        memcpy(request.addresses, &destination, destinationSize);
+        if (prefix >= 0) {
+            struct sockaddr_in mask = {0};
+            mask.sin_len = sizeof(mask); mask.sin_family = AF_INET;
+            mask.sin_addr.s_addr = htonl(prefix ? UINT32_MAX << (32 - prefix) : 0);
+            destination.sin_addr.s_addr &= mask.sin_addr.s_addr;
+            memcpy(request.addresses, &destination, destinationSize);
+            memcpy(request.addresses + destinationSize, &mask, sizeof(mask));
+        }
+    } else {
+        struct sockaddr_in6 destination = {0};
+        destination.sin6_len = sizeof(destination); destination.sin6_family = AF_INET6;
+        if (inet_pton(AF_INET6, address, &destination.sin6_addr) != 1) return -1;
+        destinationSize = sizeof(destination);
+        memcpy(request.addresses, &destination, destinationSize);
+    }
+    request.header.rtm_msglen = sizeof(request.header) + destinationSize * (prefix >= 0 ? 2 : 1);
     request.header.rtm_version = RTM_VERSION;
     request.header.rtm_type = RTM_GET;
-    request.header.rtm_addrs = RTA_DST;
+    request.header.rtm_addrs = RTA_DST | (prefix >= 0 ? RTA_NETMASK : 0);
     request.header.rtm_pid = getpid();
     request.header.rtm_seq = (int)(arc4random() & INT_MAX);
-    int fd = socket(PF_ROUTE, SOCK_RAW, AF_INET6);
-    if (fd < 0) return 0;
+    int fd = socket(PF_ROUTE, SOCK_RAW, family);
+    if (fd < 0) return -1;
     fcntl(fd, F_SETFD, FD_CLOEXEC);
     fcntl(fd, F_SETFL, O_NONBLOCK);
-    if (write(fd, &request, sizeof(request)) != sizeof(request)) { close(fd); return 0; }
-    int result = 0;
+    if (write(fd, &request, request.header.rtm_msglen) != request.header.rtm_msglen) { close(fd); return -1; }
+    int result = -1;
     for (int attempt = 0; attempt < 8; ++attempt) {
         struct pollfd ready = {fd, POLLIN, 0};
         if (poll(&ready, 1, 100) <= 0) break;
         union { struct rt_msghdr header; unsigned char bytes[4096]; } response = {0};
         ssize_t length = read(fd, &response, sizeof(response));
         struct rt_msghdr *header = &response.header;
-        if (length < sizeof(*header) || header->rtm_version != RTM_VERSION || header->rtm_type != RTM_GET || header->rtm_pid != request.header.rtm_pid || header->rtm_seq != request.header.rtm_seq) continue;
-        result = header->rtm_errno == 0 && header->rtm_index == expected && !(header->rtm_flags & (RTF_REJECT | RTF_BLACKHOLE));
+        if (length < sizeof(*header) || header->rtm_msglen < sizeof(*header) || header->rtm_msglen > length || header->rtm_version != RTM_VERSION || header->rtm_type != RTM_GET || header->rtm_pid != request.header.rtm_pid || header->rtm_seq != request.header.rtm_seq) continue;
+        if (header->rtm_errno == ESRCH) result = 0;
+        else if (header->rtm_errno == 0 && header->rtm_index && (header->rtm_flags & RTF_UP) && !(header->rtm_flags & (RTF_REJECT | RTF_BLACKHOLE))) {
+            // Darwin may return its default route when an exact mask misses.
+            // Never mistake that fallback for the requested underlying subnet.
+            if (prefix >= 0 && ipv4RoutePrefix(response.bytes, header->rtm_msglen, header) != prefix) result = 0;
+            else { *found = *header; result = 1; }
+        }
         break;
     }
     close(fd);
     return result;
+}
+
+int keq_ipv6_route_uses_interface(const char *address, const char *interface_name) {
+    unsigned int expected = if_nametoindex(interface_name);
+    if (!expected) return 0;
+    struct rt_msghdr found = {0};
+    return routeLookup(AF_INET6, address, -1, &found) == 1 && found.rtm_index == expected;
+}
+
+int keq_ipv4_route_interface(const char *address, char *interface_name, size_t length) {
+    if (!interface_name || length < IF_NAMESIZE) return 0;
+    interface_name[0] = 0;
+    struct rt_msghdr found = {0};
+    int result = routeLookup(AF_INET, address, -1, &found);
+    if (result < 0) return 0;
+    // A proxy server or bootstrap resolver can legitimately have a /32 route
+    // outside TUN. An exact key-mask lookup finds its underlying subnet route
+    // without removing that exception or sending packets to the probe address.
+    if (result == 0 || (found.rtm_flags & RTF_HOST)) {
+        for (int prefix = 31; prefix >= 0; --prefix) {
+            result = routeLookup(AF_INET, address, prefix, &found);
+            if (result < 0) return 0;
+            if (result == 1 && !(found.rtm_flags & RTF_HOST)) break;
+        }
+    }
+    if (result != 1 || (found.rtm_flags & RTF_HOST)) return 0;
+    return if_indextoname(found.rtm_index, interface_name) != NULL;
 }
 int keq_process_matches(pid_t pid, uint64_t start_time, const char *executable) {
     char path[PROC_PIDPATHINFO_MAXSIZE];
