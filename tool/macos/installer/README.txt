@@ -11,9 +11,10 @@ Compare the downloaded DMG SHA-256 with its .sha256 sidecar before opening it.
 3. If macOS blocks the downloaded package, use System Settings > Privacy &
    Security > Open Anyway for that package, then retry. On macOS 12 this is
    System Preferences > Security & Privacy. Do not disable Gatekeeper globally.
-4. Open KEQDIS from Applications. The first system proxy or TUN connection asks
-   for administrator authorization for this local account and installed version.
-   Updates require the complete installer and authorization for the new version.
+4. Open KEQDIS from Applications. Proxy connects and switches the system proxy
+   without an administrator prompt; its cores run as the current user. TUN asks
+   for administrator authorization once per account and installed version.
+   Updates require the complete installer and administrator authorization.
 
 Closing the window keeps the connection in the menu bar when enabled.
 Quit / Cmd+Q restores network settings before the app exits.

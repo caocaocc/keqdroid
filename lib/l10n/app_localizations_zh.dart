@@ -2483,11 +2483,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get macosNetworkServiceTitle => '网络服务';
 
   @override
-  String get macosNetworkServiceHint => '授权当前账户管理系统代理和 TUN。每个已安装版本首次授权时，macOS 会请求管理员许可。';
+  String get macosNetworkServiceHint => 'Proxy 连接时无需管理员授权，并会自动切换系统代理。TUN 每个已安装版本需要授权一次。';
 
   @override
   String get macosNetworkServiceMissing => '请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。';
 
   @override
-  String get macosAuthorizeAccount => '授权当前账户';
+  String get macosAuthorizeAccount => '授权当前账户使用 TUN';
 }

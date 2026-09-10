@@ -2485,11 +2485,11 @@ class AppLocalizationsDe extends AppLocalizations {
   String get macosNetworkServiceTitle => 'Netzwerkdienst';
 
   @override
-  String get macosNetworkServiceHint => 'Dieses Konto darf Systemproxy und TUN verwalten. macOS fragt einmal pro installierter Version nach Administratorrechten.';
+  String get macosNetworkServiceHint => 'Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.';
 
   @override
   String get macosNetworkServiceMissing => 'Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.';
 
   @override
-  String get macosAuthorizeAccount => 'Dieses Konto autorisieren';
+  String get macosAuthorizeAccount => 'TUN für dieses Konto autorisieren';
 }

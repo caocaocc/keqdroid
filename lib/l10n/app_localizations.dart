@@ -4826,7 +4826,7 @@ abstract class AppLocalizations {
   /// No description provided for @macosNetworkServiceHint.
   ///
   /// In en, this message translates to:
-  /// **'Authorize this account to control the system proxy and TUN. macOS asks for administrator permission once per installed version.'**
+  /// **'Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.'**
   String get macosNetworkServiceHint;
 
   /// No description provided for @macosNetworkServiceMissing.
@@ -4838,7 +4838,7 @@ abstract class AppLocalizations {
   /// No description provided for @macosAuthorizeAccount.
   ///
   /// In en, this message translates to:
-  /// **'Authorize this account'**
+  /// **'Authorize TUN for this account'**
   String get macosAuthorizeAccount;
 }
 

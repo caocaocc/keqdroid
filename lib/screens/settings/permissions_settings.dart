@@ -230,9 +230,7 @@ class _MacOSNetworkPermissionTileState
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                authorized
-                    ? l10n.settingsPermStatusGranted
-                    : l10n.settingsPermStatusDenied,
+                'TUN: ${authorized ? l10n.settingsPermStatusGranted : l10n.settingsPermStatusDenied}',
               ),
             ),
           if (_error != null)

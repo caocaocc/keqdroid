@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/tunnel/connection_mode.dart';
+import 'package:keqdroid/models/app_settings.dart';
+import 'package:keqdroid/utils/singbox_tun_config.dart';
 import 'package:keqdroid/tunnel/macos_tunnel_backend.dart';
 import 'package:keqdroid/tunnel/macos_network_context.dart';
 import 'package:keqdroid/tunnel/tunnel_session_request.dart';
@@ -14,9 +16,16 @@ void main() {
   const desktop = MethodChannel('test.keqdroid.macos.desktop');
   late MacOSTunnelBackend backend;
   late List<MethodCall> calls;
+  late Map<String, dynamic> service;
   Map<String, dynamic> snapshot = {'status': 'disconnected'};
   setUp(() {
     calls = [];
+    service = {
+      'installed': true,
+      'authorized': false,
+      'proxyWithoutElevation': true,
+      'protocolVersion': 1,
+    };
     snapshot = {'status': 'disconnected'};
     backend = MacOSTunnelBackend(
       channel: channel,
@@ -28,11 +37,16 @@ void main() {
           calls.add(call);
           switch (call.method) {
             case 'getServiceStatus':
+              return service;
+            case 'authorize':
+              return {...service, 'authorized': true};
+            case 'prepareNetworkContext':
               return {
-                'installed': true,
-                'authorized': true,
-                'protocolVersion': 1,
+                'contextId': 'test-network',
+                'interfaceName': 'en0',
+                'dnsServers': ['192.168.1.1'],
               };
+            case 'startProxySession':
             case 'startSession':
               final args = call.arguments as Map;
               snapshot = {
@@ -72,9 +86,14 @@ void main() {
       );
       expect((await backend.getCurrentState()).status, VpnStatus.connected);
       final start =
-          calls.singleWhere((call) => call.method == 'startSession').arguments
+          calls
+                  .singleWhere((call) => call.method == 'startProxySession')
+                  .arguments
               as Map;
       expect(start['core'], 'keqrnel');
+      expect(start['systemProxy'], isTrue);
+      expect(calls.any((call) => call.method == 'authorize'), isFalse);
+      expect(calls.any((call) => call.method == 'startSession'), isFalse);
       expect(start['configurations'], contains('keqrnel'));
       expect(start.containsKey('executablePath'), isFalse);
       expect(
@@ -90,13 +109,117 @@ void main() {
     },
   );
 
+  test(
+    'login Proxy needs a matching helper, while login TUN needs its grant',
+    () {
+      expect(
+        MacOSTunnelBackend.canConnectWithoutPrompt(
+          service,
+          ConnectionMode.proxy,
+        ),
+        isTrue,
+      );
+      expect(
+        MacOSTunnelBackend.canConnectWithoutPrompt(service, ConnectionMode.tun),
+        isFalse,
+      );
+      service['authorized'] = true;
+      expect(
+        MacOSTunnelBackend.canConnectWithoutPrompt(service, ConnectionMode.tun),
+        isTrue,
+      );
+      service.remove('proxyWithoutElevation');
+      expect(
+        MacOSTunnelBackend.canConnectWithoutPrompt(
+          service,
+          ConnectionMode.proxy,
+        ),
+        isFalse,
+      );
+      service['protocolVersion'] = 0;
+      expect(
+        MacOSTunnelBackend.canConnectWithoutPrompt(service, ConnectionMode.tun),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'old helper cannot fall back to administrator authorization for proxy',
+    () async {
+      service.remove('proxyWithoutElevation');
+      await expectLater(
+        backend.startSession(
+          const TunnelSessionRequest(
+            mode: ConnectionMode.proxy,
+            xrayConfig: '{"outbounds":[]}',
+          ),
+        ),
+        throwsException,
+      );
+      expect(calls.map((call) => call.method), ['getServiceStatus']);
+      expect(backend.currentState.errorMessage, contains('updated'));
+    },
+  );
+
+  test(
+    'TUN still requires authorization before preparing system DNS',
+    () async {
+      await backend.startSession(
+        TunnelSessionRequest(
+          mode: ConnectionMode.tun,
+          xrayConfig: '{"outbounds":[]}',
+          singboxConfig: SingBoxTunConfigGen.generate(
+            localSocksPort: 2080,
+            socksUsername: 'test-user',
+            socksPassword: 'test-password',
+            serverIpToExclude: '192.0.2.1',
+            settings: const AppSettings(),
+            windows: false,
+            macos: true,
+          ),
+        ),
+      );
+      final methods = calls.map((call) => call.method).toList();
+      expect(methods.indexOf('authorize'), greaterThanOrEqualTo(0));
+      expect(
+        methods.indexOf('authorize'),
+        lessThan(methods.indexOf('prepareNetworkContext')),
+      );
+      expect(methods, contains('startSession'));
+      expect(methods, isNot(contains('startProxySession')));
+    },
+  );
+
+  test('declined TUN permission cannot prepare DNS or start a core', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'getServiceStatus' || call.method == 'authorize') {
+            return service;
+          }
+          throw StateError('Unexpected operation: ${call.method}');
+        });
+    await expectLater(
+      backend.startSession(
+        const TunnelSessionRequest(
+          mode: ConnectionMode.tun,
+          xrayConfig: '{"outbounds":[]}',
+        ),
+      ),
+      throwsException,
+    );
+    expect(calls.map((call) => call.method), ['getServiceStatus', 'authorize']);
+  });
+
   test('invalid native success cannot be presented as connected', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getServiceStatus') {
             return {
               'installed': true,
-              'authorized': true,
+              'authorized': false,
+              'proxyWithoutElevation': true,
               'protocolVersion': 1,
             };
           }
@@ -140,7 +263,7 @@ void main() {
       'protocolVersion': 1,
     });
     await Future.wait([start, stop]);
-    expect(calls.any((call) => call.method == 'startSession'), isFalse);
+    expect(calls.any((call) => call.method == 'startProxySession'), isFalse);
     expect(calls.any((call) => call.method == 'authorize'), isFalse);
     expect(backend.currentState.status, VpnStatus.disconnected);
   });
@@ -157,13 +280,9 @@ void main() {
               return poll.future;
             }
             if (call.method == 'getServiceStatus') {
-              return {
-                'installed': true,
-                'authorized': true,
-                'protocolVersion': 1,
-              };
+              return service;
             }
-            if (call.method == 'startSession') {
+            if (call.method == 'startProxySession') {
               final args = call.arguments as Map;
               return {
                 'status': 'connected',

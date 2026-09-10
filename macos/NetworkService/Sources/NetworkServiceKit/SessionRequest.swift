@@ -36,6 +36,9 @@ public struct SessionRequest {
         blockIpv6Leak = arguments["blockIpv6Leak"] as? Bool ?? false
         contextID = arguments["contextId"] as? String
         dnsAddress = arguments["dnsAddress"] as? String
+        if mode == "proxy", arguments["contextId"] != nil || arguments["dnsAddress"] != nil {
+            throw ServiceFailure("invalidRequest", "Proxy sessions cannot change system DNS or use a TUN network context.")
+        }
         if mode == "tun" {
             guard contextID != nil, let dnsAddress, isIPAddress(dnsAddress) else { throw ServiceFailure("invalidDNS", "TUN requires a prepared network context and virtual DNS address.") }
             if core != "mihomo", dnsAddress != "172.19.0.2" { throw ServiceFailure("invalidDNS", "Unexpected virtual tunnel DNS address.") }

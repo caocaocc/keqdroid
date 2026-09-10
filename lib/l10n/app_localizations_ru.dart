@@ -2490,11 +2490,11 @@ class AppLocalizationsRu extends AppLocalizations {
   String get macosNetworkServiceTitle => 'Сетевая служба';
 
   @override
-  String get macosNetworkServiceHint => 'Разрешите этому аккаунту управлять системным прокси и TUN. macOS запросит права администратора один раз для установленной версии.';
+  String get macosNetworkServiceHint => 'Proxy подключается и переключает системный прокси без прав администратора. Для TUN нужно разрешение один раз для установленной версии.';
 
   @override
   String get macosNetworkServiceMissing => 'Установите или обновите KEQDIS полным пакетом PKG, чтобы включить сетевую службу.';
 
   @override
-  String get macosAuthorizeAccount => 'Разрешить этому аккаунту';
+  String get macosAuthorizeAccount => 'Разрешить TUN этому аккаунту';
 }
