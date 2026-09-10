@@ -122,7 +122,11 @@ def check_distribution(path, arch, uninstall=False):
     expected_id = "io.github.caocaocc.keqdroid." + ("uninstaller" if uninstall else "installer")
     references = [item for item in document.findall("pkg-ref") if item.text and item.text.strip()]
     expected_package = "uninstall-component.pkg" if uninstall else "install-component.pkg"
-    if len(references) != 1 or references[0].get("id") != expected_id or references[0].text.strip() != expected_package:
+    # productbuild rewrites an embedded component reference to '#name.pkg'.
+    # Accept only that exact local fragment or the source distribution spelling;
+    # never resolve arbitrary URLs, paths or package names from the payload.
+    expected_references = {expected_package, "#" + expected_package}
+    if len(references) != 1 or references[0].get("id") != expected_id or references[0].text.strip() not in expected_references:
         raise ValueError("Unexpected component package in distribution")
 
 

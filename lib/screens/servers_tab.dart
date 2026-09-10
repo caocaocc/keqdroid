@@ -20,6 +20,7 @@ import 'package:keqdroid/shared/ui/shape_morph.dart';
 import 'package:keqdroid/shared/ui/shape_loading_indicator.dart';
 import 'package:keqdroid/shared/ui/smooth_scroll.dart';
 import 'package:keqdroid/shared/ui/stat_strip.dart';
+import 'package:keqdroid/shared/ui/subscription_deep_link_confirmation.dart';
 import 'package:keqdroid/shared/ui/update_interval_sheet.dart';
 
 import '../core/app_logger.dart';
@@ -323,6 +324,13 @@ class _ServersTabState extends ConsumerState<ServersTab>
 
   bool _handlingLaunchAction = false;
   bool _appInForeground = true;
+  late final _macOSDeepLinks = SubscriptionDeepLinkImportQueue(
+    isActive: () => mounted,
+    readPending: VpnNativeBridge.getPendingDeepLink,
+    confirmSubscription: (url) =>
+        showSubscriptionDeepLinkConfirmation(context, url),
+    importLink: _importDeepLink,
+  );
 
   @override
   void initState() {
@@ -461,7 +469,9 @@ class _ServersTabState extends ConsumerState<ServersTab>
     }
     if (call.method == 'onDeepLink') {
       final url = ((call.arguments as Map?)?['url'] as String?)?.trim();
-      if (url != null && url.isNotEmpty) {
+      if (Platform.isMacOS) {
+        await _checkPendingDeepLink(macOSRaw: url);
+      } else if (url != null && url.isNotEmpty) {
         await _importDeepLink(url);
       } else {
         // Windows шлёт пуш без ссылки: она лежит у натива и ждёт, пока её
@@ -492,9 +502,13 @@ class _ServersTabState extends ConsumerState<ServersTab>
   ///
   /// Зовётся и при (пере)монтировании вкладки: на Windows ссылка могла прийти,
   /// пока было открыто меню трея и вкладки не было в дереве.
-  Future<void> _checkPendingDeepLink() async {
+  Future<void> _checkPendingDeepLink({String? macOSRaw}) async {
     if (!VpnNativeBridge.supportsDeepLinks) return;
     try {
+      if (Platform.isMacOS) {
+        await _macOSDeepLinks.drain(raw: macOSRaw);
+        return;
+      }
       final url = (await VpnNativeBridge.getPendingDeepLink())?.trim();
       if (url == null || url.isEmpty || !mounted) return;
       await _importDeepLink(url);

@@ -100,6 +100,26 @@ class DownloadChecks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify.check_distribution(distribution, "arm64")
 
+    def test_productbuild_embedded_references_and_bundle_metadata(self):
+        distribution = self.root / "Distribution"
+        for uninstall in (False, True):
+            suffix = "uninstaller" if uninstall else "installer"
+            name = "uninstall-component.pkg" if uninstall else "install-component.pkg"
+            content = f'''<installer-gui-script><options hostArchitectures="arm64"/>
+            <volume-check><allowed-os-versions><os-version min="12.0"/></allowed-os-versions></volume-check>
+            <pkg-ref id="io.github.caocaocc.keqdroid.{suffix}">#{name}</pkg-ref>
+            <pkg-ref id="io.github.caocaocc.keqdroid.{suffix}">
+              <bundle-version><bundle id="io.github.caocaocc.keqdroid"/></bundle-version>
+            </pkg-ref></installer-gui-script>'''
+            distribution.write_text(content)
+            verify.check_distribution(distribution, "arm64", uninstall=uninstall)
+            for reference in ("#other.pkg", "../" + name, "##" + name,
+                              "https://example.test/" + name, "#../" + name):
+                with self.subTest(uninstall=uninstall, reference=reference):
+                    distribution.write_text(content.replace("#" + name, reference))
+                    with self.assertRaisesRegex(ValueError, "Unexpected component"):
+                        verify.check_distribution(distribution, "arm64", uninstall=uninstall)
+
     def test_installer_script_comparison_reads_git_blob_without_executing_script(self):
         script = self.root / "preinstall"
         script.write_bytes(b"#!/bin/sh\nexit 0\n")
