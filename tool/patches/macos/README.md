@@ -48,6 +48,15 @@ permission to substitute public DNS.
 * `xray-bootstrap-dns.patch` preserves that same resolver when Xray constructs
   its controller-owned local DNS client. Mutating the original
   `net.DefaultResolver` also covers Xray's retained alias and implicit lookups.
+  With the protected Darwin context it also pins Xray's actual TCP/UDP system
+  sockets to the captured interface, after applying controller/socket options.
+  Interface name/index changes, option failures and failed binding/readback
+  abort the connection. This prevents embedded Xray traffic from re-entering
+  the TUN before process routing can identify it. Exact loopback destinations
+  remain local; an exempt UDP socket rejects subsequent non-loopback writes.
+  Chain redirection still occurs before the physical socket is created. No
+  context and non-Darwin builds keep upstream behavior. This covers the default
+  Xray system dialer, not arbitrary replacement dialers or wireproxy's sockets.
 * `mihomo-bootstrap-dns.patch` makes `system` DNS use the captured list through
   bound clients, disables its public fallback for active bootstrap sessions,
   and prevents `main` from replacing the installed resolver with its upstream
@@ -131,5 +140,5 @@ incomplete recovery on timeout; it must not attempt prefix-based deletion.
 
 Tests use simulated route tables, serialized messages and an ordinary pipe
 for descriptor lifetime; they never create a TUN or change real routes.
-Live TUN and routing recovery validation must be performed manually on the
-target macOS versions and architectures.
+Live TUN and routing recovery validation must be performed with user
+authorization on the target macOS versions and architectures.

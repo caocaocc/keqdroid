@@ -75,6 +75,16 @@ class CoreCheckpointTests(unittest.TestCase):
         self.change_patch("macos/bootstrapdns/resolver.go")
         self.assert_changed(before, builder.CORES)
 
+    def test_xray_physical_socket_regressions_run_with_bootstrap_checks(self):
+        sources = {name: self.directory / name for name in builder.DEPENDENCIES["keqrnel"]}
+        with patch.object(builder, "run") as commands:
+            builder.test_sources(("keqrnel",), Path("go"), {}, sources)
+        xray_calls = [call.args[0] for call in commands.call_args_list if call.args[1] == sources["xray"]]
+        self.assertEqual(len(xray_calls), 1)
+        self.assertIn("./transport/internet", xray_calls[0])
+        self.assertIn("./features/dns/localdns", xray_calls[0])
+        self.assertIn("^TestKeqdis", xray_calls[0])
+
     def test_darwin_route_dependency_invalidates_only_keqrnel(self):
         before = self.fingerprints()
         self.change_patch("macos/singtun-route-ownership.patch")

@@ -79,7 +79,7 @@ TUN DNS 使用核心虚拟端点：keqrnel/AWG 为 `172.19.0.2`，Mihomo 从运�
 
 虚拟 DNS 探测每条查询最多等待 8 秒，UDP 和 TCP 共享 15 秒总期限，避免把代理 DNS 的冷启动延迟误判为不可用。查询期间保留同一个 socket，定期读取有限数量的核心日志并检查核心与接口；UDP 失败也会检查 TCP，错误中分别保留两者结果。TCP 连接、帧头和响应分片共用同一单调时钟期限，不因收到部分数据而重新计时。这只检查 DNS 协议响应，提交设置后仍须通过下面的系统解析检查。
 
-提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由原有比较后恢复逻辑保留其修改。仅 TUN 使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；两次查询共享总计 5 秒期限，失败或超时不进入已连接状态。若用户规则屏蔽了整个 `example.com`，此项就绪检查可能失败，诊断会明确指出探测域，用户 DNS 规则不会被更改。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
+提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由原有比较后恢复逻辑保留其修改。仅 TUN 使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；查询启用 `ReturnIntermediates` 以接收负回答，合法 CNAME 中间记录继续等待 A。两次查询共享总计 5 秒期限，等待期间每 100 毫秒在会话线程读取有限核心日志、核验核心和接口，避免输出管道堵塞；失败或超时不进入已连接状态。错误区分随机查询与正答案兜底阶段，核心退出和接口丢失保留其原始错误。若用户规则屏蔽了整个 `example.com`，此项就绪检查可能失败，诊断会明确指出探测域，用户 DNS 规则不会被更改。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
 
 启动前保存物理 DNS 和出口，注入固定环境契约：
 
@@ -90,7 +90,7 @@ KEQDIS_BOOTSTRAP_INTERFACE=en0
 
 macOS TUN 在未启用自定义 DNS 时，自动生成的链接和代理链使用这份物理快照解析各节点的实际服务器域名。该策略只应用于节点的精确 bootstrap 域名，普通业务 DNS 仍按现有规则运行；明确开启的自定义 DNS、完整作者配置、Proxy 和其他平台保持原策略。这样可以避免物理网络无法直连默认公共 DoH 时，节点启动先消耗一次失败等待。合理的 DNS 就绪期限仍保留，作为慢响应的容错上限。
 
-Darwin 补丁覆盖 keqrnel local DNS、Xray 隐式/新建 resolver 和 Mihomo system resolver。有效快照绑定物理出口；错误或不完整快照拒绝启动；失败不静默回退公共 DNS。用户明确配置的 DoH/DoT/代理 DNS 保留。网络切换后重建整个快照与会话。补丁来源、范围和单独测试方法见 [`tool/patches/macos/README.md`](../tool/patches/macos/README.md)。
+Darwin 补丁覆盖 keqrnel local DNS、Xray 隐式/新建 resolver 和 Mihomo system resolver。有效快照绑定物理出口；错误或不完整快照拒绝启动；失败不静默回退公共 DNS。用户明确配置的 DoH/DoT/代理 DNS 保留。内嵌 Xray 的默认 TCP/UDP 系统拨号器使用同一物理接口创建实际出站 socket，在应用其他 socket 选项后绑定并读回核验；接口消失、被替换或绑定失败时拒绝拨号，不依赖 TUN 内进程识别才绕过自身流量。精确 loopback 目的地保留给本机上游，豁免的 UDP socket 拒绝向非 loopback 改发数据。链式代理仍先完成既有 `dialerProxy` 重定向；`xicmp` 等自建 socket 的特殊传输不在此补丁覆盖范围。网络切换后重建整个快照与会话。补丁来源、范围和单独测试方法见 [`tool/patches/macos/README.md`](../tool/patches/macos/README.md)。
 
 开启 IPv6 防泄漏要求时，必须证明捕获/阻断成立；否则拒绝连接。目前 Mihomo 的该组合会明确拒绝，keqrnel/AWG 必须同时通过配置与实际 IPv6 路由校验。保留 mDNS/系统本地域行为，不承诺接管另一 VPN 的 scoped DNS；发现冲突时停止并报告。
 
@@ -185,4 +185,4 @@ CI 只上传 `unvalidated` 开发产物，不自动发布 GitHub Release。新�
 
 CI 演练已确认：仅修改安装脚本的提交中，两个架构共十个组件均恢复成功，所有编译步骤跳过；真实下载组件修改一字节后被校验拒绝。打包检查同时发现了 Flutter 原生资产默认最低 macOS 13 的问题，因此编译成功和符合 macOS 12 部署目标不是同一验收项，必须保留最终 Mach-O 检查。
 
-本机为 macOS 15.6、Apple Silicon。根据使用者要求，现有 VPN 保持连接，TUN 运行验收由使用者人工完成；自动验收聚焦安装、桌面和 Proxy。网络原始快照保存在本机私有目录，不能提交订阅凭据或本机网络详情。Intel 运行、macOS 12 两架构、AWG 节点及尚未执行的完整发布矩阵继续标为待验证。
+本机为 macOS 15.6、Apple Silicon。2026-09-11 使用者授权将 TUN 连接、网络设置与验收改为自动执行；每次测试保存网络基线、设置限时退出保护，并核对断开后的恢复结果。系统管理员凭据仍由使用者在系统界面输入。网络原始快照保存在本机私有目录，不能提交订阅凭据或本机网络详情。Intel 运行、macOS 12 两架构、AWG 节点及尚未执行的完整发布矩阵继续标为待验证。

@@ -24,3 +24,702 @@ diff --git a/features/dns/localdns/client.go b/features/dns/localdns/client.go
  	return &Client{
  		d: d,
  		r: r,
+diff --git a/transport/internet/system_dialer.go b/transport/internet/system_dialer.go
+--- a/transport/internet/system_dialer.go
++++ b/transport/internet/system_dialer.go
+@@ -49,91 +49,65 @@
+ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
+-	errors.LogDebug(ctx, "dialing to "+dest.String())
+-
+-	if dest.Network == net.Network_UDP {
+-		srcAddr := resolveSrcAddr(net.Network_UDP, src)
+-		if srcAddr == nil {
+-			srcAddr = &net.UDPAddr{
+-				IP:   []byte{0, 0, 0, 0},
+-				Port: 0,
+-			}
+-		}
+-		var lc net.ListenConfig
+-		destAddr, err := net.ResolveUDPAddr("udp", dest.NetAddr())
+-		if err != nil {
+-			return nil, err
+-		}
+-		lc.Control = func(network, address string, c syscall.RawConn) error {
+-			for _, ctl := range Controllers {
+-				if err := ctl(network, address, c); err != nil {
+-					errors.LogInfoInner(ctx, err, "failed to apply external controller")
+-				}
+-			}
+-			return c.Control(func(fd uintptr) {
+-				if sockopt != nil {
+-					if err := applyOutboundSocketOptions(network, destAddr.String(), fd, sockopt); err != nil {
+-						errors.LogInfo(ctx, err, "failed to apply socket options")
+-					}
+-				}
+-			})
+-		}
+-		packetConn, err := lc.ListenPacket(ctx, srcAddr.Network(), srcAddr.String())
+-		if err != nil {
+-			return nil, err
+-		}
+-		return &PacketConnWrapper{
+-			PacketConn: packetConn,
+-			Dest:       destAddr,
+-		}, nil
+-	}
+-	// Chrome defaults
+-	keepAliveConfig := net.KeepAliveConfig{
+-		Enable:   true,
+-		Idle:     45 * time.Second,
+-		Interval: 45 * time.Second,
+-		Count:    -1,
+-	}
+-	keepAlive := time.Duration(0)
+-	if sockopt != nil {
+-		if sockopt.TcpKeepAliveIdle*sockopt.TcpKeepAliveInterval < 0 {
+-			return nil, errors.New("invalid TcpKeepAliveIdle or TcpKeepAliveInterval value: ", sockopt.TcpKeepAliveIdle, " ", sockopt.TcpKeepAliveInterval)
+-		}
+-		if sockopt.TcpKeepAliveIdle < 0 || sockopt.TcpKeepAliveInterval < 0 {
+-			keepAlive = -1
+-			keepAliveConfig.Enable = false
+-		}
+-		if sockopt.TcpKeepAliveIdle > 0 {
+-			keepAliveConfig.Idle = time.Duration(sockopt.TcpKeepAliveIdle) * time.Second
+-		}
+-		if sockopt.TcpKeepAliveInterval > 0 {
+-			keepAliveConfig.Interval = time.Duration(sockopt.TcpKeepAliveInterval) * time.Second
+-		}
+-	}
+-	dialer := &net.Dialer{
+-		Timeout:         time.Second * 16,
+-		LocalAddr:       resolveSrcAddr(dest.Network, src),
+-		KeepAlive:       keepAlive,
+-		KeepAliveConfig: keepAliveConfig,
+-	}
+-
+-	if sockopt != nil || len(Controllers) > 0 {
+-		if sockopt != nil && sockopt.TcpMptcp {
+-			dialer.SetMultipathTCP(true)
+-		}
+-		dialer.Control = func(network, address string, c syscall.RawConn) error {
+-			for _, ctl := range Controllers {
+-				if err := ctl(network, address, c); err != nil {
+-					errors.LogInfoInner(ctx, err, "failed to apply external controller")
+-				}
+-			}
+-			return c.Control(func(fd uintptr) {
+-				if sockopt != nil {
+-					if err := applyOutboundSocketOptions(network, address, fd, sockopt); err != nil {
+-						errors.LogInfoInner(ctx, err, "failed to apply socket options")
+-					}
+-				}
+-			})
+-		}
+-	}
+-
+-	return dialer.DialContext(ctx, dest.Network.SystemString(), dest.NetAddr())
++	errors.LogDebug(ctx, "dialing to "+dest.String())
++
++	if dest.Network == net.Network_UDP {
++		srcAddr := resolveSrcAddr(net.Network_UDP, src)
++		if srcAddr == nil {
++			srcAddr = &net.UDPAddr{
++				IP:   []byte{0, 0, 0, 0},
++				Port: 0,
++			}
++		}
++		var lc net.ListenConfig
++		destAddr, err := net.ResolveUDPAddr("udp", dest.NetAddr())
++		if err != nil {
++			return nil, err
++		}
++		lc.Control = keqdisSocketControl(ctx, destAddr.String(), sockopt)
++		packetConn, err := keqdisListenUDP(&lc, ctx, srcAddr.Network(), srcAddr.String())
++		if err != nil {
++			return nil, err
++		}
++		return &PacketConnWrapper{
++			PacketConn: keqdisRestrictLoopbackPacketConn(packetConn, destAddr),
++			Dest:       destAddr,
++		}, nil
++	}
++	// Chrome defaults
++	keepAliveConfig := net.KeepAliveConfig{
++		Enable:   true,
++		Idle:     45 * time.Second,
++		Interval: 45 * time.Second,
++		Count:    -1,
++	}
++	keepAlive := time.Duration(0)
++	if sockopt != nil {
++		if sockopt.TcpKeepAliveIdle*sockopt.TcpKeepAliveInterval < 0 {
++			return nil, errors.New("invalid TcpKeepAliveIdle or TcpKeepAliveInterval value: ", sockopt.TcpKeepAliveIdle, " ", sockopt.TcpKeepAliveInterval)
++		}
++		if sockopt.TcpKeepAliveIdle < 0 || sockopt.TcpKeepAliveInterval < 0 {
++			keepAlive = -1
++			keepAliveConfig.Enable = false
++		}
++		if sockopt.TcpKeepAliveIdle > 0 {
++			keepAliveConfig.Idle = time.Duration(sockopt.TcpKeepAliveIdle) * time.Second
++		}
++		if sockopt.TcpKeepAliveInterval > 0 {
++			keepAliveConfig.Interval = time.Duration(sockopt.TcpKeepAliveInterval) * time.Second
++		}
++	}
++	dialer := &net.Dialer{
++		Timeout:         time.Second * 16,
++		LocalAddr:       resolveSrcAddr(dest.Network, src),
++		KeepAlive:       keepAlive,
++		KeepAliveConfig: keepAliveConfig,
++	}
++
++	if sockopt != nil || len(Controllers) > 0 || keqdisPhysicalSocketEnabled() {
++		if sockopt != nil && sockopt.TcpMptcp {
++			dialer.SetMultipathTCP(true)
++		}
++		dialer.Control = keqdisSocketControl(ctx, "", sockopt)
++	}
++
++	return keqdisDialTCP(dialer, ctx, dest.Network.SystemString(), dest.NetAddr())
+ }
+diff --git a/transport/internet/keqdis_physical_socket.go b/transport/internet/keqdis_physical_socket.go
+new file mode 100644
+--- /dev/null
++++ b/transport/internet/keqdis_physical_socket.go
+@@ -0,0 +1,91 @@
++package internet
++
++import (
++	"context"
++	"fmt"
++	"net"
++	"syscall"
++
++	"github.com/xtls/xray-core/common/errors"
++)
++
++// Kept separate from socket policy so the integration tests can exercise the
++// actual DefaultSystemDialer branches without opening a socket or sending data.
++var keqdisDialTCP = func(d *net.Dialer, ctx context.Context, network, address string) (net.Conn, error) {
++	return d.DialContext(ctx, network, address)
++}
++var keqdisListenUDP = func(c *net.ListenConfig, ctx context.Context, network, address string) (net.PacketConn, error) {
++	return c.ListenPacket(ctx, network, address)
++}
++
++// The UDP control address is the local bind address, not its peer. Keep the
++// destination separate; TCP's Control address is already resolved by net.Dialer.
++func keqdisSocketControl(ctx context.Context, destination string, sockopt *SocketConfig) func(string, string, syscall.RawConn) error {
++	return keqdisSocketControlWithOptions(ctx, destination, sockopt, applyOutboundSocketOptions)
++}
++
++func keqdisSocketControlWithOptions(ctx context.Context, destination string, sockopt *SocketConfig,
++	apply func(string, string, uintptr, *SocketConfig) error) func(string, string, syscall.RawConn) error {
++	return func(network, address string, socket syscall.RawConn) error {
++		strict := keqdisPhysicalSocketEnabled()
++		for _, controller := range Controllers {
++			if err := controller(network, address, socket); err != nil {
++				errors.LogInfoInner(ctx, err, "failed to apply external controller")
++				if strict {
++					return err
++				}
++			}
++		}
++		target := destination
++		if target == "" {
++			target = address
++		}
++		var optionErr error
++		if err := socket.Control(func(fd uintptr) {
++			if sockopt != nil {
++				optionErr = apply(network, target, fd, sockopt)
++				if optionErr != nil {
++					errors.LogInfoInner(ctx, optionErr, "failed to apply socket options")
++				}
++			}
++		}); err != nil {
++			return err
++		}
++		if strict && optionErr != nil {
++			return optionErr
++		}
++		// Last socket operation: an outbound's sockopt/controller cannot override
++		// the session's mandatory physical interface. Binding failures abort Dial.
++		return keqdisBindPhysicalSocket(network, target, socket)
++	}
++}
++
++func keqdisLoopbackDestination(address string) bool {
++	host, _, err := net.SplitHostPort(address)
++	if err != nil {
++		return false
++	}
++	if ip := net.ParseIP(host); ip != nil {
++		return ip.IsLoopback()
++	}
++	return false // No DNS queries, hostname guessing, or port-based exemption.
++}
++
++func keqdisRestrictLoopbackPacketConn(conn net.PacketConn, destination *net.UDPAddr) net.PacketConn {
++	if !keqdisPhysicalSocketEnabled() || !destination.IP.IsLoopback() {
++		return conn
++	}
++	// Xray freedom/Hysteria can access the underlying PacketConn and change a
++	// datagram's destination. A loopback-exempt socket must never send remotely.
++	return &keqdisLoopbackPacketConn{PacketConn: conn}
++}
++
++type keqdisLoopbackPacketConn struct{ net.PacketConn }
++
++func (c *keqdisLoopbackPacketConn) WriteTo(buffer []byte, address net.Addr) (int, error) {
++	peer, ok := address.(*net.UDPAddr)
++	if !ok || peer == nil || !peer.IP.IsLoopback() {
++		return 0, fmt.Errorf("physical socket: loopback-only UDP destination required")
++	}
++	return c.PacketConn.WriteTo(buffer, address)
++}
+diff --git a/transport/internet/keqdis_physical_socket_darwin.go b/transport/internet/keqdis_physical_socket_darwin.go
+new file mode 100644
+--- /dev/null
++++ b/transport/internet/keqdis_physical_socket_darwin.go
+@@ -0,0 +1,118 @@
++//go:build darwin
++
++package internet
++
++import (
++	"fmt"
++	"net"
++	"os"
++	"strings"
++	"syscall"
++)
++
++type keqdisPhysicalSocketState struct {
++	enabled   bool
++	name      string
++	index     int
++	err       error
++	lookup    func(string) (*net.Interface, error)
++	setOption func(int, int, int, int) error
++	getOption func(int, int, int) (int, error)
++}
++
++// Capture the helper-supplied identity once, before any embedded engine starts.
++// Per-socket checks reject a removed/replaced interface instead of using a new
++// interface with the same name or silently following the TUN's default route.
++var keqdisPhysicalSockets = keqdisLoadPhysicalSockets(os.LookupEnv, net.InterfaceByName)
++
++func keqdisLoadPhysicalSockets(env func(string) (string, bool), lookup func(string) (*net.Interface, error)) *keqdisPhysicalSocketState {
++	dns, haveDNS := env("KEQDIS_BOOTSTRAP_DNS")
++	name, haveInterface := env("KEQDIS_BOOTSTRAP_INTERFACE")
++	s := &keqdisPhysicalSocketState{enabled: haveDNS || haveInterface, name: name,
++		lookup: lookup, setOption: syscall.SetsockoptInt, getOption: syscall.GetsockoptInt}
++	if !s.enabled {
++		return s
++	}
++	if !haveDNS || !haveInterface || strings.TrimSpace(dns) == "" || !keqdisPhysicalInterfaceName(name) {
++		s.err = fmt.Errorf("physical socket: incomplete or invalid protected network context")
++		return s
++	}
++	iface, err := lookup(name)
++	if err != nil {
++		s.err = fmt.Errorf("physical socket: interface lookup: %w", err)
++		return s
++	}
++	if !keqdisPhysicalInterface(iface, name) {
++		s.err = fmt.Errorf("physical socket: interface is not active physical context")
++		return s
++	}
++	s.index = iface.Index
++	return s
++}
++
++func keqdisPhysicalInterfaceName(name string) bool {
++	if name == "" || len(name) > 15 || name == "lo0" || strings.HasPrefix(name, "utun") || strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "tap") {
++		return false
++	}
++	for _, c := range name {
++		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
++			return false
++		}
++	}
++	return true
++}
++
++func keqdisPhysicalInterface(iface *net.Interface, name string) bool {
++	return iface != nil && iface.Name == name && iface.Index > 0 && iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagLoopback == 0
++}
++
++func keqdisPhysicalSocketEnabled() bool { return keqdisPhysicalSockets.enabled }
++
++func keqdisBindPhysicalSocket(network, address string, socket syscall.RawConn) error {
++	s := keqdisPhysicalSockets
++	if !s.enabled {
++		return nil
++	}
++	if s.err != nil {
++		return s.err
++	}
++	iface, err := s.lookup(s.name)
++	if err != nil {
++		return fmt.Errorf("physical socket: interface disappeared: %w", err)
++	}
++	if !keqdisPhysicalInterface(iface, s.name) || iface.Index != s.index {
++		return fmt.Errorf("physical socket: interface changed; rebuild the network session")
++	}
++	if keqdisLoopbackDestination(address) {
++		return nil
++	}
++	if host, _, err := net.SplitHostPort(address); err != nil || net.ParseIP(strings.Split(host, "%")[0]) == nil {
++		return fmt.Errorf("physical socket: unresolved destination")
++	}
++	level, option := syscall.IPPROTO_IP, syscall.IP_BOUND_IF
++	switch network {
++	case "tcp4", "udp4":
++	case "tcp6", "udp6":
++		level, option = syscall.IPPROTO_IPV6, syscall.IPV6_BOUND_IF
++	default:
++		return fmt.Errorf("physical socket: unsupported socket network")
++	}
++	var bindErr error
++	if err := socket.Control(func(fd uintptr) {
++		bindErr = s.setOption(int(fd), level, option, s.index)
++		if bindErr != nil {
++			return
++		}
++		var actual int
++		actual, bindErr = s.getOption(int(fd), level, option)
++		if bindErr == nil && actual != s.index {
++			bindErr = fmt.Errorf("physical socket: interface binding verification failed")
++		}
++	}); err != nil {
++		return fmt.Errorf("physical socket: descriptor control: %w", err)
++	}
++	if bindErr != nil {
++		return fmt.Errorf("physical socket: mandatory interface binding: %w", bindErr)
++	}
++	return nil
++}
+diff --git a/transport/internet/keqdis_physical_socket_darwin_test.go b/transport/internet/keqdis_physical_socket_darwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/transport/internet/keqdis_physical_socket_darwin_test.go
+@@ -0,0 +1,283 @@
++//go:build darwin
++
++package internet
++
++import (
++	"context"
++	"errors"
++	"net"
++	"reflect"
++	"syscall"
++	"testing"
++	"time"
++
++	xnet "github.com/xtls/xray-core/common/net"
++)
++
++type keqdisTestRawConn struct{ err error }
++
++func (s keqdisTestRawConn) Control(f func(uintptr)) error {
++	if s.err != nil {
++		return s.err
++	}
++	f(7)
++	return nil
++}
++func (s keqdisTestRawConn) Read(func(uintptr) bool) error  { panic("unexpected socket read") }
++func (s keqdisTestRawConn) Write(func(uintptr) bool) error { panic("unexpected socket write") }
++
++type keqdisTestPacketConn struct{ writes int }
++
++func (c *keqdisTestPacketConn) ReadFrom([]byte) (int, net.Addr, error) {
++	panic("unexpected packet read")
++}
++func (c *keqdisTestPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
++	c.writes++
++	return len(b), nil
++}
++func (*keqdisTestPacketConn) Close() error                     { return nil }
++func (*keqdisTestPacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
++func (*keqdisTestPacketConn) SetDeadline(time.Time) error      { return nil }
++func (*keqdisTestPacketConn) SetReadDeadline(time.Time) error  { return nil }
++func (*keqdisTestPacketConn) SetWriteDeadline(time.Time) error { return nil }
++
++func keqdisTestPhysicalState(t *testing.T) (*keqdisPhysicalSocketState, *[]int) {
++	t.Helper()
++	previous, controllers := keqdisPhysicalSockets, Controllers
++	t.Cleanup(func() { keqdisPhysicalSockets = previous; Controllers = controllers })
++	Controllers = nil
++	calls := []int{}
++	s := &keqdisPhysicalSocketState{enabled: true, name: "en0", index: 9,
++		lookup: func(name string) (*net.Interface, error) {
++			return &net.Interface{Name: name, Index: 9, Flags: net.FlagUp}, nil
++		},
++		setOption: func(fd, level, option, index int) error { calls = append(calls, level, option, index); return nil },
++		getOption: func(fd, level, option int) (int, error) { return 9, nil }}
++	keqdisPhysicalSockets = s
++	return s, &calls
++}
++
++func TestKeqdisPhysicalDefaultDialerUsesBothActualControlPaths(t *testing.T) {
++	_, calls := keqdisTestPhysicalState(t)
++	oldTCP, oldUDP := keqdisDialTCP, keqdisListenUDP
++	t.Cleanup(func() { keqdisDialTCP = oldTCP; keqdisListenUDP = oldUDP })
++	keqdisDialTCP = func(d *net.Dialer, ctx context.Context, network, address string) (net.Conn, error) {
++		if d.Control == nil {
++			t.Error("TCP without sockopt/controller has no physical protection")
++			return nil, nil
++		}
++		return nil, d.Control("tcp4", address, keqdisTestRawConn{})
++	}
++	keqdisListenUDP = func(c *net.ListenConfig, ctx context.Context, network, address string) (net.PacketConn, error) {
++		// Even an IPv4 destination may use a dual-stack wildcard UDP socket.
++		if c.Control == nil {
++			t.Fatal("UDP has no physical protection")
++		}
++		return &keqdisTestPacketConn{}, c.Control("udp6", "[::]:0", keqdisTestRawConn{})
++	}
++	d := &DefaultSystemDialer{}
++	for _, network := range []xnet.Network{xnet.Network_TCP, xnet.Network_UDP} {
++		_, err := d.Dial(context.Background(), nil, xnet.Destination{Network: network, Address: xnet.IPAddress(net.ParseIP("198.51.100.7")), Port: 53}, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++	}
++	want := []int{syscall.IPPROTO_IP, syscall.IP_BOUND_IF, 9, syscall.IPPROTO_IPV6, syscall.IPV6_BOUND_IF, 9}
++	if !reflect.DeepEqual(*calls, want) {
++		t.Fatalf("missing physical binding: %v", *calls)
++	}
++}
++
++func TestKeqdisPhysicalDefaultDialerPropagatesMandatoryBindingErrors(t *testing.T) {
++	s, _ := keqdisTestPhysicalState(t)
++	failure := errors.New("denied binding")
++	s.setOption = func(int, int, int, int) error { return failure }
++	oldTCP, oldUDP := keqdisDialTCP, keqdisListenUDP
++	t.Cleanup(func() { keqdisDialTCP = oldTCP; keqdisListenUDP = oldUDP })
++	keqdisDialTCP = func(d *net.Dialer, ctx context.Context, network, address string) (net.Conn, error) {
++		if d.Control == nil {
++			return nil, nil
++		}
++		return nil, d.Control("tcp4", address, keqdisTestRawConn{})
++	}
++	keqdisListenUDP = func(c *net.ListenConfig, ctx context.Context, network, address string) (net.PacketConn, error) {
++		return &keqdisTestPacketConn{}, c.Control("udp4", "0.0.0.0:0", keqdisTestRawConn{})
++	}
++	for _, network := range []xnet.Network{xnet.Network_TCP, xnet.Network_UDP} {
++		_, err := (&DefaultSystemDialer{}).Dial(context.Background(), nil, xnet.Destination{Network: network, Address: xnet.IPAddress(net.ParseIP("198.51.100.7")), Port: 443}, nil)
++		if !errors.Is(err, failure) {
++			t.Errorf("binding failure swallowed for %v: %v", network, err)
++		}
++	}
++}
++
++func TestKeqdisPhysicalOptionsCannotOverwriteMandatoryBinding(t *testing.T) {
++	s, _ := keqdisTestPhysicalState(t)
++	sequence := []string{}
++	Controllers = []func(string, string, syscall.RawConn) error{func(string, string, syscall.RawConn) error { sequence = append(sequence, "controller"); return nil }}
++	s.setOption = func(int, int, int, int) error { sequence = append(sequence, "physical"); return nil }
++	s.getOption = func(int, int, int) (int, error) { sequence = append(sequence, "verify"); return 9, nil }
++	apply := func(string, string, uintptr, *SocketConfig) error { sequence = append(sequence, "sockopt"); return nil }
++	err := keqdisSocketControlWithOptions(context.Background(), "", &SocketConfig{}, apply)("tcp4", "198.51.100.7:443", keqdisTestRawConn{})
++	if err != nil || !reflect.DeepEqual(sequence, []string{"controller", "sockopt", "physical", "verify"}) {
++		t.Fatalf("wrong socket order: %v %v", sequence, err)
++	}
++}
++
++func TestKeqdisPhysicalFailuresAreClosed(t *testing.T) {
++	for _, test := range []string{"controller", "sockopt", "control", "setsockopt", "getsockopt", "wrong-index", "missing-interface", "replaced-interface", "down-interface"} {
++		t.Run(test, func(t *testing.T) {
++			s, _ := keqdisTestPhysicalState(t)
++			failure := errors.New("fixture failure")
++			raw := keqdisTestRawConn{}
++			apply := func(string, string, uintptr, *SocketConfig) error { return nil }
++			switch test {
++			case "controller":
++				Controllers = []func(string, string, syscall.RawConn) error{func(string, string, syscall.RawConn) error { return failure }}
++			case "sockopt":
++				apply = func(string, string, uintptr, *SocketConfig) error { return failure }
++			case "control":
++				raw.err = failure
++			case "setsockopt":
++				s.setOption = func(int, int, int, int) error { return failure }
++			case "getsockopt":
++				s.getOption = func(int, int, int) (int, error) { return 0, failure }
++			case "wrong-index":
++				s.getOption = func(int, int, int) (int, error) { return 3, nil }
++			case "missing-interface":
++				s.lookup = func(string) (*net.Interface, error) { return nil, failure }
++			case "replaced-interface":
++				s.lookup = func(n string) (*net.Interface, error) {
++					return &net.Interface{Name: n, Index: 10, Flags: net.FlagUp}, nil
++				}
++			case "down-interface":
++				s.lookup = func(n string) (*net.Interface, error) { return &net.Interface{Name: n, Index: 9}, nil }
++			}
++			if err := keqdisSocketControlWithOptions(context.Background(), "", &SocketConfig{}, apply)("tcp4", "198.51.100.7:443", raw); err == nil {
++				t.Fatal("unsafe socket accepted")
++			}
++		})
++	}
++}
++
++func TestKeqdisPhysicalSnapshotIsStrictAndPinned(t *testing.T) {
++	lookup := func(name string) (*net.Interface, error) {
++		return &net.Interface{Name: name, Index: 9, Flags: net.FlagUp}, nil
++	}
++	for _, test := range []struct {
++		name                   string
++		dns                    string
++		dnsSet                 bool
++		iface                  string
++		ifaceSet               bool
++		wantEnabled, wantError bool
++	}{
++		{"none", "", false, "", false, false, false}, {"missing-dns", "", false, "en0", true, true, true}, {"missing-interface", "[]", true, "", false, true, true},
++		{"tun", "[]", true, "utun9", true, true, true}, {"loopback", "[]", true, "lo0", true, true, true}, {"malformed", "[]", true, "en0;bad", true, true, true},
++		{"valid", "[\"192.0.2.1\"]", true, "en0", true, true, false},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			s := keqdisLoadPhysicalSockets(func(k string) (string, bool) {
++				if k == "KEQDIS_BOOTSTRAP_DNS" {
++					return test.dns, test.dnsSet
++				}
++				return test.iface, test.ifaceSet
++			}, lookup)
++			if s.enabled != test.wantEnabled || (s.err != nil) != test.wantError {
++				t.Fatalf("invalid snapshot state: %+v", s)
++			}
++		})
++	}
++}
++
++func TestKeqdisPhysicalLoopbackUsesExactPeerAndRestrictsUnderlyingUDP(t *testing.T) {
++	_, calls := keqdisTestPhysicalState(t)
++	for _, address := range []string{"127.0.0.1:443", "127.9.8.7:53", "[::1]:51820", "[::ffff:127.0.0.1]:53"} {
++		if err := keqdisSocketControl(context.Background(), address, nil)("udp6", "[::]:0", keqdisTestRawConn{}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if len(*calls) != 0 {
++		t.Fatal("loopback was pinned to a physical interface")
++	}
++	for _, address := range []string{"198.51.100.7:1080", "192.0.2.1:53"} {
++		if err := keqdisSocketControl(context.Background(), address, nil)("udp4", "0.0.0.0:0", keqdisTestRawConn{}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if len(*calls) != 6 {
++		t.Fatal("port-based or wildcard exemption allowed remote UDP")
++	}
++	underlying := &keqdisTestPacketConn{}
++	packet := keqdisRestrictLoopbackPacketConn(underlying, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1080})
++	if _, err := packet.WriteTo([]byte{1}, &net.UDPAddr{IP: net.ParseIP("198.51.100.7"), Port: 1080}); err == nil {
++		t.Fatal("loopback socket leaked to remote peer")
++	}
++	if _, err := packet.WriteTo([]byte{1}, &net.UDPAddr{IP: net.ParseIP("::1"), Port: 53}); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := packet.WriteTo([]byte{1}, (*net.UDPAddr)(nil)); err == nil {
++		t.Fatal("nil UDP peer accepted")
++	}
++	if underlying.writes != 1 {
++		t.Fatal("rejected packet reached underlying socket")
++	}
++}
++
++func TestKeqdisPhysicalNoContextPreservesLegacyControllerAndOptionsBehavior(t *testing.T) {
++	s, calls := keqdisTestPhysicalState(t)
++	s.enabled = false
++	failure := errors.New("legacy ignored option")
++	Controllers = []func(string, string, syscall.RawConn) error{func(string, string, syscall.RawConn) error { return failure }}
++	if err := keqdisSocketControlWithOptions(context.Background(), "", &SocketConfig{}, func(string, string, uintptr, *SocketConfig) error { return failure })("tcp4", "198.51.100.7:443", keqdisTestRawConn{}); err != nil {
++		t.Fatal(err)
++	}
++	if len(*calls) != 0 {
++		t.Fatal("ordinary Proxy session got physical binding")
++	}
++	underlying := &keqdisTestPacketConn{}
++	if keqdisRestrictLoopbackPacketConn(underlying, &net.UDPAddr{IP: net.ParseIP("127.0.0.1")}) != underlying {
++		t.Fatal("ordinary Proxy packet semantics changed")
++	}
++}
++
++func TestKeqdisPhysicalDefaultUDPLoopbackCannotChangeToRemotePeer(t *testing.T) {
++	_, calls := keqdisTestPhysicalState(t)
++	old := keqdisListenUDP
++	t.Cleanup(func() { keqdisListenUDP = old })
++	underlying := &keqdisTestPacketConn{}
++	keqdisListenUDP = func(c *net.ListenConfig, ctx context.Context, network, address string) (net.PacketConn, error) {
++		return underlying, c.Control("udp6", "[::]:0", keqdisTestRawConn{})
++	}
++	conn, err := (&DefaultSystemDialer{}).Dial(context.Background(), nil, xnet.UDPDestination(xnet.IPAddress(net.ParseIP("127.0.0.1")), 1080), nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	wrapper := conn.(*PacketConnWrapper)
++	// Exercise the field used directly by transports, not just net.Conn.Write.
++	if _, err = wrapper.PacketConn.WriteTo([]byte{1}, &net.UDPAddr{IP: net.ParseIP("198.51.100.7"), Port: 1080}); err == nil {
++		t.Fatal("default dialer left loopback UDP socket unrestricted")
++	}
++	if _, err = conn.Write([]byte{1}); err != nil {
++		t.Fatal(err)
++	}
++	if len(*calls) != 0 || underlying.writes != 1 {
++		t.Fatalf("loopback path changed: bindings=%v writes=%d", *calls, underlying.writes)
++	}
++}
++
++func TestKeqdisPhysicalNoContextKeepsPlainTCPControlUnset(t *testing.T) {
++	s, _ := keqdisTestPhysicalState(t)
++	s.enabled = false
++	old := keqdisDialTCP
++	t.Cleanup(func() { keqdisDialTCP = old })
++	keqdisDialTCP = func(d *net.Dialer, ctx context.Context, network, address string) (net.Conn, error) {
++		if d.Control != nil {
++			t.Fatal("ordinary Proxy TCP gained a control hook")
++		}
++		return nil, nil
++	}
++	if _, err := (&DefaultSystemDialer{}).Dial(context.Background(), nil, xnet.TCPDestination(xnet.IPAddress(net.ParseIP("198.51.100.7")), 443), nil); err != nil {
++		t.Fatal(err)
++	}
++}
+diff --git a/transport/internet/keqdis_physical_socket_other.go b/transport/internet/keqdis_physical_socket_other.go
+new file mode 100644
+--- /dev/null
++++ b/transport/internet/keqdis_physical_socket_other.go
+@@ -0,0 +1,8 @@
++//go:build !darwin
++
++package internet
++
++import "syscall"
++
++func keqdisPhysicalSocketEnabled() bool                              { return false }
++func keqdisBindPhysicalSocket(string, string, syscall.RawConn) error { return nil }
+diff --git a/transport/internet/keqdis_physical_socket_other_test.go b/transport/internet/keqdis_physical_socket_other_test.go
+new file mode 100644
+--- /dev/null
++++ b/transport/internet/keqdis_physical_socket_other_test.go
+@@ -0,0 +1,16 @@
++//go:build !darwin
++
++package internet
++
++import "testing"
++
++func TestKeqdisPhysicalBindingIsDarwinOnly(t *testing.T) {
++	t.Setenv("KEQDIS_BOOTSTRAP_DNS", "invalid")
++	t.Setenv("KEQDIS_BOOTSTRAP_INTERFACE", "utun9")
++	if keqdisPhysicalSocketEnabled() {
++		t.Fatal("non-Darwin behavior changed")
++	}
++	if err := keqdisBindPhysicalSocket("invalid", "invalid", nil); err != nil {
++		t.Fatal(err)
++	}
++}

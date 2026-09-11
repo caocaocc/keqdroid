@@ -230,7 +230,7 @@ public final class NetworkService {
             try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
             if request.mode == "tun" {
                 stage = "systemDNS"
-                try SystemDNSReadiness.verify()
+                try SystemDNSReadiness.verify(progress: checkStartupProcessesAndInterface)
             }
             // Catch a core exit or a user edit during the asynchronous configd /
             // resolver checks before publishing a connected session.

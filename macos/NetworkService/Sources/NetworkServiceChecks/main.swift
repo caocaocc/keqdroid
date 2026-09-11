@@ -443,6 +443,73 @@ expect(negativeDNS == .negative, "NoSuchRecord remains an ambiguous negative res
 rejects("system DNS callback timeout") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Timeout), added: false, type: 0, recordClass: 0, length: 0) }
 rejects("system DNS callback server failure") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Transient), added: false, type: 0, recordClass: 0, length: 0) }
 rejects("malformed positive DNS record") { _ = try SystemDNSReadiness.interpret(error: 0, added: true, type: 1, recordClass: 1, length: 0) }
+let absentLocalDNSName = "keqdis-local-check-\(UUID().uuidString.lowercased()).invalid."
+do {
+    _ = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 0.25, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly), flags: DNSServiceFlags(kDNSServiceFlagsTimeout))
+    expect(false, "legacy flags must suppress absent LocalOnly record callbacks")
+} catch let error as ServiceFailure {
+    expect(error.code == "systemDNSUnavailable" && error.message.contains("timed out"), "legacy flags suppress absent LocalOnly record until wrapper deadline")
+}
+do {
+    let localNegative = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 3, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly))
+    expect(localNegative == .negative, "production flags deliver LocalOnly negative answer without public DNS")
+} catch {
+    expect(false, "production flags must deliver LocalOnly negative answer: \(error.localizedDescription)")
+}
+do {
+    let intermediateCNAME = try SystemDNSReadiness.interpret(error: 0, added: true, type: UInt16(kDNSServiceType_CNAME), recordClass: 1, length: 13)
+    expect(intermediateCNAME == nil, "intermediate CNAME is followed without declaring A readiness")
+} catch {
+    expect(false, "intermediate CNAME must be followed: \(error.localizedDescription)")
+}
+let aAfterCNAME = try SystemDNSReadiness.interpret(error: 0, added: true, type: 1, recordClass: 1, length: 4)
+expect(aAfterCNAME == .positive, "A answer after CNAME completes readiness")
+rejects("empty intermediate CNAME") { _ = try SystemDNSReadiness.interpret(error: 0, added: true, type: UInt16(kDNSServiceType_CNAME), recordClass: 1, length: 0) }
+rejects("non-IN intermediate CNAME") { _ = try SystemDNSReadiness.interpret(error: 0, added: true, type: UInt16(kDNSServiceType_CNAME), recordClass: 3, length: 13) }
+for fallback in [false, true] {
+    var queryCount = 0
+    do {
+        try SystemDNSReadiness.verify(query: { _, _ in
+            queryCount += 1
+            if fallback && queryCount == 1 { return .negative }
+            throw ServiceFailure("systemDNSUnavailable", "System DNS resolution timed out.")
+        })
+        expect(false, "system DNS transport failure must fail verification")
+    } catch let error as ServiceFailure {
+        expect(error.code == "systemDNSUnavailable" && error.message.contains(fallback ? "positive fallback" : "initial randomized probe"), "system DNS timeout identifies query phase and preserves error code")
+    }
+}
+let systemDNSCaller = pthread_self()
+for failureCode in ["coreExited", "tunnelInterfaceLost"] {
+    var progressCalls = 0
+    var progressOnCaller = true
+    do {
+        _ = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 3, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly), flags: DNSServiceFlags(kDNSServiceFlagsTimeout), progress: {
+            progressCalls += 1
+            progressOnCaller = progressOnCaller && pthread_equal(pthread_self(), systemDNSCaller) != 0
+            if progressCalls == 3 { throw ServiceFailure(failureCode, "Synthetic startup health failure.", stage: "systemDNS") }
+        })
+        expect(false, "startup health failure must cancel pending system DNS")
+    } catch let error as ServiceFailure {
+        expect(error.code == failureCode && error.stage == "systemDNS", "pending system DNS preserves specific startup health failure")
+    }
+    expect(progressCalls == 3 && progressOnCaller, "pending system DNS repeatedly validates on its caller thread")
+    let afterCancellation = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 3, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly))
+    expect(afterCancellation == .negative && progressCalls == 3, "cancelled system DNS context is quiescent before the next query")
+}
+var completedSystemDNSProgress = 0
+let completedSystemDNS = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 3, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly), progress: { completedSystemDNSProgress += 1 })
+expect(completedSystemDNS == .negative && completedSystemDNSProgress >= 2, "completed system DNS validates health before accepting the callback")
+var slowSystemDNSProgress = 0
+do {
+    _ = try SystemDNSReadiness.queryRecord(name: absentLocalDNSName, timeout: 0.01, interfaceIndex: UInt32(kDNSServiceInterfaceIndexLocalOnly), progress: {
+        slowSystemDNSProgress += 1
+        Thread.sleep(forTimeInterval: 0.03)
+    })
+    expect(false, "system DNS progress must consume the existing deadline")
+} catch let error as ServiceFailure {
+    expect(error.code == "systemDNSUnavailable" && slowSystemDNSProgress == 1, "progress cannot renew the system DNS deadline or accept a late callback")
+}
 let diagnosticOwner = ClientIdentity(uid: 501, gid: 20, connectionID: 10)
 let failedDiagnostic: [String: Any] = ["status": "error", "error": "DNS readiness timed out.", "errorCode": "readinessTimeout", "errorStage": "virtualDNS", "log": "last output", "apiSecret": "private", "sessionId": "old", "pids": ["core": 42]]
 let stoppedDiagnostic = SessionDiagnostics.snapshot(failedDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)

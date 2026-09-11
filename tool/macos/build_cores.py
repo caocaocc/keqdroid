@@ -311,7 +311,7 @@ def test_sources(cores, go, env, sources):
     if "keqrnel" in cores:
         run([go, "test", "-tags", "with_gvisor", ".", "-run", "^TestKeqdisRoute"], sources["singtun"], env,
             "test-singtun-route-ownership")
-        run([go, "test", "./features/dns/localdns", "-run", "^TestKeqdis"], sources["xray"], env,
+        run([go, "test", "./features/dns/localdns", "./transport/internet", "-run", "^TestKeqdis"], sources["xray"], env,
             "test-xray-bootstrap")
         run([go, "test", "-tags", "with_gvisor", "./core/localdns", "./internal/keqdisdns"],
             sources["keqrnel"], env, "test-keqrnel-localdns")
