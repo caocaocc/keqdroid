@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/exceptions.dart';
 import 'package:keqdroid/l10n/app_localizations.dart';
 
@@ -41,6 +42,15 @@ class UiErrorMessage {
 }
 
 UiErrorMessage explainError(Object error) {
+  final macOSMessage = _macOSNetworkErrorMessage(error);
+  if (macOSMessage != null) {
+    return UiErrorMessage(
+      kind: UiErrorKind.unknown,
+      message: macOSMessage,
+      title: 'Operation Failed',
+      action: 'Retry operation. If issue repeats, check server and app settings.',
+    );
+  }
   final raw = error.toString();
   final msg = raw.toLowerCase();
 
@@ -194,6 +204,52 @@ UiErrorMessage explainError(Object error) {
   );
 }
 
+// Provider stores toString(), so recognize the same native envelope after that
+// conversion. Require macOS provenance; other platform timeouts stay localized.
+String? _macOSNetworkErrorMessage(Object error) {
+  if (error is AppException && error.cause != null) {
+    final cause = _macOSNetworkErrorMessage(error.cause!);
+    if (cause != null) return cause;
+  }
+  final String code;
+  final String? message;
+  Map<Object?, Object?> details = const {};
+  if (error is PlatformException) {
+    code = error.code;
+    message = error.message;
+    if (error.details is Map) details = error.details as Map;
+  } else {
+    final match = RegExp(
+      r'^(?:(?:VpnStartException|VpnException|PlatformChannelException):\s*)*'
+      r'(?:The macOS network service is unavailable: )?'
+      r'PlatformException\((\w+), ([\s\S]*?), (\{[^{}\r\n]*\}|null), ',
+    ).firstMatch(error.toString());
+    if (match == null) return null;
+    code = match.group(1)!;
+    message = match.group(2);
+    details = {
+      for (final entry in RegExp(
+        r'(?:^\{|, )(\w+): (\w+)(?=, |\}$)',
+      ).allMatches(match.group(3)!))
+        entry.group(1)!: entry.group(2)!,
+    };
+  }
+  const methods = {
+    'getServiceStatus', 'authorize', 'prepareNetworkContext',
+    'startSession', 'startProxySession', 'stopSession', 'getSession',
+  };
+  if (code != 'macos_network' &&
+      (details['serviceCode'] != code || !methods.contains(details['method']))) {
+    return null;
+  }
+  final stage = details['stage'] ?? details['method'];
+  final diagnostic = stage is String ? '[$code · $stage]' : '[$code]';
+  final summary = message?.split('\n').first.trim();
+  return summary == null || summary.isEmpty || summary == 'null'
+      ? diagnostic
+      : '$summary\n$diagnostic';
+}
+
 UiErrorMessage explainErrorLocalized(Object error, AppLocalizations l10n) {
   final base = explainError(error);
   // Заголовок ключуется по коду, а не по виду ошибки: видов шесть на
@@ -302,4 +358,3 @@ String vpnErrorStatusLabel(String? errorMessage, BuildContext context) {
     UiErrorKind.unknown => l10n.errorConnectionGeneric,
   };
 }
-

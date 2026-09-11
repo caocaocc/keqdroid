@@ -4,8 +4,14 @@ import Darwin
 public struct ServiceFailure: Error, LocalizedError {
     public let code: String
     public let message: String
+    public let stage: String?
     public var errorDescription: String? { message }
-    public init(_ code: String, _ message: String) { self.code = code; self.message = message }
+    public init(_ code: String, _ message: String, stage: String? = nil) { self.code = code; self.message = message; self.stage = stage }
+    public var dictionary: [String: String] {
+        var result = ["code": code, "message": message]
+        if let stage { result["stage"] = stage }
+        return result
+    }
 }
 
 public enum ServicePaths {

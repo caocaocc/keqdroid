@@ -2,6 +2,7 @@
 // installation are touched. XCTest coverage is also available with full Xcode.
 import Foundation
 import NetworkServiceKit
+import KEQNetworkClient
 import CNetworkXPC
 import Darwin
 import dnssd
@@ -304,4 +305,36 @@ expect(negativeDNS == .negative, "NoSuchRecord remains an ambiguous negative res
 rejects("system DNS callback timeout") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Timeout), added: false, type: 0, recordClass: 0, length: 0) }
 rejects("system DNS callback server failure") { _ = try SystemDNSReadiness.interpret(error: Int32(kDNSServiceErr_Transient), added: false, type: 0, recordClass: 0, length: 0) }
 rejects("malformed positive DNS record") { _ = try SystemDNSReadiness.interpret(error: 0, added: true, type: 1, recordClass: 1, length: 0) }
+let diagnosticOwner = ClientIdentity(uid: 501, gid: 20, connectionID: 10)
+let failedDiagnostic: [String: Any] = ["status": "error", "error": "DNS readiness timed out.", "errorCode": "readinessTimeout", "errorStage": "virtualDNS", "log": "last output", "apiSecret": "private", "sessionId": "old", "pids": ["core": 42]]
+let stoppedDiagnostic = SessionDiagnostics.snapshot(failedDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)
+expect(stoppedDiagnostic["status"] as? String == "disconnected", "diagnostics do not keep a stopped session active")
+expect(stoppedDiagnostic["log"] as? String == "last output", "failed startup log survives stop")
+expect(stoppedDiagnostic["errorStage"] as? String == "virtualDNS", "failure phase survives stop")
+expect(Set(stoppedDiagnostic.keys) == ["status", "log", "error", "errorCode", "errorStage"], "stopped diagnostics omit runtime secrets and session identifiers")
+expect(NSDictionary(dictionary: stoppedDiagnostic).isEqual(to: SessionDiagnostics.snapshot(stoppedDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)), "repeated stop preserves diagnostics")
+for caller in [ClientIdentity(uid: 502, gid: 20, connectionID: 10), ClientIdentity(uid: 501, gid: 20, connectionID: 11)] {
+    expect(SessionDiagnostics.snapshot(failedDiagnostic, owner: diagnosticOwner, caller: caller).keys.sorted() == ["status"], "last diagnostics stay with original account and XPC connection")
+}
+expect(SessionDiagnostics.snapshot(failedDiagnostic, owner: nil, caller: diagnosticOwner).keys.sorted() == ["status"], "unowned diagnostics are never disclosed")
+let diagnosticFailure = ServiceFailure("readinessTimeout", "DNS readiness timed out.", stage: "virtualDNS")
+let diagnosticClient = NetworkServiceError(response: diagnosticFailure.dictionary)
+let diagnosticBridge = NetworkServiceError.bridge(diagnosticClient, method: "startSession")
+expect(diagnosticBridge.code == "readinessTimeout", "Flutter receives original service error code")
+expect(diagnosticBridge.details == ["serviceCode": "readinessTimeout", "stage": "virtualDNS", "method": "startSession"], "service phase survives envelope and Flutter bridge")
+let diagnosticLegacy = NetworkServiceError(response: ["code": "vpnRouteConflict", "message": "Another VPN owns the route."])
+expect(diagnosticLegacy.stage == nil, "legacy helper errors remain compatible")
+let diagnosticFallback = NetworkServiceError.bridge(NSError(domain: "test", code: 1), method: "getSession")
+expect(diagnosticFallback.code == "macos_network" && diagnosticFallback.details == ["method": "getSession"], "unknown errors retain generic fallback without invented details")
+let monitorDiagnostic: [String: Any] = ["status": "error", "errorCode": "network_changed", "requiresReconnect": true, "sessionId": "old"]
+let monitorRead = SessionDiagnostics.snapshot(monitorDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner)
+expect(monitorRead["requiresReconnect"] as? Bool == true, "monitor reconnect request survives getSession diagnostics")
+expect(monitorRead["status"] as? String == "error" && monitorRead["sessionId"] == nil, "monitor diagnostics retain error without old session credentials")
+let monitorStopped = SessionDiagnostics.snapshot(monitorRead, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)
+expect(monitorStopped["requiresReconnect"] == nil && monitorStopped["status"] as? String == "disconnected", "explicit stop clears automatic reconnect request")
+for caller in [ClientIdentity(uid: 502, gid: 20, connectionID: 10), ClientIdentity(uid: 501, gid: 20, connectionID: 11)] {
+    expect(SessionDiagnostics.snapshot(monitorDiagnostic, owner: diagnosticOwner, caller: caller).keys.sorted() == ["status"], "monitor reconnect request remains private to original account and connection")
+}
+expect(SessionDiagnostics.snapshot(["requiresReconnect": "true"], owner: diagnosticOwner, caller: diagnosticOwner)["requiresReconnect"] == nil, "reconnect metadata must be a boolean")
+
 print("Passed \(checks) native network service checks (no privileged operations).")

@@ -4,8 +4,20 @@ import CNetworkXPC
 public struct NetworkServiceError: LocalizedError {
     public let code: String
     public let message: String
+    public let stage: String?
     public var errorDescription: String? { message }
-    public init(code: String, message: String) { self.code = code; self.message = message }
+    public init(code: String, message: String, stage: String? = nil) { self.code = code; self.message = message; self.stage = stage }
+    public init(response: [String: Any]) {
+        self.init(code: response["code"] as? String ?? "serviceError", message: response["message"] as? String ?? "Network service failed.", stage: response["stage"] as? String)
+    }
+
+    public static func bridge(_ error: Error, method: String) -> (code: String, message: String, details: [String: String]) {
+        var details = ["method": method]
+        guard let service = error as? NetworkServiceError else { return ("macos_network", error.localizedDescription, details) }
+        details["serviceCode"] = service.code
+        if let stage = service.stage { details["stage"] = stage }
+        return (service.code, service.message, details)
+    }
 }
 
 private final class ResponseBox {
@@ -21,7 +33,7 @@ private final class ResponseBox {
                 result = .success(envelope["result"] as? [String: Any] ?? [:])
             } else {
                 let error = envelope["error"] as? [String: Any] ?? [:]
-                result = .failure(NetworkServiceError(code: error["code"] as? String ?? "serviceError", message: error["message"] as? String ?? "Network service failed."))
+                result = .failure(NetworkServiceError(response: error))
             }
         } catch { result = .failure(error) }
         DispatchQueue.main.async { self.completion(result) }
