@@ -17,7 +17,7 @@ public final class NetworkService {
     private var activeRequest: SessionRequest?
     private var activeContext: NetworkContext?
     private var owner: ClientIdentity?
-    private var snapshotUID: uid_t?
+    private var snapshotOwner: ClientIdentity?
     private var sessionDirectory: URL?
     private var tunnelInterface: TunnelInterfaceIdentity?
     private var interfacesBeforeSession: [String: UInt32] = [:]
@@ -73,7 +73,7 @@ public final class NetworkService {
                 envelope = ["ok": true, "result": result]
             } catch {
                 let failure = error as? ServiceFailure ?? ServiceFailure("serviceError", error.localizedDescription)
-                envelope = ["ok": false, "error": ["code": failure.code, "message": failure.message]]
+                envelope = ["ok": false, "error": failure.dictionary]
             }
             let data = (try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys])) ?? Data("{}".utf8)
             completion(String(data: data, encoding: .utf8) ?? "{}")
@@ -127,11 +127,21 @@ public final class NetworkService {
             if method == "startProxySession", request.mode != "proxy" { throw ServiceFailure("invalidRequest", "A proxy request cannot start a TUN session.") }
             return try start(request, identity: identity)
         case "stopSession":
-            try stop(); snapshot = ["status": "disconnected"]
+            // An idle caller may stop idempotently, but cannot erase another
+            // connection's last failure after active ownership was released.
+            if owner == nil && !recoveryPending {
+                let stopped = SessionDiagnostics.snapshot(snapshot, owner: snapshotOwner, caller: identity, disconnected: true)
+                if SessionDiagnostics.canRead(owner: snapshotOwner, caller: identity) { snapshot = stopped }
+                return stopped
+            }
+            try stop()
+            snapshot = SessionDiagnostics.snapshot(snapshot, owner: snapshotOwner, caller: identity, disconnected: true)
             return snapshot
         case "getSession":
-            if let snapshotUID, snapshotUID != identity.uid { return ["status": "disconnected"] }
-            updateSnapshot(); return snapshot
+            guard SessionDiagnostics.canRead(owner: snapshotOwner, caller: identity) else { return ["status": "disconnected"] }
+            updateSnapshot()
+            if activeRequest == nil && !recoveryPending { return SessionDiagnostics.snapshot(snapshot, owner: snapshotOwner, caller: identity) }
+            return snapshot
         default: throw ServiceFailure("unknownMethod", "Unknown network service method.")
         }
     }
@@ -149,9 +159,10 @@ public final class NetworkService {
             try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode)
         } else { context = try settings.prepare(uid: identity.uid) }
         let before = request.mode == "tun" ? try TunnelInterfaceRecovery.capture() : [:]
-        owner = identity; snapshotUID = identity.uid; activeRequest = request; activeContext = context; lastContact = Date()
+        owner = identity; snapshotOwner = identity; activeRequest = request; activeContext = context; lastContact = Date()
         interfacesBeforeSession = before; tunnelInterface = nil
         snapshot = ["sessionId": request.id, "status": "connecting", "connectionMode": request.mode, "core": request.core]
+        var stage = "sessionSetup"
         do {
             let directory = root.appendingPathComponent("sessions", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o711])
@@ -159,6 +170,7 @@ public final class NetworkService {
             try persistSession()
             let order = request.core == "awg" ? (request.mode == "tun" ? ["wireproxy", "keqrnel"] : ["wireproxy"]) : [request.core]
             for name in order {
+                stage = "coreStartup"
                 // AWG's upstream may take seconds to start. Recheck before the
                 // actual TUN process can replace an existing broad route.
                 if request.mode == "tun" && name != "wireproxy" { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode) }
@@ -167,8 +179,12 @@ public final class NetworkService {
                 processes.append(process)
                 try persistSession()
                 try process.releaseStartGate()
-                if name == "wireproxy" { try waitUntilReady(timeout: 15) { keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1 } }
+                if name == "wireproxy" {
+                    stage = "upstreamReadiness"
+                    try waitUntilReady(timeout: 15) { keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1 }
+                }
             }
+            stage = "localEndpoints"
             try waitUntilReady(timeout: 20) {
                 let portsReady = keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
                 let apiReady = request.core == "awg" && request.mode == "proxy" ? true : keq_socket_ready("127.0.0.1", UInt16(request.apiPort), 100) == 1
@@ -176,6 +192,7 @@ public final class NetworkService {
             }
             if request.mode == "tun" {
                 var interface: String?
+                stage = "ipv4Routes"
                 try waitUntilReady(timeout: 8) {
                     guard let candidate = tunnelInterface else { return false }
                     interface = candidate.name
@@ -183,6 +200,7 @@ public final class NetworkService {
                 }
                 snapshot["interfaceName"] = interface
                 if request.blockIpv6Leak && context.hasIPv6 {
+                    stage = "ipv6Protection"
                     guard let interface else { throw ServiceFailure("ipv6ProtectionUnavailable", "The IPv6 tunnel interface is missing.") }
                     // Cover both halves of ::/0; the second address is only a
                     // routing-table lookup, not an emitted network packet.
@@ -193,6 +211,7 @@ public final class NetworkService {
                     }
                 }
                 guard let dns = request.dnsAddress else { throw ServiceFailure("invalidDNS", "TUN DNS address is missing.") }
+                stage = "virtualDNS"
                 try waitUntilReady(timeout: 8) {
                     keq_dns_ready(dns, 53, 0, 500) == 1 && keq_dns_ready(dns, 53, 1, 500) == 1
                 }
@@ -204,11 +223,17 @@ public final class NetworkService {
             // both DNS transports are working.
             let proxyPorts: (socks: Int, http: Int)? = request.systemProxy && request.mode == "proxy" ? (request.socksPort, request.httpPort) : nil
             let dnsAddress = request.mode == "tun" ? request.dnsAddress : nil
+            stage = "applyNetworkSettings"
             try settings.apply(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
+            stage = "networkSettingsReadiness"
             try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
-            if request.mode == "tun" { try SystemDNSReadiness.verify() }
+            if request.mode == "tun" {
+                stage = "systemDNS"
+                try SystemDNSReadiness.verify()
+            }
             // Catch a core exit or a user edit during the asynchronous configd /
             // resolver checks before publishing a connected session.
+            stage = "finalReadiness"
             try waitUntilReady(timeout: 1) {
                 keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 &&
                 keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
@@ -218,10 +243,12 @@ public final class NetworkService {
             try persistSession(); updateSnapshot()
             return snapshot
         } catch {
-            let failure = error
+            let original = error as? ServiceFailure ?? ServiceFailure("startFailed", error.localizedDescription)
+            let failure = ServiceFailure(original.code, original.message, stage: original.stage ?? stage)
             do { try stop() } catch { snapshot["recoveryError"] = error.localizedDescription }
             snapshot["status"] = "error"; snapshot["error"] = failure.localizedDescription
-            snapshot["errorCode"] = (failure as? ServiceFailure)?.code ?? "startFailed"
+            snapshot["errorCode"] = failure.code
+            snapshot["errorStage"] = failure.stage
             throw failure
         }
     }

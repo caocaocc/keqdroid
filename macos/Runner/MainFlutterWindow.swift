@@ -40,7 +40,9 @@ class MainFlutterWindow: NSWindow {
         DispatchQueue.main.async {
           switch response {
           case .success(let value): result(value)
-          case .failure(let error): result(FlutterError(code: "macos_network", message: error.localizedDescription, details: nil))
+          case .failure(let error):
+            let failure = NetworkServiceError.bridge(error, method: call.method)
+            result(FlutterError(code: failure.code, message: failure.message, details: failure.details))
           }
         }
       }

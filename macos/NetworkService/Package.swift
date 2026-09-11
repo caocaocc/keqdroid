@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "KEQNetworkClient", dependencies: ["CNetworkXPC"]),
         .target(name: "NetworkServiceKit", dependencies: ["CNetworkXPC"], linkerSettings: [.linkedFramework("SystemConfiguration"), .linkedFramework("Security")]),
         .executableTarget(name: "NetworkServiceDaemon", dependencies: ["NetworkServiceKit", "CNetworkXPC"]),
-        .executableTarget(name: "NetworkServiceChecks", dependencies: ["NetworkServiceKit", "CNetworkXPC"]),
-        .testTarget(name: "NetworkServiceTests", dependencies: ["NetworkServiceKit"]),
+        .executableTarget(name: "NetworkServiceChecks", dependencies: ["NetworkServiceKit", "KEQNetworkClient", "CNetworkXPC"]),
+        .testTarget(name: "NetworkServiceTests", dependencies: ["NetworkServiceKit", "KEQNetworkClient"]),
     ]
 )
