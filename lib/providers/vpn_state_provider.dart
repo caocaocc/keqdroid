@@ -706,6 +706,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
               localInboundsNoAuth: proxyModeNoAuth,
               geoIndex: customGeoIndex,
               nativeTunInbound: nativeTun,
+              physicalBootstrapDns:
+                  TunnelSessionBuilder.usePhysicalBootstrapDns(connectionMode),
             );
 
       // Забирать ли IPv6 в туннель. Спрашиваем машину, а не только настройку:

@@ -11,6 +11,10 @@ import '../utils/singbox_tun_config.dart';
 
 /// собирает TunnelSessionRequest под платформу и режим proxy/tun
 class TunnelSessionBuilder {
+  /// Only macOS TUN receives the helper's protected physical DNS snapshot.
+  static bool usePhysicalBootstrapDns(ConnectionMode mode, {bool? isMacOS}) =>
+      (isMacOS ?? Platform.isMacOS) && mode == ConnectionMode.tun;
+
   /// Режим сессии из настроек — теперь и на Android.
   ///
   /// Раньше здесь стояло жёсткое `tun`: другого пути на Android не было, весь

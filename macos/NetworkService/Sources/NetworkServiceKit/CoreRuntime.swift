@@ -45,13 +45,9 @@ public final class CoreProcess {
         guard result == 1 else { throw ServiceFailure("coreStartFailed", "Core exited before configuration was committed.") }
     }
     public var journal: [String: Any] { ["name": name, "pid": Int(pid), "startTime": startTime, "executable": executable] }
-    public func collectOutput() {
-        guard outputFD >= 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        while true {
-            let count = read(outputFD, &buffer, buffer.count)
-            if count <= 0 { break }
-            log.append(contentsOf: buffer.prefix(count))
+    public func collectOutput(maximumReads: Int = .max) {
+        CoreOutputReader.drain(outputFD, maximumReads: maximumReads) { data in
+            log.append(data)
             if log.count > 64 * 1024 { log.removeFirst(log.count - 64 * 1024) }
         }
     }

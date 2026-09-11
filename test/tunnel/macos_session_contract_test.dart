@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
+import 'package:keqdroid/services/tunnel_session_builder.dart';
 import 'package:keqdroid/tunnel/connection_mode.dart';
 import 'package:keqdroid/tunnel/macos_core_paths.dart';
 import 'package:keqdroid/tunnel/macos_network_context.dart';
@@ -41,6 +42,11 @@ void main() {
                     link,
                     settings,
                     localInboundsNoAuth: mode == ConnectionMode.proxy,
+                    physicalBootstrapDns:
+                        TunnelSessionBuilder.usePhysicalBootstrapDns(
+                          mode,
+                          isMacOS: true,
+                        ),
                   )
                 : '',
             awgConfig: core == VpnBackend.awg ? awg : null,

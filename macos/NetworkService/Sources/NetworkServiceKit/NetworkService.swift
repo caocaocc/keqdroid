@@ -212,9 +212,10 @@ public final class NetworkService {
                 }
                 guard let dns = request.dnsAddress else { throw ServiceFailure("invalidDNS", "TUN DNS address is missing.") }
                 stage = "virtualDNS"
-                try waitUntilReady(timeout: 8) {
-                    keq_dns_ready(dns, 53, 0, 500) == 1 && keq_dns_ready(dns, 53, 1, 500) == 1
-                }
+                try VirtualDNSReadiness.wait(probe: { tcp, timeout in
+                    try VirtualDNSReadiness.probe(address: dns, tcp: tcp, timeoutMilliseconds: timeout,
+                                                  validate: self.checkStartupProcessesAndInterface)
+                }, validate: checkStartupProcessesAndInterface)
                 guard let interface, IPv4RouteSnapshot.capture().usesTunnel(interface) else {
                     throw ServiceFailure("ipv4RoutesUnavailable", "IPv4 traffic is not fully routed into the managed tunnel.")
                 }
@@ -275,15 +276,20 @@ public final class NetworkService {
     private func waitUntilReady(timeout: TimeInterval, predicate: () -> Bool) throws {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            try recordTunnelInterfaceIfAvailable()
-            for process in processes {
-                process.collectOutput()
-                guard process.isAlive else { throw ServiceFailure("coreExited", "\(process.name) exited during startup. \(String(decoding: process.log.suffix(4096), as: UTF8.self))") }
-            }
+            try checkStartupProcessesAndInterface()
             if predicate() { return }
             Thread.sleep(forTimeInterval: 0.1)
         } while Date() < deadline
         throw ServiceFailure("readinessTimeout", "Core, tunnel, or TCP/UDP DNS readiness timed out.")
+    }
+
+    private func checkStartupProcessesAndInterface() throws {
+        try recordTunnelInterfaceIfAvailable()
+        for process in processes {
+            // A continuously logging core must yield to startup deadlines.
+            process.collectOutput(maximumReads: 8)
+            guard process.isAlive else { throw ServiceFailure("coreExited", "\(process.name) exited during startup. \(String(decoding: process.log.suffix(4096), as: UTF8.self))") }
+        }
     }
 
     private func recordTunnelInterfaceIfAvailable() throws {

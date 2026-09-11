@@ -61,15 +61,6 @@
               "queryStrategy": "UseIPv4",
               "servers": [
                 {
-                  "address": "https+local://1.1.1.1/dns-query",
-                  "domains": [
-                    "full:node.example.com"
-                  ],
-                  "serveStale": true,
-                  "skipFallback": true,
-                  "timeoutMs": 2500
-                },
-                {
                   "address": "localhost",
                   "domains": [
                     "full:node.example.com"

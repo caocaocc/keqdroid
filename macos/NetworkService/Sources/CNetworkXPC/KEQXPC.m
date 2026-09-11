@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 
 static const char *serviceName = "io.github.caocaocc.keqdroid.network-service";
 // Use the system-owned administrator right. A custom right may have been
@@ -439,28 +440,98 @@ int keq_interface_counters(const char *name, uint64_t *upload, uint64_t *downloa
     }
     free(buffer); return found;
 }
-int keq_dns_ready(const char *address, uint16_t port, int tcp, int timeout_ms) {
+static int64_t dnsMonotonicNanoseconds(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now)) return 0;
+    return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
+}
+static int dnsRemainingMilliseconds(int64_t deadline) {
+    int64_t now = dnsMonotonicNanoseconds();
+    if (!now || now >= deadline) return 0;
+    return (int)((deadline - now + 999999) / 1000000);
+}
+typedef struct {
+    keq_dns_progress_callback callback;
+    void *context;
+} DNSProgress;
+static int dnsWait(int fd, short events, int64_t deadline, DNSProgress progress) {
+    for (;;) {
+        int remaining = dnsRemainingMilliseconds(deadline);
+        if (!remaining) return 0;
+        if (progress.callback && !progress.callback(progress.context)) return 0;
+        remaining = dnsRemainingMilliseconds(deadline);
+        if (!remaining) return 0;
+        struct pollfd descriptor = {fd, events, 0};
+        int interval = progress.callback && remaining > 100 ? 100 : remaining;
+        int result = poll(&descriptor, 1, interval);
+        if (!result) continue;
+        if (result < 0 && errno == EINTR) continue;
+        return result > 0 && (descriptor.revents & events) && dnsRemainingMilliseconds(deadline) > 0;
+    }
+}
+static int dnsConnectedSocket(const char *address, uint16_t port, int type, int64_t deadline, DNSProgress progress) {
+    struct sockaddr_storage storage = {0}; socklen_t length;
+    struct sockaddr_in *v4 = (struct sockaddr_in *)&storage;
+    struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)&storage;
+    int family;
+    if (inet_pton(AF_INET, address, &v4->sin_addr) == 1) {
+        family = AF_INET; v4->sin_family = AF_INET; v4->sin_len = sizeof(*v4); v4->sin_port = htons(port); length = sizeof(*v4);
+    } else if (inet_pton(AF_INET6, address, &v6->sin6_addr) == 1) {
+        family = AF_INET6; v6->sin6_family = AF_INET6; v6->sin6_len = sizeof(*v6); v6->sin6_port = htons(port); length = sizeof(*v6);
+    } else return -1;
+    int fd = socket(family, type, 0); if (fd < 0) return -1;
+    int one = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)) ||
+        fcntl(fd, F_SETFD, FD_CLOEXEC) || fcntl(fd, F_SETFL, O_NONBLOCK)) { close(fd); return -1; }
+    if (connect(fd, (struct sockaddr *)&storage, length) && errno != EINPROGRESS) { close(fd); return -1; }
+    int error = 0; socklen_t errorLength = sizeof(error);
+    if (!dnsWait(fd, POLLOUT, deadline, progress) || getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorLength) || error) { close(fd); return -1; }
+    return fd;
+}
+static int dnsTransferExact(int fd, unsigned char *buffer, size_t length, int writing, int64_t deadline, DNSProgress progress) {
+    size_t offset = 0;
+    while (offset < length) {
+        if (!dnsWait(fd, writing ? POLLOUT : POLLIN, deadline, progress)) return 0;
+        ssize_t count = writing ? send(fd, buffer + offset, length - offset, 0) : recv(fd, buffer + offset, length - offset, 0);
+        if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+        if (count <= 0) return 0;
+        offset += (size_t)count;
+    }
+    return dnsRemainingMilliseconds(deadline) > 0;
+}
+int keq_dns_ready_with_progress(const char *address, uint16_t port, int tcp, int timeout_ms, keq_dns_progress_callback callback, void *context) {
     // Query localhost A. A real DNS reply (including NXDOMAIN) proves the listener
     // speaks DNS; merely binding a UDP socket does not prove readiness.
     unsigned char query[] = {0,0,1,0,0,1,0,0,0,0,0,0,9,'l','o','c','a','l','h','o','s','t',0,0,1,0,1};
+    if (timeout_ms <= 0) return 0;
+    int64_t now = dnsMonotonicNanoseconds();
+    if (!now) return 0;
+    // The same deadline covers connect, query, frame header and all body
+    // fragments; a slow peer must not renew the budget with each byte.
+    int64_t deadline = now + (int64_t)timeout_ms * 1000000;
+    DNSProgress progress = {callback, context};
     uint16_t id = (uint16_t)arc4random(); query[0] = id >> 8; query[1] = id & 255;
-    int fd = connectedSocket(address, port, tcp ? SOCK_STREAM : SOCK_DGRAM, timeout_ms);
+    int fd = dnsConnectedSocket(address, port, tcp ? SOCK_STREAM : SOCK_DGRAM, deadline, progress);
     if (fd < 0) return 0;
     unsigned char response[4096]; ssize_t count = -1;
     if (tcp) {
         unsigned char framed[sizeof(query) + 2] = {0, sizeof(query)};
         memcpy(framed + 2, query, sizeof(query));
-        if (send(fd, framed, sizeof(framed), 0) == sizeof(framed)) {
+        if (dnsTransferExact(fd, framed, sizeof(framed), 1, deadline, progress)) {
             unsigned char size[2];
-            if (recv(fd, size, 2, MSG_WAITALL) == 2) {
+            if (dnsTransferExact(fd, size, 2, 0, deadline, progress)) {
                 size_t expected = ((size_t)size[0] << 8) | size[1];
                 if (expected >= 12 && expected <= sizeof(response)) {
-                    count = recv(fd, response, expected, MSG_WAITALL);
-                    if (count != expected) count = -1;
+                    if (dnsTransferExact(fd, response, expected, 0, deadline, progress)) count = (ssize_t)expected;
                 }
             }
         }
-    } else if (send(fd, query, sizeof(query), 0) == sizeof(query)) count = recv(fd, response, sizeof(response), 0);
+    } else if (dnsWait(fd, POLLOUT, deadline, progress) && send(fd, query, sizeof(query), 0) == sizeof(query) && dnsWait(fd, POLLIN, deadline, progress)) {
+        count = recv(fd, response, sizeof(response), 0);
+    }
     close(fd);
-    return count >= 12 && response[0] == query[0] && response[1] == query[1] && (response[2] & 0x80);
+    return dnsRemainingMilliseconds(deadline) > 0 && count >= 12 && response[0] == query[0] && response[1] == query[1] && (response[2] & 0x80);
+}
+int keq_dns_ready(const char *address, uint16_t port, int tcp, int timeout_ms) {
+    return keq_dns_ready_with_progress(address, port, tcp, timeout_ms, NULL, NULL);
 }

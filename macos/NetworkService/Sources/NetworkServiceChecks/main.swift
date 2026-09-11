@@ -211,8 +211,49 @@ let hostInterfaceIndices = try TunnelInterfaceRecovery.capture()
 let hostRouteIndices = try TunnelInterfaceRecovery.captureRouteInterfaceIndices()
 expect(hostInterfaceIndices["lo0"].map { hostRouteIndices.contains($0) } == true, "read-only kernel interface and route dumps identify loopback")
 
+var logPipe: [Int32] = [-1, -1]
+expect(pipe(&logPipe) == 0 && fcntl(logPipe[0], F_SETFL, O_NONBLOCK) == 0, "create nonblocking synthetic core output pipe")
+let logPayload = Data((0..<(12 * 8192)).map { UInt8($0 % 251) })
+var writtenLogBytes = 0
+var receivedLog = Data()
+func produceLogChunk() {
+    guard writtenLogBytes < logPayload.count else { return }
+    let count = logPayload.withUnsafeBytes { Darwin.write(logPipe[1], $0.baseAddress!.advanced(by: writtenLogBytes), 8192) }
+    guard count == 8192 else { fputs("FAIL: synthetic pipe producer\n", stderr); exit(1) }
+    writtenLogBytes += count
+}
+produceLogChunk()
+let consumeLog: (Data) -> Void = { data in
+    receivedLog.append(data)
+    // Refill after each read so the producer never lets the pipe reach EAGAIN.
+    produceLogChunk()
+}
+let firstLogRead = CoreOutputReader.drain(logPipe[0], maximumReads: 8, consume: consumeLog)
+expect(firstLogRead == 64 * 1024 && receivedLog.count == firstLogRead, "startup log collection yields after eight reads even with a continuous producer")
+let remainingLogRead = CoreOutputReader.drain(logPipe[0], maximumReads: 8, consume: consumeLog)
+expect(remainingLogRead == 32 * 1024 && receivedLog == logPayload, "next log collection preserves all unread pipe bytes without loss")
+expect(CoreOutputReader.drain(logPipe[0], maximumReads: 8, consume: consumeLog) == 0, "empty nonblocking log pipe returns immediately")
+close(logPipe[0]); close(logPipe[1])
+
 // Exercise the real C TCP and UDP DNS probes against local protocol responders.
-func probeDNS(tcp: Bool, validReply: Bool) -> Bool {
+final class DNSProbeGate {
+    private let lock = NSLock()
+    private let allowed = DispatchSemaphore(value: 0)
+    private var received = false
+    private var replied = false
+    private var progressCount = 0
+    func receivedQuery() { lock.lock(); received = true; lock.unlock() }
+    func recordProgress() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        if received { progressCount += 1 }
+        return progressCount
+    }
+    func releaseReply() { allowed.signal() }
+    func waitToReply() -> Bool { allowed.wait(timeout: .now() + 3) == .success }
+    func sentReply() { lock.lock(); replied = true; lock.unlock() }
+    var hasReplied: Bool { lock.lock(); defer { lock.unlock() }; return replied }
+}
+func probeDNS(tcp: Bool, validReply: Bool, delay: TimeInterval = 0, fragmentDelay: TimeInterval = 0, timeout: Int32 = 1000, gate: DNSProbeGate? = nil, operation: ((UInt16) -> Bool)? = nil) -> Bool {
     let fd = socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0)
     guard fd >= 0 else { return false }
     var address = sockaddr_in(); address.sin_family = sa_family_t(AF_INET); address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); address.sin_addr.s_addr = inet_addr("127.0.0.1")
@@ -228,26 +269,123 @@ func probeDNS(tcp: Bool, validReply: Bool) -> Bool {
         var buffer = [UInt8](repeating: 0, count: 512)
         if tcp {
             let peer = accept(fd, nil, nil); guard peer >= 0 else { return }; defer { close(peer) }
+            var one: Int32 = 1
+            _ = setsockopt(peer, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
             let count = recv(peer, &buffer, buffer.count, 0)
             guard count >= 14 else { return }
+            gate?.receivedQuery()
+            if let gate, !gate.waitToReply() { return }
             if validReply { buffer[4] |= 0x80; buffer[5] |= 3 } else { buffer[2] ^= 0xff }
-            _ = send(peer, buffer, count, 0)
+            Thread.sleep(forTimeInterval: delay)
+            gate?.sentReply()
+            _ = send(peer, buffer, 2, 0)
+            Thread.sleep(forTimeInterval: fragmentDelay)
+            _ = buffer.withUnsafeBytes { send(peer, $0.baseAddress!.advanced(by: 2), count - 2, 0) }
         } else {
             var remote = sockaddr_storage(); var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
             let count = withUnsafeMutablePointer(to: &remote) { pointer in pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { recvfrom(fd, &buffer, buffer.count, 0, $0, &length) } }
             guard count >= 12 else { return }
+            gate?.receivedQuery()
+            if let gate, !gate.waitToReply() { return }
             if validReply { buffer[2] |= 0x80; buffer[3] |= 3 } else { buffer[0] ^= 0xff }
+            Thread.sleep(forTimeInterval: delay)
+            gate?.sentReply()
             _ = withUnsafePointer(to: &remote) { pointer in pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(fd, buffer, count, 0, $0, length) } }
         }
     }
-    let result = keq_dns_ready("127.0.0.1", port, tcp ? 1 : 0, 1000) == 1
-    _ = done.wait(timeout: .now() + 2)
+    let result = operation?(port) ?? (keq_dns_ready("127.0.0.1", port, tcp ? 1 : 0, timeout) == 1)
+    gate?.releaseReply()
+    _ = done.wait(timeout: .now() + max(2, delay + fragmentDelay + 1))
     return result
 }
 expect(probeDNS(tcp: false, validReply: true), "UDP DNS readiness accepts matching DNS response")
 expect(probeDNS(tcp: true, validReply: true), "TCP DNS readiness accepts matching framed response")
 expect(!probeDNS(tcp: false, validReply: false), "UDP DNS readiness rejects mismatched transaction")
 expect(!probeDNS(tcp: true, validReply: false), "TCP DNS readiness rejects mismatched transaction")
+expect(!probeDNS(tcp: true, validReply: true, delay: 0.16, fragmentDelay: 0.16, timeout: 250), "TCP DNS fragments share one total deadline")
+expect(probeDNS(tcp: false, validReply: true, delay: 0.75, timeout: 2000), "UDP DNS probe retains a slow query beyond 500ms")
+expect(probeDNS(tcp: true, validReply: true, delay: 0.1, fragmentDelay: 0.65, timeout: 2000), "TCP DNS probe reads delayed fragments within its deadline")
+expect(!probeDNS(tcp: false, validReply: true, delay: 0.35, timeout: 150), "UDP DNS probe rejects a reply after its deadline")
+for tcp in [Int32(0), 1] {
+    expect(keq_dns_ready("127.0.0.1", 9, tcp, 0) == 0, "DNS probe refuses an exhausted budget")
+    expect(keq_dns_ready("127.0.0.1", 9, tcp, -1) == 0, "DNS probe refuses a negative budget")
+}
+for tcp in [false, true] {
+    let gate = DNSProbeGate()
+    var observedProgress = 0
+    let continued = probeDNS(tcp: tcp, validReply: true, timeout: 2000, gate: gate, operation: { port in
+        (try? VirtualDNSReadiness.probe(address: "127.0.0.1", port: port, tcp: tcp, timeoutMilliseconds: 2000, validate: {
+            observedProgress = gate.recordProgress()
+            if observedProgress >= 2 { gate.releaseReply() }
+        })) == true
+    })
+    expect(continued && observedProgress >= 2, "DNS response waits for repeated health callbacks on the same pending query")
+}
+for failureCode in ["coreExited", "tunnelInterfaceLost"] {
+    let gate = DNSProbeGate()
+    var observedCode: String?
+    var repliedBeforeAbort = true
+    let continued = probeDNS(tcp: failureCode == "coreExited", validReply: true, timeout: 2000, gate: gate, operation: { port in
+        do {
+            return try VirtualDNSReadiness.probe(address: "127.0.0.1", port: port, tcp: failureCode == "coreExited", timeoutMilliseconds: 2000, validate: {
+                if gate.recordProgress() >= 2 { throw ServiceFailure(failureCode, "Synthetic startup identity lost.") }
+            })
+        } catch let error as ServiceFailure { observedCode = error.code; repliedBeforeAbort = gate.hasReplied; return false }
+        catch { return false }
+    })
+    expect(!continued && observedCode == failureCode && !repliedBeforeAbort, "DNS waiting aborts with the original core/interface failure before the responder is released")
+}
+var virtualDNSTime: TimeInterval = 0
+var virtualDNSCalls: [(Bool, Int32)] = []
+do {
+    try VirtualDNSReadiness.wait(probe: { tcp, budget in
+        virtualDNSCalls.append((tcp, budget))
+        let responseDelay = tcp ? 0.6 : 5.3
+        virtualDNSTime += min(responseDelay, Double(budget) / 1000)
+        return Double(budget) / 1000 >= responseDelay
+    }, validate: {}, now: { virtualDNSTime }, sleep: { virtualDNSTime += $0 })
+    expect(virtualDNSCalls.count == 2 && virtualDNSTime < 6, "DNS startup retains cold UDP query and then checks TCP")
+} catch { expect(false, "DNS startup accepts real-world cold response beyond 500ms") }
+virtualDNSTime = 0; virtualDNSCalls = []
+do {
+    try VirtualDNSReadiness.wait(probe: { tcp, budget in
+        virtualDNSCalls.append((tcp, budget)); virtualDNSTime += Double(budget) / 1000
+        return false
+    }, validate: {}, now: { virtualDNSTime }, sleep: { virtualDNSTime += $0 })
+    expect(false, "unresponsive DNS must time out")
+} catch let error as ServiceFailure {
+    expect(virtualDNSCalls.map { $0.0 } == [false, true], "TCP gets a probe when UDP is unresponsive")
+    expect(virtualDNSCalls.map { $0.1 } == [8000, 7000] && virtualDNSTime == 15, "DNS transports share 15s without renewing the budget")
+    expect(error.code == "readinessTimeout" && error.message.contains("UDP: not ready") && error.message.contains("TCP: not ready"), "DNS timeout identifies both failed transports")
+}
+virtualDNSTime = 0; virtualDNSCalls = []
+do {
+    try VirtualDNSReadiness.wait(probe: { tcp, budget in
+        virtualDNSCalls.append((tcp, budget)); virtualDNSTime += tcp ? 0.1 : Double(budget) / 1000
+        return tcp
+    }, validate: {}, now: { virtualDNSTime }, sleep: { virtualDNSTime += $0 })
+    expect(false, "TCP success alone must not report DNS ready")
+} catch let error as ServiceFailure {
+    expect(error.message.contains("UDP: not ready") && error.message.contains("TCP: ready"), "DNS failure preserves independent TCP success")
+    expect(virtualDNSCalls.filter { $0.0 }.count == 1 && virtualDNSTime <= 15, "successful transport is retained while failed UDP retries within the shared budget")
+}
+virtualDNSTime = 0; virtualDNSCalls = []
+do {
+    try VirtualDNSReadiness.wait(timeout: 0, probe: { tcp, budget in virtualDNSCalls.append((tcp, budget)); return true }, validate: {}, now: { virtualDNSTime })
+    expect(false, "zero overall DNS budget must fail")
+} catch { expect(virtualDNSCalls.isEmpty, "exhausted DNS budget emits no probes") }
+for failureCode in ["coreExited", "tunnelInterfaceLost"] {
+    var alive = true
+    virtualDNSCalls = []
+    do {
+        try VirtualDNSReadiness.wait(probe: { tcp, budget in virtualDNSCalls.append((tcp, budget)); alive = false; return true }, validate: {
+            if !alive { throw ServiceFailure(failureCode, "Synthetic startup identity lost.") }
+        })
+        expect(false, "DNS response cannot hide startup identity loss")
+    } catch let error as ServiceFailure {
+        expect(error.code == failureCode && virtualDNSCalls.count == 1, "DNS validates core/interface again after each probe")
+    }
+}
 let cleanupRoot = FileManager.default.temporaryDirectory.appendingPathComponent("keqdis-cleanup-\(UUID().uuidString)", isDirectory: true)
 let outside = cleanupRoot.appendingPathComponent("outside", isDirectory: true)
 let session = cleanupRoot.appendingPathComponent("session", isDirectory: true)
