@@ -87,7 +87,7 @@ public enum ConfigPolicy {
             if let value = value as? [String: Any] { return !value.isEmpty }
             return true
         }
-        func walk(_ node: Any, parents: [String], depth: Int) throws {
+        func walk(_ node: Any, parents: [String], depth: Int, isTopLevelDNSServer: Bool = false) throws {
             count += 1
             guard depth < 48, count < 100_000 else { throw ServiceFailure("invalidConfiguration", "Configuration nesting or size exceeds limits.") }
             if let dictionary = node as? [String: Any] {
@@ -125,6 +125,15 @@ public enum ConfigPolicy {
                         }
                     }
                     let httpPath = normalized == "path" && ["wssettings", "httpupgrade", "httpupgradesettings", "xhttpsettings", "http", "httpupgrade", "ws", "grpc", "transport", "httpheaders", "httpsettings"].contains(parent)
+                    let dnsHTTPPath = isTopLevelDNSServer && dictionary["type"] as? String == "https" && key == "path"
+                    if dnsHTTPPath {
+                        guard let path = value as? String, path.utf8.count <= 2048,
+                              path.isEmpty || path.hasPrefix("/"),
+                              let decoded = path.removingPercentEncoding,
+                              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                            throw ServiceFailure("unsafeConfiguration", "DoH path must be an HTTP URL path of at most 2048 bytes without control characters.")
+                        }
+                    }
                     let providerPath = normalized == "path" && (parents.contains("proxy-providers") || parents.contains("rule-providers"))
                     let nonPathContainer = ["profile", "cachefile"].contains(normalized) && value is [String: Any]
                     if providerPath {
@@ -138,7 +147,7 @@ public enum ConfigPolicy {
                         throw ServiceFailure("unsafeConfiguration", "TLS/SSH keys and certificates must be inline PEM, not filesystem references.")
                     }
                     if normalized == "type", value as? String == "file", parents.contains("proxy-providers") || parents.contains("rule-providers") { throw ServiceFailure("unsafeConfiguration", "External provider files cannot be read by the privileged core.") }
-                    if meaningful(value) && !pathExceptions.contains(normalized) && !httpPath && !providerPath && !nonPathContainer && (forbidden.contains(normalized) || normalized.hasSuffix("path") || normalized.hasSuffix("file") || normalized.hasSuffix("filepath")) {
+                    if meaningful(value) && !pathExceptions.contains(normalized) && !httpPath && !dnsHTTPPath && !providerPath && !nonPathContainer && (forbidden.contains(normalized) || normalized.hasSuffix("path") || normalized.hasSuffix("file") || normalized.hasSuffix("filepath")) {
                         throw ServiceFailure("unsafeConfiguration", "File or executable option is not allowed in privileged configuration: \(key)")
                     }
                     if ["listen", "listenaddress", "bindaddress"].contains(normalized), let address = value as? String {
@@ -154,7 +163,11 @@ public enum ConfigPolicy {
                     try walk(value, parents: parents + [key], depth: depth + 1)
                 }
             } else if let array = node as? [Any] {
-                for item in array { try walk(item, parents: parents, depth: depth + 1) }
+                // Arrays do not add parent names. Depth and direct-item scope
+                // prevent nested arrays or a dictionary named servers from
+                // turning a filesystem path into a permitted DoH URL path.
+                let dnsServers = core == "keqrnel" && parents == ["dns", "servers"] && depth == 2
+                for item in array { try walk(item, parents: parents, depth: depth + 1, isTopLevelDNSServer: dnsServers) }
             } else if let value = node as? String {
                 let lower = value.lowercased()
                 let field = parents.last?.lowercased() ?? ""

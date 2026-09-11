@@ -10,6 +10,7 @@ on:
       wireproxy_artifact: {type: string, required: true}
       helper_artifact: {type: string, required: true}
       app_artifact: {type: string, required: true}
+      session_contract_artifact: {type: string, required: true}
       fault_injection: {type: string, default: none}
 
 permissions:
@@ -51,6 +52,10 @@ jobs:
         with:
           name: ${{ inputs.app_artifact }}
           path: build/ci-archives/app
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.session_contract_artifact }}
+          path: build/macos-session-contract
       - name: Verify and restore all precompiled inputs
         run: |
           for component in keqrnel mihomo wireproxy helper app; do
@@ -63,6 +68,12 @@ jobs:
           done
           bash tool/build_macos_cores.sh --arch "$ARCH" --output-dir "build/macos-cores/$ARCH" --assemble-only \
             2>&1 | tee build/ci-logs/provenance.log
+      - name: Validate live Dart sessions with the verified Swift checker
+        env:
+          KEQDIS_MACOS_FIXTURE_DIR: build/macos-session-contract
+          KEQDIS_MACOS_CONTRACT_CHECKER: build/ci-components/helper/keqdis-network-tests
+          KEQDIS_MACOS_CONTRACT_REQUIRED: '1'
+        run: python3 -m unittest discover -s tool/tests -p test_macos_session_contract.py -v 2>&1 | tee build/ci-logs/session-contract.log
       - name: Exercise failed packaging retry without losing components
         if: inputs.fault_injection == inputs.arch && github.run_attempt == 1
         run: |

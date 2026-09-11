@@ -1,0 +1,437 @@
+diff --git a/core/localdns/doh_lifetime_darwin_test.go b/core/localdns/doh_lifetime_darwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/core/localdns/doh_lifetime_darwin_test.go
+@@ -0,0 +1,432 @@
++package localdns_test
++
++import (
++	"context"
++	"crypto/tls"
++	"crypto/x509"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"net/url"
++	"strconv"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	xraybridge "github.com/Lemonochka/keqrnel/bridge/xray"
++	dnsTransport "github.com/sagernet/sing-box/dns/transport"
++	M "github.com/sagernet/sing/common/metadata"
++)
++
++type localHTTP2Dialer struct {
++	engine    *xraybridge.Engine
++	tlsConfig *tls.Config
++	calls     atomic.Int32
++	observed  chan context.Context
++	finished  chan struct{}
++}
++
++func (d *localHTTP2Dialer) DialContext(ctx context.Context, _ string, dest M.Socksaddr) (net.Conn, error) {
++	d.calls.Add(1)
++	if d.observed != nil {
++		d.observed <- ctx
++	}
++	if d.finished != nil {
++		defer func() { d.finished <- struct{}{} }()
++	}
++	conn, err := d.engine.DialTCP(ctx, dest.Addr.String(), dest.Port)
++	if err != nil {
++		return nil, err
++	}
++	secured := tls.Client(conn, d.tlsConfig.Clone())
++	if err := secured.HandshakeContext(ctx); err != nil {
++		conn.Close()
++		return nil, err
++	}
++	return secured, nil
++}
++func (*localHTTP2Dialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
++	return nil, fmt.Errorf("packet dialing is forbidden in this TCP-only fixture")
++}
++
++func localClientEngine(t *testing.T, protocol string) *xraybridge.Engine {
++	t.Helper()
++	config := `{"log":{"loglevel":"none"},"outbounds":[{"protocol":"freedom","settings":{"finalRules":[{"action":"allow"}]}}]}`
++	if protocol == "vless" {
++		reservation, err := net.Listen("tcp", "127.0.0.1:0")
++		if err != nil {
++			t.Fatal(err)
++		}
++		port := reservation.Addr().(*net.TCPAddr).Port
++		reservation.Close()
++		const testID = "01234567-89ab-cdef-0123-456789abcdef"
++		serverConfig := fmt.Sprintf(`{"log":{"loglevel":"none"},"inbounds":[{"listen":"127.0.0.1","port":%d,"protocol":"vless","settings":{"clients":[{"id":%q}],"decryption":"none"},"streamSettings":{"network":"tcp","security":"none"}}],"outbounds":[{"protocol":"freedom","settings":{"finalRules":[{"action":"allow"}]}}]}`, port, testID)
++		server, err := xraybridge.NewEngine([]byte(serverConfig))
++		if err != nil {
++			t.Fatal(err)
++		}
++		t.Cleanup(func() { server.Close() })
++		config = fmt.Sprintf(`{"log":{"loglevel":"none"},"outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"127.0.0.1","port":%d,"users":[{"id":%q,"encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"none"}}]}`, port, testID)
++	}
++	engine, err := xraybridge.NewEngine([]byte(config))
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { engine.Close() })
++	return engine
++}
++
++// The first request creates one HTTP/2 connection through the exact sing-box
++// pool and embedded Xray bridge. Completing its DNS-style context must not
++// cancel another in-flight request sharing that connection.
++func TestDoHFirstRequestCancellationPreservesSharedConnection(t *testing.T) {
++	for _, protocol := range []string{"freedom", "vless"} {
++		t.Run(protocol, func(t *testing.T) {
++			firstEntered := make(chan struct{})
++			secondEntered := make(chan struct{})
++			releaseSecond := make(chan struct{})
++			var release sync.Once
++			unblock := func() { release.Do(func() { close(releaseSecond) }) }
++			defer unblock()
++			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if r.ProtoMajor != 2 {
++					t.Errorf("expected HTTP/2, got %s", r.Proto)
++					return
++				}
++				switch r.URL.Path {
++				case "/first":
++					close(firstEntered)
++					select {
++					case <-secondEntered:
++					case <-r.Context().Done():
++						return
++					}
++				case "/second":
++					close(secondEntered)
++					select {
++					case <-releaseSecond:
++					case <-r.Context().Done():
++						return
++					}
++				default:
++					t.Errorf("unexpected local path")
++					return
++				}
++				w.WriteHeader(http.StatusOK)
++				io.WriteString(w, "local-response")
++			}))
++			server.EnableHTTP2 = true
++			server.StartTLS()
++			defer server.Close()
++			// Ensure the gated handler cannot hold httptest.Close on failure.
++			defer unblock()
++			roots := x509.NewCertPool()
++			roots.AddCert(server.Certificate())
++			engine := localClientEngine(t, protocol)
++			dialer := &localHTTP2Dialer{engine: engine, tlsConfig: &tls.Config{RootCAs: roots, ServerName: "127.0.0.1", NextProtos: []string{"h2"}}, observed: make(chan context.Context, 1)}
++			destination, _ := url.Parse(server.URL)
++			host, rawPort, _ := net.SplitHostPort(destination.Host)
++			port, _ := strconv.Atoi(rawPort)
++			transport := dnsTransport.NewHTTPSTransportWrapper(dialer, M.ParseSocksaddrHostPort(host, uint16(port)), destination)
++			defer transport.Close()
++			session, stop := context.WithTimeout(t.Context(), 5*time.Second)
++			defer stop()
++			first, cancelFirst := context.WithCancel(session)
++			defer cancelFirst()
++			request := func(ctx context.Context, path string) error {
++				req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+path, nil)
++				if err != nil {
++					return err
++				}
++				response, err := transport.RoundTrip(req)
++				if err != nil {
++					return err
++				}
++				defer response.Body.Close()
++				body, err := io.ReadAll(response.Body)
++				if err == nil && string(body) != "local-response" {
++					return fmt.Errorf("unexpected local body")
++				}
++				return err
++			}
++			firstResult := make(chan error, 1)
++			secondResult := make(chan error, 1)
++			go func() { firstResult <- request(first, "/first") }()
++			select {
++			case <-firstEntered:
++			case err := <-firstResult:
++				t.Fatalf("first request failed before handler: %v", err)
++			case <-session.Done():
++				t.Fatal("first request did not arrive")
++			}
++			connectionContext := <-dialer.observed
++			go func() { secondResult <- request(session, "/second") }()
++			select {
++			case err := <-firstResult:
++				if err != nil {
++					t.Fatal(err)
++				}
++			case <-session.Done():
++				t.Fatal("first request did not finish")
++			}
++			if dialer.calls.Load() != 1 {
++				t.Fatalf("requests did not share one connection: %d", dialer.calls.Load())
++			}
++			cancelFirst() // Matches dns.Client.Exchange's cancel after transport.Exchange.
++			if connectionContext.Err() != nil {
++				t.Fatalf("completed query cancellation reached the shared connection: %v", connectionContext.Err())
++			}
++			unblock()
++			select {
++			case err := <-secondResult:
++				if err != nil {
++					t.Fatalf("second response: %v", err)
++				}
++			case <-session.Done():
++				t.Fatal("second response did not finish")
++			}
++			if dialer.calls.Load() != 1 {
++				t.Fatalf("connection was replaced instead of preserved: %d", dialer.calls.Load())
++			}
++		})
++	}
++}
++
++func TestDoHPendingTLSHonorsCancellationAndDeadline(t *testing.T) {
++	for _, cancelMode := range []string{"cancel", "deadline"} {
++		t.Run(cancelMode, func(t *testing.T) {
++			listener, err := net.Listen("tcp", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer listener.Close()
++			entered := make(chan struct{})
++			peerClosed := make(chan struct{})
++			go func() {
++				conn, err := listener.Accept()
++				if err != nil {
++					return
++				}
++				defer conn.Close()
++				close(entered)
++				io.Copy(io.Discard, conn) // Consume ClientHello without answering TLS.
++				close(peerClosed)
++			}()
++			engine := localClientEngine(t, "freedom")
++			dialer := &localHTTP2Dialer{engine: engine, tlsConfig: &tls.Config{ServerName: "127.0.0.1", NextProtos: []string{"h2"}}, observed: make(chan context.Context, 1), finished: make(chan struct{}, 1)}
++			destination, _ := url.Parse("https://" + listener.Addr().String())
++			addr := listener.Addr().(*net.TCPAddr)
++			transport := dnsTransport.NewHTTPSTransportWrapper(dialer, M.ParseSocksaddrHostPort("127.0.0.1", uint16(addr.Port)), destination)
++			defer transport.Close()
++			type key struct{}
++			ctx := context.WithValue(t.Context(), key{}, "local-metadata")
++			var cancel context.CancelFunc
++			if cancelMode == "deadline" {
++				ctx, cancel = context.WithTimeout(ctx, time.Second)
++			} else {
++				ctx, cancel = context.WithCancel(ctx)
++			}
++			defer cancel()
++			result := make(chan error, 1)
++			go func() {
++				req, _ := http.NewRequestWithContext(ctx, http.MethodPost, destination.String(), nil)
++				_, err := transport.RoundTrip(req)
++				result <- err
++			}()
++			select {
++			case <-entered:
++			case <-time.After(4 * time.Second):
++				t.Fatal("TLS dialing did not begin")
++			}
++			lifetime := <-dialer.observed
++			if lifetime.Value(key{}) != "local-metadata" {
++				t.Fatal("dial metadata lost")
++			}
++			expected := context.DeadlineExceeded
++			if cancelMode == "cancel" {
++				expected = context.Canceled
++				cancel()
++			}
++			select {
++			case err := <-result:
++				if !errors.Is(err, expected) {
++					t.Fatalf("caller error: %v", err)
++				}
++			case <-time.After(4 * time.Second):
++				t.Fatal("caller cancellation was lost")
++			}
++			select {
++			case <-dialer.finished:
++			case <-time.After(4 * time.Second):
++				t.Fatal("TLS dial outlived cancellation")
++			}
++			if !errors.Is(context.Cause(lifetime), expected) {
++				t.Fatalf("dial cause: %v", context.Cause(lifetime))
++			}
++			select {
++			case <-peerClosed:
++			case <-time.After(4 * time.Second):
++				t.Fatal("cancelled TLS left local TCP open")
++			}
++		})
++	}
++}
++
++func TestDoHHTTP1FallbackKeepsTLSMetadata(t *testing.T) {
++	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "local-h1") }))
++	defer server.Close()
++	roots := x509.NewCertPool()
++	roots.AddCert(server.Certificate())
++	engine := localClientEngine(t, "freedom")
++	dialer := &localHTTP2Dialer{engine: engine, tlsConfig: &tls.Config{RootCAs: roots, ServerName: "127.0.0.1", NextProtos: []string{"h2", "http/1.1"}}}
++	destination, _ := url.Parse(server.URL)
++	addr := server.Listener.Addr().(*net.TCPAddr)
++	transport := dnsTransport.NewHTTPSTransportWrapper(dialer, M.ParseSocksaddrHostPort("127.0.0.1", uint16(addr.Port)), destination)
++	defer transport.Close()
++	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
++	defer cancel()
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, nil)
++	response, err := transport.RoundTrip(req)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer response.Body.Close()
++	body, err := io.ReadAll(response.Body)
++	if err != nil || string(body) != "local-h1" || response.ProtoMajor != 1 {
++		t.Fatalf("HTTP1 fallback failed: %v %q", err, body)
++	}
++	if response.TLS == nil || !response.TLS.HandshakeComplete {
++		t.Fatal("HTTP1 TLS metadata lost")
++	}
++	if dialer.calls.Load() != 2 {
++		t.Fatalf("ALPN fallback should replace exactly one H2 attempt: %d", dialer.calls.Load())
++	}
++}
++
++func TestDoHShutdownOwnsActiveOldAndClonedConnections(t *testing.T) {
++	entered := make(chan string, 2)
++	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { entered <- r.URL.Path; <-r.Context().Done() }))
++	server.EnableHTTP2 = true
++	server.StartTLS()
++	defer server.Close()
++	roots := x509.NewCertPool()
++	roots.AddCert(server.Certificate())
++	engine := localClientEngine(t, "vless")
++	dialer := &localHTTP2Dialer{engine: engine, tlsConfig: &tls.Config{RootCAs: roots, ServerName: "127.0.0.1", NextProtos: []string{"h2"}}, observed: make(chan context.Context, 4)}
++	destination, _ := url.Parse(server.URL)
++	addr := server.Listener.Addr().(*net.TCPAddr)
++	original := dnsTransport.NewHTTPSTransportWrapper(dialer, M.ParseSocksaddrHostPort("127.0.0.1", uint16(addr.Port)), destination)
++	defer original.Close()
++	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
++	defer cancel()
++	outcomes := make(chan error, 2)
++	start := func(transport *dnsTransport.HTTPSTransportWrapper, path string) {
++		go func() {
++			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+path, nil)
++			_, err := transport.RoundTrip(req)
++			outcomes <- err
++		}()
++	}
++	start(original, "/original")
++	select {
++	case <-entered:
++	case <-ctx.Done():
++		t.Fatal("old generation did not connect")
++	}
++	oldLifetime := <-dialer.observed
++	original.CloseIdleConnections()
++	cloned := original.Clone()
++	start(cloned, "/cloned")
++	select {
++	case <-entered:
++	case <-ctx.Done():
++		t.Fatal("new generation did not connect")
++	}
++	newLifetime := <-dialer.observed
++	if oldLifetime.Err() != nil {
++		t.Fatal("idle close/reset killed an active old generation")
++	}
++	// Box.Close closes outbounds before DNS transports. Engine.Close alone
++	// does not own these dispatcher contexts, so final transport close must.
++	if err := engine.Close(); err != nil {
++		t.Fatal(err)
++	}
++	cloned.Close()
++	for range 2 {
++		select {
++		case err := <-outcomes:
++			if err == nil {
++				t.Fatal("shutdown completed a gated query")
++			}
++		case <-ctx.Done():
++			t.Fatal("shutdown leaked active stream")
++		}
++	}
++	for _, lifetime := range []context.Context{oldLifetime, newLifetime} {
++		if lifetime.Err() == nil {
++			t.Fatal("transport close did not cancel a detached connection")
++		}
++	}
++	for _, transport := range []*dnsTransport.HTTPSTransportWrapper{original, cloned} {
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/closed", nil)
++		if _, err := transport.RoundTrip(req); err == nil {
++			t.Fatal("closed generation accepted a new dial")
++		}
++	}
++}
++
++type stalledDoHDialer struct {
++	entered  chan context.Context
++	finished chan struct{}
++}
++
++func (d *stalledDoHDialer) DialContext(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
++	d.entered <- ctx
++	<-ctx.Done()
++	close(d.finished)
++	return nil, context.Cause(ctx)
++}
++func (*stalledDoHDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
++	return nil, errors.New("not used")
++}
++
++func TestDoHShutdownCancelsPendingDial(t *testing.T) {
++	dialer := &stalledDoHDialer{entered: make(chan context.Context, 1), finished: make(chan struct{})}
++	destination, _ := url.Parse("https://127.0.0.1:1/")
++	transport := dnsTransport.NewHTTPSTransportWrapper(dialer, M.ParseSocksaddrHostPort("127.0.0.1", 1), destination)
++	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
++	defer cancel()
++	outcome := make(chan error, 1)
++	go func() {
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, destination.String(), nil)
++		_, err := transport.RoundTrip(req)
++		outcome <- err
++	}()
++	var lifetime context.Context
++	select {
++	case lifetime = <-dialer.entered:
++	case <-ctx.Done():
++		t.Fatal("pending dial did not start")
++	}
++	transport.Close()
++	select {
++	case <-dialer.finished:
++	case <-ctx.Done():
++		t.Fatal("pending dial ignored shutdown")
++	}
++	select {
++	case err := <-outcome:
++		if err == nil {
++			t.Fatal("pending shutdown returned success")
++		}
++	case <-ctx.Done():
++		t.Fatal("pending request survived shutdown")
++	}
++	if !errors.Is(context.Cause(lifetime), net.ErrClosed) {
++		t.Fatalf("shutdown cause: %v", context.Cause(lifetime))
++	}
++}

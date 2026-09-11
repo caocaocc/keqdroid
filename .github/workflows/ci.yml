@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
   workflow_call:
+    outputs:
+      session-contract-artifact:
+        description: Live Dart session payloads from these successful checks
+        value: ${{ jobs.checks.outputs.session-contract-artifact }}
 
 permissions:
   contents: read
@@ -12,12 +16,14 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      session-contract-artifact: ${{ steps.session-contract.outputs.artifact-name }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir -p build/ci-logs
+      - run: mkdir -p build/ci-logs build/macos-session-contract
       - uses: subosito/flutter-action@v2
         id: flutter-sdk
         with:
@@ -26,6 +32,17 @@ jobs:
       - run: flutter pub get --enforce-lockfile 2>&1 | tee build/ci-logs/pub-get.log
       - run: flutter analyze 2>&1 | tee build/ci-logs/analyze.log
       - run: flutter test --reporter expanded 2>&1 | tee build/ci-logs/flutter-tests.log
+        env:
+          KEQDIS_MACOS_FIXTURE_DIR: build/macos-session-contract
+      - id: session-contract
+        run: echo "artifact-name=macos-session-contract-attempt${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+      - name: Preserve generated macOS session requests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.session-contract.outputs.artifact-name }}
+          path: build/macos-session-contract/*.json
+          if-no-files-found: error
+          retention-days: 30
       - run: python3 -m unittest discover -s tool/tests -v 2>&1 | tee build/ci-logs/python-tests.log
       - name: Preserve Flutter SDK after failed checks
         if: always() && steps.flutter-sdk.outcome == 'success' && steps.flutter-sdk.outputs.CACHE-HIT != 'true'

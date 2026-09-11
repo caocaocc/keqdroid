@@ -75,6 +75,14 @@ class CoreCheckpointTests(unittest.TestCase):
         self.change_patch("macos/bootstrapdns/resolver.go")
         self.assert_changed(before, builder.CORES)
 
+    def test_doh_lifecycle_patch_and_regression_invalidate_only_keqrnel(self):
+        for patch_name in ("macos/singbox-doh-connection-lifetime.patch",
+                           "macos/keqrnel-doh-lifetime-tests.patch"):
+            with self.subTest(patch=patch_name):
+                before = self.fingerprints()
+                self.change_patch(patch_name)
+                self.assert_changed(before, ("keqrnel",))
+
     def test_xray_physical_socket_regressions_run_with_bootstrap_checks(self):
         sources = {name: self.directory / name for name in builder.DEPENDENCIES["keqrnel"]}
         with patch.object(builder, "run") as commands:

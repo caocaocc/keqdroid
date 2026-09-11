@@ -69,6 +69,7 @@ jobs:
       wireproxy_artifact: ${{ needs.wireproxy-arm64.outputs.artifact-name }}
       helper_artifact: ${{ needs.helper-arm64.outputs.artifact-name }}
       app_artifact: ${{ needs.app-arm64.outputs.artifact-name }}
+      session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}
 
   package-x64:
     needs: [checks, keqrnel-x64, mihomo-x64, wireproxy-x64, helper-x64, app-x64]
@@ -82,3 +83,4 @@ jobs:
       wireproxy_artifact: ${{ needs.wireproxy-x64.outputs.artifact-name }}
       helper_artifact: ${{ needs.helper-x64.outputs.artifact-name }}
       app_artifact: ${{ needs.app-x64.outputs.artifact-name }}
+      session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}

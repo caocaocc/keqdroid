@@ -72,6 +72,26 @@ packets. The build executes them on its macOS host and cross-compiles the
 other architecture. Real TUN, sleep/wake, DHCP changes, IPv6-only networks, and
 both CPU architectures still require device acceptance testing.
 
+## DoH connection lifetime
+
+`singbox-doh-connection-lifetime.patch` keeps a Darwin HTTP/2 DNS connection
+alive independently of the request that first opened it. The embedded Xray
+dispatcher retains its dial context for the whole stream; cancelling a finished
+DNS query previously closed the shared HTTP/2 connection and interrupted other
+queries with `unexpected EOF`. Cancellation still reaches the TCP/TLS dial until
+the TLS handshake completes. Afterwards, the connection and the DNS transport
+own cancellation. Transport shutdown closes pending and active managed HTTP/2
+connections, including those retained across a reset. HTTP/1.1 keeps its existing
+dialer and cancellation behavior, including TLS metadata and protocol fallback.
+Non-Darwin builds keep the original context behavior. DNS upstreams, routes,
+query timeouts and the helper's readiness deadlines do not change.
+
+`keqrnel-doh-lifetime-tests.patch` adds DNS-over-proxy integration regressions to
+the already executed `core/localdns` test package. They use synthetic loopback
+HTTP/2 and proxy servers rather than public resolvers or user credentials. The
+tests validate connection sharing and cancellation, not real TUN routing or
+system DNS readiness; those remain separate device acceptance checks.
+
 ## Privileged Clash API
 
 The helper additionally sets `KEQDIS_PRIVILEGED_RUNTIME=1` for its Darwin root
