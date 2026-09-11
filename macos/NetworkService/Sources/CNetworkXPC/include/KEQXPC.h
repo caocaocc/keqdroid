@@ -23,6 +23,10 @@ int keq_port_available(uint16_t port);
 int keq_remove_tree(const char *path);
 int keq_interface_counters(const char *name, uint64_t *upload, uint64_t *download);
 int keq_dns_ready(const char *address, uint16_t port, int tcp, int timeout_ms);
+// Runs on the calling thread while the same DNS socket waits. Returning zero
+// cancels the probe, allowing startup checks to drain core logs and fail early.
+typedef int (*keq_dns_progress_callback)(void *context);
+int keq_dns_ready_with_progress(const char *address, uint16_t port, int tcp, int timeout_ms, keq_dns_progress_callback progress, void *context);
 // Read-only RTM_GET lookup. Returns 1 only when the IPv6 destination uses the
 // exact interface; errors or absent routes return 0. Never changes routing.
 int keq_ipv6_route_uses_interface(const char *address, const char *interface_name);

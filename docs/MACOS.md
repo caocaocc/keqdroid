@@ -77,6 +77,8 @@ keqrnel、Mihomo、AWG 均有 Proxy/TUN 请求路径；AWG TUN 使用 wireproxy 
 
 TUN DNS 使用核心虚拟端点：keqrnel/AWG 为 `172.19.0.2`，Mihomo 从运行配置推导（默认 `198.18.0.2`）。Swift 不在 `127.0.0.1:53` 新建 DNS 服务。先测试 UDP/TCP DNS，再修改系统 DNS，并复测系统解析路径。恢复 DNS/代理后才停止核心。
 
+虚拟 DNS 探测每条查询最多等待 8 秒，UDP 和 TCP 共享 15 秒总期限，避免把代理 DNS 的冷启动延迟误判为不可用。查询期间保留同一个 socket，定期读取有限数量的核心日志并检查核心与接口；UDP 失败也会检查 TCP，错误中分别保留两者结果。TCP 连接、帧头和响应分片共用同一单调时钟期限，不因收到部分数据而重新计时。这只检查 DNS 协议响应，提交设置后仍须通过下面的系统解析检查。
+
 提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由原有比较后恢复逻辑保留其修改。仅 TUN 使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；两次查询共享总计 5 秒期限，失败或超时不进入已连接状态。若用户规则屏蔽了整个 `example.com`，此项就绪检查可能失败，诊断会明确指出探测域，用户 DNS 规则不会被更改。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
 
 启动前保存物理 DNS 和出口，注入固定环境契约：
@@ -85,6 +87,8 @@ TUN DNS 使用核心虚拟端点：keqrnel/AWG 为 `172.19.0.2`，Mihomo 从运�
 KEQDIS_BOOTSTRAP_DNS=["192.168.1.1"]
 KEQDIS_BOOTSTRAP_INTERFACE=en0
 ```
+
+macOS TUN 在未启用自定义 DNS 时，自动生成的链接和代理链使用这份物理快照解析各节点的实际服务器域名。该策略只应用于节点的精确 bootstrap 域名，普通业务 DNS 仍按现有规则运行；明确开启的自定义 DNS、完整作者配置、Proxy 和其他平台保持原策略。这样可以避免物理网络无法直连默认公共 DoH 时，节点启动先消耗一次失败等待。合理的 DNS 就绪期限仍保留，作为慢响应的容错上限。
 
 Darwin 补丁覆盖 keqrnel local DNS、Xray 隐式/新建 resolver 和 Mihomo system resolver。有效快照绑定物理出口；错误或不完整快照拒绝启动；失败不静默回退公共 DNS。用户明确配置的 DoH/DoT/代理 DNS 保留。网络切换后重建整个快照与会话。补丁来源、范围和单独测试方法见 [`tool/patches/macos/README.md`](../tool/patches/macos/README.md)。
 

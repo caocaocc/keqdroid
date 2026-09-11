@@ -500,10 +500,13 @@ class XrayCoreSettings {
   /// все запросы схлопываются в одно постоянное соединение до 1.1.1.1 вместо
   /// отдельного TCP на каждый. В режимах «остальное direct/block» оставляем
   /// прямой — там `final` увёл бы запрос мимо прокси или вовсе в blackhole.
+  /// [physicalBootstrapDns] uses the protected macOS TUN resolver only for
+  /// automatic node bootstrap; ordinary and explicit custom DNS stay intact.
   Map<String, dynamic> buildDnsBlock({
     required List<String> directDomains,
     List<String> bootstrapDomains = const [],
     bool proxiedDoh = false,
+    bool physicalBootstrapDns = false,
   }) {
     final servers = <Map<String, dynamic>>[];
 
@@ -516,12 +519,16 @@ class XrayCoreSettings {
         : const <Map<String, dynamic>>[];
 
     if (bootstrapDomains.isNotEmpty) {
-      for (final server in _bootstrapResolvers(custom)) {
-        servers.add({
-          ...server,
-          'domains': bootstrapDomains,
-          'skipFallback': true,
-        });
+      // macOS TUN's localhost resolver uses the protected physical snapshot.
+      // Skip automatic public DoH delays without replacing explicit user DNS.
+      if (!physicalBootstrapDns || dnsUseCustom) {
+        for (final server in _bootstrapResolvers(custom)) {
+          servers.add({
+            ...server,
+            'domains': bootstrapDomains,
+            'skipFallback': true,
+          });
+        }
       }
       servers.add({
         'address': 'localhost',
