@@ -41,7 +41,7 @@ swift run --package-path macos/NetworkService --scratch-path build/macos-native-
 
 此命令不安装或启动网络服务，不需要管理员权限；检查包含环回测试套接字和只读路由查询，受限执行环境需允许这些操作。完整 XCTest 仍使用配置好的 Xcode 环境。Dart 配置和状态逻辑可单独运行 `flutter test --no-pub <测试文件>`，提交前仍须完成全量分析和测试。
 
-本地回归通过后再集中推送、构建和安装。修改受保护的 helper 后，已安装程序不会自动获得修复，仍须通过完整 PKG 更新；独立 helper 源码变化可复用应用，而双方共享的原生客户端/C 源码变化会同时使应用和 helper 的组件指纹变化。核心输入未变时继续复用核心。实际 TUN 测试由使用者手动操作。
+本地回归通过后再集中推送、构建和安装。修改受保护的 helper 后，已安装程序不会自动获得修复，仍须通过完整 PKG 更新；独立 helper 源码变化可复用应用，而双方共享的原生客户端/C 源码变化会同时使应用和 helper 的组件指纹变化。核心输入未变时继续复用核心。经使用者授权，实际 TUN 连接、断开和验收由自动化执行；系统管理员凭据仍由使用者在系统界面输入。
 
 ## 本机验收
 
@@ -50,6 +50,8 @@ swift run --package-path macos/NetworkService --scratch-path build/macos-native-
 使用 `python3 tool/macos/verify_download.py --dmg <DMG> --sha256 <SHA256文件> --report <验证报告> --arch arm64 --commit <完整提交SHA> --inspect-payload --output <本机验证报告>` 可以核对下载、只读展开 PKG、检查完整签名、所有 Mach-O 架构与最低系统版本，并将安装脚本逐字节对照指定提交。此检查不会执行安装脚本、启动包内程序或修改网络配置。
 
 本机测试配置只保存在本机，不进入 Git、Actions secrets、构建日志或公共测试报告。报告仅记录所测协议和结果。测试前保存系统代理、DNS、路由状态；断开、退出和异常恢复后核对状态。
+
+自动 TUN 验收先确认已安装版本与组件摘要，保存网络基线，并设置独立的限时退出保护。每次连接分别记录核心、虚拟 DNS、系统 DNS、实际流量和恢复结果。Codex 使用 SOCKS 代理不代表其上游客户端自动绕过被测 TUN，因此不能据此省略恢复保护。失败后先核对恢复，再进行下一组测试；仅建立 utun 或本地 DNS 返回 localhost 不能标记整条代理链路通过。
 
 当前本机为 Apple Silicon、macOS 15.6。所提供测试订阅包含两个 VLESS 节点，用于 keqrnel/Mihomo 的 Proxy、TUN、DNS、分流和恢复测试。未提供 AWG 测试节点。当前本机验收不能代表 Intel 或 macOS 12，完整发布矩阵见 [macOS 开发与验收](MACOS.md)。
 
