@@ -34,6 +34,40 @@ final class NetworkServiceTests: XCTestCase {
         let payload: [String: Any] = ["log": ["output": "/etc/sudoers"]]
         XCTAssertThrowsError(try ConfigPolicy.validateJSON(payload, core: "keqrnel", mode: "tun", ports: [2080, 2081, 9090], apiPort: 9090, secret: "0123456789abcdef"))
     }
+    private func validateDNS(_ dns: Any, tun: Bool = false, core: String = "keqrnel") throws {
+        let inbounds: [[String: Any]] = tun ? [["type": "tun", "auto_route": true, "address": ["172.19.0.1/30"]]] : [["type": "socks", "listen": "127.0.0.1", "listen_port": 2080]]
+        let object: [String: Any] = core == "keqrnel"
+            ? ["dns": dns, "inbounds": inbounds, "experimental": ["clash_api": ["external_controller": "127.0.0.1:9090", "secret": "0123456789abcdef"]]]
+            : ["dns": dns, "external-controller": "127.0.0.1:9090", "secret": "0123456789abcdef", "geodata-mode": true, "geo-auto-update": false]
+        try ConfigPolicy.validateJSON(object, core: core, mode: tun ? "tun" : "proxy", ports: [2080, 2081, 9090], apiPort: 9090, secret: "0123456789abcdef")
+    }
+    func testHTTPSDNSURLPathsAreAllowedInProxyAndTUN() {
+        for tun in [false, true] {
+            for path in ["/dns-query", "", "/", "/custom/dns%2Dquery", "/" + String(repeating: "a", count: 2047)] {
+                XCTAssertNoThrow(try validateDNS(["servers": [["type": "https", "server": "1.1.1.1", "path": path]]], tun: tun))
+            }
+        }
+    }
+    func testHTTPSDNSPathRejectsMalformedValues() {
+        for path in [NSNull(), false, 123, ["/dns-query"], ["path": "/dns-query"], "dns-query", "file:///etc/sudoers", "/" + String(repeating: "a", count: 2048), "/dns\r\nInjected", "/dns\0", "/dns\u{7f}", "/dns%00", "/dns%0a", "/dns%XX"] as [Any] {
+            XCTAssertThrowsError(try validateDNS(["servers": [["type": "https", "path": path]]])) {
+                XCTAssertEqual(($0 as? ServiceFailure)?.code, "unsafeConfiguration")
+            }
+        }
+    }
+    func testDNSPathExemptionRequiresAnExactHTTPSServerArrayItem() {
+        let https: [String: Any] = ["type": "https", "path": "/dns-query"]
+        for kind in ["hosts", "file", "local", "tcp", "HTTPS", ""] {
+            XCTAssertThrowsError(try validateDNS(["servers": [["type": kind, "path": "/etc/hosts"]]]))
+        }
+        for dns in [
+            ["servers": https], ["servers": [[https]]], [["servers": [https]]],
+            ["servers": [["type": "https", "nested": ["path": "/etc/sudoers"]]]],
+            ["nested": ["dns": ["servers": [https]]]],
+            ["servers": [["type": "https", "path": "/dns-query", "tls": ["certificate_path": "/etc/private.pem"]]]]
+        ] as [Any] { XCTAssertThrowsError(try validateDNS(dns)) }
+        XCTAssertThrowsError(try validateDNS(["servers": [https]], core: "mihomo"))
+    }
     func testRecoveryJournalRejectsCorruptState() {
         XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: ["directory": UUID().uuidString], root: ServicePaths.root))
         XCTAssertThrowsError(try SessionRecoveryJournal(dictionary: ["directory": "../../etc", "processes": []], root: ServicePaths.root))

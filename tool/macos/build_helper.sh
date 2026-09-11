@@ -10,6 +10,11 @@ BUILD="build/macos-helper/$ARCH"
 mkdir -p "$DESTINATION"
 swift test --package-path macos/NetworkService --scratch-path "$BUILD"
 swift run --package-path macos/NetworkService --scratch-path "$BUILD" keqdis-network-tests
+# Preserve the request-only validator with this exact helper source revision.
+# Packaging runs it against freshly generated Dart payloads without compiling.
+TEST_BIN=$(swift build --package-path macos/NetworkService --scratch-path "$BUILD" --show-bin-path)
+cp "$TEST_BIN/keqdis-network-tests" "$DESTINATION/keqdis-network-tests"
+chmod 755 "$DESTINATION/keqdis-network-tests"
 swift build --package-path macos/NetworkService --scratch-path "$BUILD" -c release --arch "$TARGET" --product keqdis-network-service
 BIN=$(swift build --package-path macos/NetworkService --scratch-path "$BUILD" -c release --arch "$TARGET" --show-bin-path)
 cp "$BIN/keqdis-network-service" "$DESTINATION/keqdis-network-service"

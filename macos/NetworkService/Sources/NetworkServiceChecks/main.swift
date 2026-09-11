@@ -52,6 +52,38 @@ let secret = "0123456789abcdef"
 let valid: [String: Any] = ["experimental": ["clash_api": ["external_controller": "127.0.0.1:9090", "secret": secret]], "inbounds": [["type": "socks", "listen": "127.0.0.1", "listen_port": 2080]], "outbounds": [["type": "direct"]]]
 func validate(_ object: [String: Any]) throws { try ConfigPolicy.validateJSON(object, core: "keqrnel", mode: "proxy", ports: [2080, 2081, 9090], apiPort: 9090, secret: secret) }
 do { try validate(valid); checks += 1 } catch { fputs("FAIL: valid proxy config \(error)\n", stderr); exit(1) }
+func validateDNS(_ dns: Any, tun: Bool = false) throws {
+    var object = valid
+    object["dns"] = dns
+    if tun { object["inbounds"] = [["type": "tun", "auto_route": true, "address": ["172.19.0.1/30"]]] }
+    try ConfigPolicy.validateJSON(object, core: "keqrnel", mode: tun ? "tun" : "proxy", ports: [2080, 2081, 9090], apiPort: 9090, secret: secret)
+}
+let dohServer: [String: Any] = ["type": "https", "tag": "proxy-dns", "server": "1.1.1.1", "path": "/dns-query"]
+for tun in [false, true] {
+    for path in ["/dns-query", "", "/", "/custom/dns%2Dquery", "/" + String(repeating: "a", count: 2047)] {
+        var server = dohServer; server["path"] = path
+        do { try validateDNS(["servers": [server]], tun: tun); checks += 1 }
+        catch { fputs("FAIL: DoH URL path rejected in \(tun ? "TUN" : "Proxy"): \(error)\n", stderr); exit(1) }
+    }
+}
+for path in [NSNull(), false, 123, ["/dns-query"], ["path": "/dns-query"], "dns-query", "file:///etc/sudoers", "/" + String(repeating: "a", count: 2048), "/dns\r\nInjected", "/dns\0", "/dns\u{7f}", "/dns%00", "/dns%0a", "/dns%XX"] as [Any] {
+    rejects("malformed DoH URL path") { var server = dohServer; server["path"] = path; try validateDNS(["servers": [server]]) }
+}
+for kind in ["hosts", "file", "local", "tcp", "HTTPS", ""] {
+    rejects("DoH path exemption for non-HTTPS transport") { var server = dohServer; server["type"] = kind; try validateDNS(["servers": [server]]) }
+}
+let disguisedDNS: [Any] = [
+    ["servers": dohServer], ["servers": [[dohServer]]], [["servers": [dohServer]]],
+    ["servers": [["type": "https", "nested": ["path": "/etc/sudoers"]]]],
+    ["nested": ["dns": ["servers": [dohServer]]]],
+    ["servers": [["type": "https", "path": "/dns-query", "tls": ["certificate_path": "/etc/private.pem"]]]],
+    ["servers": [["type": "hosts", "path": "/etc/hosts"]]]
+]
+for object in disguisedDNS { rejects("DoH path exemption outside exact server array item") { try validateDNS(object) } }
+rejects("DoH path exemption in outbound") { var object = valid; object["outbounds"] = [["dns": ["servers": [dohServer]]]]; try validate(object) }
+rejects("DoH path exemption in Mihomo") {
+    try ConfigPolicy.validateJSON(["dns": ["servers": [dohServer]], "external-controller": "127.0.0.1:9090", "secret": secret, "geodata-mode": true, "geo-auto-update": false], core: "mihomo", mode: "proxy", ports: [2080, 2081, 9090], apiPort: 9090, secret: secret)
+}
 for (name, payload) in ["root output path": ["log": ["output": "/etc/sudoers"]], "certificate read": ["tls": ["certificate_path": "/etc/private.pem"]], "nested command": ["outbounds": [["xray": ["command": "/bin/sh"]]]]] as [String: [String: Any]] {
     rejects(name) { var modified = valid; modified.merge(payload) { _, new in new }; try validate(modified) }
 }

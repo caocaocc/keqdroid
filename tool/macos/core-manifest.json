@@ -29,7 +29,8 @@
         "with_gvisor"
       ],
       "patches": [
-        "macos/keqrnel-bootstrap-dns.patch"
+        "macos/keqrnel-bootstrap-dns.patch",
+        "macos/keqrnel-doh-lifetime-tests.patch"
       ]
     },
     "mihomo": {
@@ -99,7 +100,8 @@
       "prefix": "github.com/sagernet/sing-box@v1.13.19",
       "format": "zip",
       "patches": [
-        "macos/singbox-privileged-api.patch"
+        "macos/singbox-privileged-api.patch",
+        "macos/singbox-doh-connection-lifetime.patch"
       ]
     }
   }
