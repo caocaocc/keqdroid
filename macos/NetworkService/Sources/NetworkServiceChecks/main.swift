@@ -24,9 +24,19 @@ if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--mihomo-tra
     print("Passed \(runMihomoTransportPathChecks()) Mihomo HTTP transport path checks (no network operations).")
     exit(0)
 }
+if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--privileged-file-permissions",
+   let uid = UInt32(CommandLine.arguments[2]), let gid = UInt32(CommandLine.arguments[3]) {
+    print("Passed \(runPrivilegedFilePermissionChecks(uid: uid, gid: gid)) privileged file permission checks (temporary fixtures only).")
+    exit(0)
+}
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--file-creation-only" {
+    print("Passed \(runSecureCreationChecks()) unprivileged file creation checks.")
+    exit(0)
+}
 
 var checks = 0
 checks += runMihomoTransportPathChecks()
+checks += runSecureCreationChecks()
 func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
     guard condition() else { fputs("FAIL: \(label)\n", stderr); exit(1) }
     checks += 1

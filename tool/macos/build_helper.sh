@@ -13,6 +13,9 @@ swift run --package-path macos/NetworkService --scratch-path "$BUILD" keqdis-net
 # Preserve the request-only validator with this exact helper source revision.
 # Packaging runs it against freshly generated Dart payloads without compiling.
 TEST_BIN=$(swift build --package-path macos/NetworkService --scratch-path "$BUILD" --show-bin-path)
+# Reproduce launchd's 0077 umask, then use the production UID-drop spawn path
+# to read only random /private/tmp fixture files. Never touch installed state.
+sudo -n "$TEST_BIN/keqdis-network-tests" --privileged-file-permissions "$(id -u)" "$(id -g)"
 cp "$TEST_BIN/keqdis-network-tests" "$DESTINATION/keqdis-network-tests"
 chmod 755 "$DESTINATION/keqdis-network-tests"
 swift build --package-path macos/NetworkService --scratch-path "$BUILD" -c release --arch "$TARGET" --product keqdis-network-service

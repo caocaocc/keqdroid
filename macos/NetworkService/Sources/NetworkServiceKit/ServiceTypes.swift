@@ -48,6 +48,10 @@ public enum SecureFiles {
         guard fd >= 0 else { throw ServiceFailure("storageError", "Cannot create private service state: \(errno)") }
         var success = false
         defer { close(fd); if !success { unlink(temporary.path) } }
+        // launchd uses umask 0077. Explicitly apply the requested mode to the
+        // exclusively opened descriptor so root-owned public Geo copies remain
+        // readable after Proxy drops UID; private state still defaults to 0600.
+        guard fchmod(fd, mode) == 0 else { throw ServiceFailure("storageError", "Cannot set private service file permissions.") }
         try data.withUnsafeBytes { bytes in
             var written = 0
             while written < bytes.count {
