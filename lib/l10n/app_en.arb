@@ -1092,5 +1092,15 @@
   "macosNetworkServiceTitle": "Network service",
   "macosNetworkServiceHint": "Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.",
   "macosNetworkServiceMissing": "Install or update KEQDIS using the complete PKG installer to enable the network service.",
-  "macosAuthorizeAccount": "Authorize TUN for this account"
+  "macosAuthorizeAccount": "Authorize TUN for this account",
+  "macosWaitingNetwork": "Waiting for network to recover",
+  "macosRestoringNetwork": "Restoring previous network settings",
+  "macosRetryingNetwork": "Reconnecting automatically",
+  "macosRecoveryPaused": "Automatic recovery paused; connect manually to retry",
+  "macosRetryRecovery": "Retry network restoration",
+  "pingTimingWarm": "Warm connection",
+  "pingTimingCold": "Full request",
+  "pingTimingFallback": "First request",
+  "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
 }

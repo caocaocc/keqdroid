@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/platform/desktop_capabilities.dart';
 
 void main() {
-  test('Mac exposes implemented integrations and excludes LAN listeners', () {
+  test('Mac exposes implemented desktop and LAN integrations', () {
     final mac = DesktopCapabilities.forPlatform('macos');
     expect(
       mac.isDesktop &&
@@ -12,7 +12,7 @@ void main() {
           mac.loginStartup,
       isTrue,
     );
-    expect(mac.lanSharing, isFalse);
+    expect(mac.lanSharing, isTrue);
   });
   test('desktop additions preserve mobile and Linux capability boundaries', () {
     expect(DesktopCapabilities.forPlatform('android').isDesktop, isFalse);

@@ -1,3 +1,4 @@
+import '../tunnel/url_test_diagnostics.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -11,6 +12,7 @@ import '../tunnel/macos_network_context.dart';
 import '../tunnel/vpn_backend.dart';
 import '../utils/keqrnel_config.dart';
 import 'windows_desktop_service.dart';
+import 'desktop_http_probe.dart';
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
@@ -46,7 +48,7 @@ class _CoreLog {
   void _add(String line) {
     final trimmed = stripAnsi(line).trim();
     if (trimmed.isEmpty) return;
-    _lines.add(trimmed);
+    _lines.add(trimmed.length > 1024 ? trimmed.substring(0, 1024) : trimmed);
     if (_lines.length > _keep) _lines.removeAt(0);
   }
 
@@ -172,7 +174,15 @@ class EphemeralXrayPing {
     }
   }
 
-  static Future<({bool success, int? latencyMs, String error, int? httpStatus})>
+  static Future<
+    ({
+      bool success,
+      int? latencyMs,
+      String error,
+      int? httpStatus,
+      UrlTestDiagnostics? diagnostics,
+    })
+  >
   urlTest({
     required String xrayConfigJson,
     required int socksPort,
@@ -191,7 +201,14 @@ class EphemeralXrayPing {
 
   static Future<
     List<
-      ({String id, bool success, int? latencyMs, String error, int? httpStatus})
+      ({
+        String id,
+        bool success,
+        int? latencyMs,
+        String error,
+        int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
+      })
     >
   >
   urlTestBatch({
@@ -214,6 +231,7 @@ class EphemeralXrayPing {
             int? latencyMs,
             String error,
             int? httpStatus,
+            UrlTestDiagnostics? diagnostics,
           })
         >[];
     for (final item in items) {
@@ -231,6 +249,7 @@ class EphemeralXrayPing {
         latencyMs: r.latencyMs,
         error: r.error,
         httpStatus: r.httpStatus,
+        diagnostics: r.diagnostics,
       ));
     }
     return out;
@@ -268,7 +287,15 @@ class EphemeralXrayPing {
     });
   }
 
-  static Future<({bool success, int? latencyMs, String error, int? httpStatus})>
+  static Future<
+    ({
+      bool success,
+      int? latencyMs,
+      String error,
+      int? httpStatus,
+      UrlTestDiagnostics? diagnostics,
+    })
+  >
   _runSingle({
     required String xrayConfigJson,
     required int socksPort,
@@ -277,12 +304,26 @@ class EphemeralXrayPing {
     VpnBackend core = VpnBackend.xray,
     bool keepAlive = true,
   }) async {
+    final preparation = Stopwatch()..start();
+    final startupBudget = timeoutMs.clamp(500, _startupBudgetMs);
+    UrlTestDiagnostics startupDetails() {
+      final elapsed = preparation.elapsedMilliseconds;
+      return UrlTestDiagnostics(
+        stage: 'coreStartup',
+        elapsedMs: elapsed,
+        budgetMs: startupBudget,
+        stageDurationsMs: {'coreStartup': elapsed},
+        coreStartupBudgetMs: startupBudget,
+      );
+    }
+
     if (!DesktopCorePaths.supported) {
       return (
         success: false,
         latencyMs: null,
         error: 'Ephemeral Xray ping is only implemented on desktop in Dart',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     }
 
@@ -293,6 +334,7 @@ class EphemeralXrayPing {
         latencyMs: null,
         error: '${core.wireValue} not found. $_binariesHint',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     }
 
@@ -304,6 +346,8 @@ class EphemeralXrayPing {
       ),
     );
     Process? process;
+    _CoreLog? coreLog;
+    int? observedExit;
     // Порт может смениться на второй попытке — см. ниже.
     var port = socksPort;
 
@@ -321,11 +365,22 @@ class EphemeralXrayPing {
         );
         unawaited(_attachCoreProcess(process.pid));
         final log = _CoreLog(process);
+        coreLog = log;
+        observedExit = null;
+        final launched = process;
+        unawaited(
+          launched.exitCode.then((code) {
+            if (identical(process, launched)) observedExit = code;
+          }),
+        );
 
         final startup = await _waitForPort(
           '127.0.0.1',
           port,
-          Duration(milliseconds: timeoutMs.clamp(500, _startupBudgetMs)),
+          Duration(
+            milliseconds: (startupBudget - preparation.elapsedMilliseconds)
+                .clamp(0, startupBudget),
+          ),
           process: process,
         );
         if (startup.ready) break;
@@ -346,26 +401,60 @@ class EphemeralXrayPing {
           return (
             success: false,
             latencyMs: null,
-            error: _startupError(startup.exitCode, port, log),
+            error:
+                'GET probe failed at coreStartup: ${AppLogger.redactSensitive(_startupError(startup.exitCode, port, log))}',
             httpStatus: null,
+            diagnostics: startupDetails(),
           );
         }
         port = await _freeLoopbackPort();
       }
 
-      return await _httpProbeViaSocks(
+      final coreStartupMs = preparation.elapsedMilliseconds;
+      final result = await _httpProbeViaSocks(
         testUrl: testUrl,
         socksPort: port,
         timeoutMs: timeoutMs,
         keepAlive: keepAlive,
+      );
+      final diagnostic = result.diagnostics?.withCoreStartup(
+        elapsedMs: coreStartupMs,
+        budgetMs: startupBudget,
+      );
+      if (diagnostic != null) {
+        AppLogger.instance.debug(
+          'Desktop GET probe: ${jsonEncode(diagnostic.toMap())}',
+        );
+      }
+      if (result.success) {
+        return (
+          success: true,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          httpStatus: result.httpStatus,
+          diagnostics: diagnostic,
+        );
+      }
+      final coreFailure = observedExit == null
+          ? ''
+          : ' Core exited with code $observedExit.';
+      return (
+        success: false,
+        latencyMs: null,
+        httpStatus: result.httpStatus,
+        diagnostics: diagnostic,
+        error:
+            '${result.error}$coreFailure${AppLogger.redactSensitive(coreLog?.tail ?? '')}',
       );
     } catch (e) {
       AppLogger.instance.debug('EphemeralXrayPing failed: $e');
       return (
         success: false,
         latencyMs: null,
-        error: e.toString(),
+        error:
+            'GET probe failed at coreStartup: ${AppLogger.redactSensitive(e.toString())}',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     } finally {
       await _killProcess(process);
@@ -516,129 +605,17 @@ class EphemeralXrayPing {
     }
   }
 
-  static Future<({bool success, int? latencyMs, String error, int? httpStatus})>
-  _httpProbeViaSocks({
+  static Future<UrlTestResult> _httpProbeViaSocks({
     required String testUrl,
     required int socksPort,
     required int timeoutMs,
     bool keepAlive = true,
-  }) async {
-    final uri = Uri.parse(_ensureHttps(testUrl));
-    final host = uri.host;
-    final port = uri.hasPort ? uri.port : 443;
-    final path = uri.path.isEmpty ? '/' : uri.path;
-    final connectTimeout = Duration(milliseconds: timeoutMs.clamp(1000, 6000));
-    final readTimeout = Duration(milliseconds: timeoutMs.clamp(1000, 8000));
-
-    Socket? raw;
-    _HttpResponseReader? reader;
-    try {
-      // Соединение ведём руками, а не через HttpClient, и это не вкусовщина.
-      //
-      // `HttpClient` не переиспользует туннель CONNECT: замерено — три запроса
-      // подряд открывают три туннеля, тогда как без прокси тот же клиент
-      // обходится одним. То есть «второй запрос по тёплому соединению»,
-      // которым здесь меряется чистое время ответа, на десктопе не наступал
-      // никогда: каждая попытка платила заново TCP, CONNECT и TLS-рукопожатие.
-      // Четыре-пять RTT вместо одного — сервер с честными 50 мс показывал 200,
-      // и пороги цвета красили здоровое в красное. На Android этой беды нет:
-      // там `HttpURLConnection` держит пул как положено.
-      //
-      // Своими руками мы получаем ту же семантику, что у Android:
-      // рукопожатие один раз, дальше GET'ы по одному и тому же TLS-сокету.
-      raw = await Socket.connect(
-        InternetAddress.loopbackIPv4,
-        socksPort,
-        timeout: connectTimeout,
-      );
-      raw.setOption(SocketOption.tcpNoDelay, true);
-      reader = _HttpResponseReader(raw);
-
-      // Эфемерное ядро поднимает на этом порту HTTP-инбаунд (см. режим пинга в
-      // ConfigGeneratorV2), поэтому туннель просим методом CONNECT.
-      raw.write('CONNECT $host:$port HTTP/1.1\r\nHost: $host:$port\r\n\r\n');
-      await raw.flush();
-      final tunnel = await reader.readResponse(
-        DateTime.now().add(readTimeout),
-        headOnly: true,
-      );
-      if (tunnel.status < 200 || tunnel.status > 299) {
-        return (
-          success: false,
-          latencyMs: null,
-          error: 'proxy CONNECT ${tunnel.status}',
-          httpStatus: tunnel.status,
-        );
-      }
-
-      // Сертификат проверяем: без проверки MITM «нарисовал» бы успешный пинг
-      // мёртвому или подменённому серверу.
-      final tls = await SecureSocket.secure(
-        raw,
-        host: host,
-      ).timeout(connectTimeout);
-      raw = tls;
-      reader = _HttpResponseReader(tls);
-
-      // Первая попытка оплачивает рукопожатие и прогрев цепочки — она меряет
-      // стоимость процедуры, а не сервер. Вторая идёт по уже поднятому TLS и
-      // показывает чистое время ответа; ради неё всё это и затевалось.
-      ({bool success, int? latencyMs, String error, int? httpStatus})? best;
-      final attempts = keepAlive ? 2 : 1;
-      for (var attempt = 0; attempt < attempts; attempt++) {
-        final sw = Stopwatch()..start();
-        // Всегда GET. Раньше на `generate_204` и `connecttest.txt` уходил HEAD —
-        // то есть ровно на два пресета из трёх (gstatic-дефолт и Microsoft), и
-        // именно они у пользователей не отвечали, пока Cloudflare с GET работал.
-        // Экономии от HEAD тут нет: 204 без тела, connecttest.txt — 22 байта.
-        tls.write(
-          'GET $path HTTP/1.1\r\n'
-          'Host: $host\r\n'
-          'User-Agent: KEQDIS/1.0\r\n'
-          'Accept: */*\r\n'
-          'Connection: keep-alive\r\n\r\n',
-        );
-        await tls.flush();
-        // Срок у каждой попытки свой: медленная первая не должна съедать время
-        // второй, ради которой всё и делается.
-        final res = await reader.readResponse(DateTime.now().add(readTimeout));
-        sw.stop();
-
-        final ok = (res.status >= 200 && res.status < 400);
-        final result = (
-          success: ok,
-          latencyMs: sw.elapsedMilliseconds,
-          error: ok ? '' : 'HTTP ${res.status}',
-          httpStatus: res.status,
-        );
-        if (!ok) return result;
-        if (best == null || sw.elapsedMilliseconds < best.latencyMs!) {
-          best = result;
-        }
-        // Сервер попрощался — второй замер по этому сокету уже не сделать, а
-        // открывать новый бессмысленно: он померил бы то же, что и первый.
-        if (res.closing) break;
-      }
-      return best!;
-    } on TimeoutException {
-      return (
-        success: false,
-        latencyMs: null,
-        error: 'Timeout',
-        httpStatus: null,
-      );
-    } catch (e) {
-      return (
-        success: false,
-        latencyMs: null,
-        error: e.toString(),
-        httpStatus: null,
-      );
-    } finally {
-      await reader?.cancel();
-      raw?.destroy();
-    }
-  }
+  }) => DesktopHttpProbe.run(
+    testUrl: testUrl,
+    proxyPort: socksPort,
+    timeout: Duration(milliseconds: timeoutMs),
+    keepAlive: keepAlive,
+  );
 
   static String _ensureHttps(String url) {
     final trimmed = url.trim();
@@ -660,6 +637,13 @@ class EphemeralXrayPing {
   static const int _startupBudgetMs = 12000;
 
   /// Ждёт порт временного ядра. `exitCode` не null — ядро вышло само.
+  @visibleForTesting
+  static Future<({bool ready, int? exitCode})> waitForCorePort({
+    required Process process,
+    required int port,
+    Duration timeout = const Duration(seconds: 1),
+  }) => _waitForPort('127.0.0.1', port, timeout, process: process);
+
   static Future<({bool ready, int? exitCode})> _waitForPort(
     String host,
     int port,
@@ -667,15 +651,18 @@ class EphemeralXrayPing {
     Process? process,
   }) async {
     final deadline = DateTime.now().add(maxWait);
+    int? exited;
+    if (process != null) {
+      unawaited(
+        process.exitCode.then((code) {
+          exited = code;
+        }),
+      );
+    }
     var delay = const Duration(milliseconds: 20);
     while (DateTime.now().isBefore(deadline)) {
-      if (process != null) {
-        final code = await process.exitCode.timeout(
-          const Duration(milliseconds: 1),
-          onTimeout: () => -1,
-        );
-        if (code >= 0) return (ready: false, exitCode: code);
-      }
+      // POSIX signal exits are negative; they are exits, not a timeout sentinel.
+      if (exited != null) return (ready: false, exitCode: exited);
       try {
         final s = await Socket.connect(
           host,
@@ -717,175 +704,5 @@ class EphemeralXrayPing {
       );
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 80));
-  }
-}
-
-/// Читает ответы HTTP/1.1 из одного сокета подряд.
-///
-/// Своё чтение нужно потому, что замер ведётся по одному соединению: тело
-/// каждого ответа обязано быть дочитано ровно до конца, иначе следующий GET
-/// прочитает хвост предыдущего вместо своего статуса. `HttpClient` это делал бы
-/// сам, но он не переиспользует туннель CONNECT — см. комментарий в
-/// `_httpProbeViaSocks`, ради чего всё и написано руками.
-class _HttpResponseReader {
-  _HttpResponseReader(Stream<List<int>> socket) {
-    _sub = socket.listen(
-      (data) {
-        _buffer.addAll(data);
-        _wake();
-      },
-      onDone: () {
-        _done = true;
-        _wake();
-      },
-      onError: (Object e) {
-        _error = e;
-        _wake();
-      },
-      cancelOnError: false,
-    );
-  }
-
-  late final StreamSubscription<List<int>> _sub;
-  final List<int> _buffer = [];
-  bool _done = false;
-  Object? _error;
-  Completer<void>? _waiter;
-
-  void _wake() {
-    final waiter = _waiter;
-    _waiter = null;
-    if (waiter != null && !waiter.isCompleted) waiter.complete();
-  }
-
-  /// Ждёт следующую порцию байт. Срок общий на весь ответ, а не на порцию:
-  /// иначе медленный сервер, отдающий по чуть-чуть, никогда не упрётся в
-  /// таймаут.
-  Future<void> _more(DateTime deadline) {
-    if (_error != null) throw _error!;
-    if (_done) throw const SocketException('connection closed by peer');
-    final left = deadline.difference(DateTime.now());
-    if (left <= Duration.zero) throw TimeoutException('read');
-    return (_waiter ??= Completer<void>()).future.timeout(left);
-  }
-
-  /// Читает один ответ целиком и возвращает его статус.
-  ///
-  /// [headOnly] — для ответа на CONNECT: у него тела нет по определению, а
-  /// дальше по этому же сокету пойдёт уже TLS, и лишний байт из него читать
-  /// нельзя.
-  Future<({int status, bool closing})> readResponse(
-    DateTime deadline, {
-    bool headOnly = false,
-  }) async {
-    var end = -1;
-    while ((end = _indexOf(13, 10, 13, 10)) < 0) {
-      await _more(deadline);
-    }
-    final head = String.fromCharCodes(_buffer.sublist(0, end));
-    _buffer.removeRange(0, end + 4);
-
-    final lines = head.split('\r\n');
-    final status = _parseStatus(lines.isEmpty ? '' : lines.first);
-    final headers = <String, String>{};
-    for (final line in lines.skip(1)) {
-      final i = line.indexOf(':');
-      if (i > 0) {
-        headers[line.substring(0, i).trim().toLowerCase()] = line
-            .substring(i + 1)
-            .trim();
-      }
-    }
-    final closing = (headers['connection'] ?? '').toLowerCase().contains(
-      'close',
-    );
-
-    // 1xx — промежуточный ответ, настоящий придёт следом.
-    if (status >= 100 && status < 200) {
-      return readResponse(deadline, headOnly: headOnly);
-    }
-    // 204 и 304 по спецификации без тела, длину при них слать не обязаны.
-    if (headOnly || status == 204 || status == 304) {
-      return (status: status, closing: closing);
-    }
-
-    final chunked = (headers['transfer-encoding'] ?? '').toLowerCase().contains(
-      'chunked',
-    );
-    if (chunked) {
-      await _drainChunked(deadline);
-    } else {
-      final length = int.tryParse(headers['content-length'] ?? '');
-      if (length != null) {
-        await _drainExactly(length, deadline);
-      } else if (closing) {
-        // Ни длины, ни кусков, но соединение закрывается — тело кончается
-        // вместе с ним. Второй попытки по этому сокету всё равно не будет.
-        while (!_done) {
-          await _more(deadline);
-        }
-        _buffer.clear();
-      }
-      // Ни длины, ни chunked, ни close — тела нет.
-    }
-    return (status: status, closing: closing);
-  }
-
-  Future<void> _drainExactly(int count, DateTime deadline) async {
-    while (_buffer.length < count) {
-      await _more(deadline);
-    }
-    _buffer.removeRange(0, count);
-  }
-
-  Future<void> _drainChunked(DateTime deadline) async {
-    while (true) {
-      var nl = -1;
-      while ((nl = _indexOf(13, 10)) < 0) {
-        await _more(deadline);
-      }
-      final sizeLine = String.fromCharCodes(_buffer.sublist(0, nl));
-      _buffer.removeRange(0, nl + 2);
-      final size =
-          int.tryParse(sizeLine.split(';').first.trim(), radix: 16) ?? 0;
-      if (size == 0) {
-        // Нулевой кусок, за ним возможные трейлеры и пустая строка.
-        while (true) {
-          var tail = -1;
-          while ((tail = _indexOf(13, 10)) < 0) {
-            await _more(deadline);
-          }
-          _buffer.removeRange(0, tail + 2);
-          if (tail == 0) return;
-        }
-      }
-      // Кусок и завершающий его CRLF.
-      await _drainExactly(size + 2, deadline);
-    }
-  }
-
-  /// Смещение первой встречи последовательности байт, иначе -1.
-  int _indexOf(int a, int b, [int? c, int? d]) {
-    final len = c == null ? 2 : 4;
-    for (var i = 0; i + len - 1 < _buffer.length; i++) {
-      if (_buffer[i] != a || _buffer[i + 1] != b) continue;
-      if (c == null) return i;
-      if (_buffer[i + 2] == c && _buffer[i + 3] == d) return i;
-    }
-    return -1;
-  }
-
-  static int _parseStatus(String line) {
-    final parts = line.split(' ');
-    if (parts.length < 2) return 0;
-    return int.tryParse(parts[1]) ?? 0;
-  }
-
-  Future<void> cancel() async {
-    try {
-      await _sub.cancel();
-    } catch (_) {
-      // Подписку мог уже забрать TLS-слой при апгрейде сокета.
-    }
   }
 }

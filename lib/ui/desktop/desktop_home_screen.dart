@@ -31,6 +31,7 @@ import '../../shared/ui/app_theme.dart';
 import '../../shared/ui/expressive_button_group.dart';
 import '../../shared/ui/update_dialog.dart';
 import '../../shared/ui/desktop_dns_notice.dart';
+import '../../shared/ui/desktop_recovery_notice.dart';
 import '../../utils/clipboard_import.dart';
 import 'desktop_connection_mode.dart';
 import 'sidebar_group_nav.dart';
@@ -537,6 +538,7 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
             child: Column(
               children: [
                 if (Platform.isMacOS) const DesktopDnsNotice(),
+                if (Platform.isMacOS) const DesktopRecoveryNotice(),
                 Expanded(
                   child: IndexedStack(
                     index: _index,

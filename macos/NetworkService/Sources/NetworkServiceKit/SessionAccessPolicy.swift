@@ -3,7 +3,10 @@ import Foundation
 /// XPC has already verified the installed application and its resources. This
 /// gate separates ordinary proxy use from permission to change routes and DNS.
 public enum SessionAccessPolicy {
-    public static func validate(method: String, arguments: [String: Any], identity: ClientIdentity, tunAuthorized: Bool, owner: ClientIdentity?, activeSessionID: String?) throws {
+    public static func isBusy(owner: ClientIdentity?, caller: ClientIdentity) -> Bool {
+        owner.map { $0.uid != caller.uid || $0.connectionID != caller.connectionID } ?? false
+    }
+    public static func validate(method: String, arguments: [String: Any], identity: ClientIdentity, tunAuthorized: Bool, owner: ClientIdentity?, activeSessionID: String?, ownerDisconnected: Bool = false, recoveryPending: Bool = false) throws {
         guard identity.uid >= 500 else { throw ServiceFailure("authorizationDenied", "Network sessions require an ordinary macOS account.") }
         switch method {
         case "startProxySession":
@@ -15,12 +18,16 @@ public enum SessionAccessPolicy {
         case "getSession", "stopSession": break
         default: throw ServiceFailure("unknownMethod", "Unknown network service method.")
         }
-        if let owner {
+        // Only a native XPC disconnect (or a previous helper epoch recovered
+        // from a protected journal) permits same-account residual cleanup.
+        let residualStop = method == "stopSession" && arguments["sessionId"] == nil &&
+            recoveryPending && ownerDisconnected && owner?.uid == identity.uid
+        if let owner, !residualStop {
             guard owner.uid == identity.uid, owner.connectionID == identity.connectionID else {
                 throw ServiceFailure("busy", "Another account or application instance owns this network session.")
             }
         }
-        if let activeSessionID, method == "stopSession" || method == "getSession" && arguments["sessionId"] != nil {
+        if let activeSessionID, !residualStop, method == "stopSession" || method == "getSession" && arguments["sessionId"] != nil {
             guard arguments["sessionId"] as? String == activeSessionID else { throw ServiceFailure("sessionMismatch", "The requested session no longer owns the connection.") }
         }
     }

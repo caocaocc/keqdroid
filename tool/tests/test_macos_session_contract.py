@@ -31,6 +31,12 @@ REQUEST_NAMES += tuple(
     for network in ("xhttp", "ws", "http", "h2")
     for mode in ("proxy", "tun")
 )
+REQUEST_NAMES += tuple(
+    f"{core}-{mode}-lan-{auth}"
+    for core in ("xray", "mihomo")
+    for mode in ("proxy", "tun")
+    for auth in ("auth", "noauth")
+)
 
 
 class MacOSSessionContractTests(unittest.TestCase):

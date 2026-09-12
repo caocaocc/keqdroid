@@ -10,6 +10,7 @@ public final class NetworkService {
     private let settings: NetworkSettings
     private let runtime: CoreRuntime
     private let packageFingerprint: String
+    private let helperEpoch = UUID().uuidString
     private var grants: [String: Any] = [:]
     private var contexts: [String: NetworkContext] = [:]
     private var timer: DispatchSourceTimer?
@@ -17,16 +18,18 @@ public final class NetworkService {
     private var activeRequest: SessionRequest?
     private var activeContext: NetworkContext?
     private var owner: ClientIdentity?
+    private var ownerDisconnected = false
     private var snapshotOwner: ClientIdentity?
     private var sessionDirectory: URL?
     private var tunnelInterface: TunnelInterfaceIdentity?
     private var interfacesBeforeSession: [String: UInt32] = [:]
     private var snapshot: [String: Any] = ["status": "disconnected"]
     private var connectedAt: Date?
-    private var lastContact = Date()
-    private var lastMonitor = Date()
+    private var lastContact = NetworkClockSample.capture().awake
+    private var lastMonitor = NetworkClockSample.capture()
     private var recoveryPending = false
     private var recoverySessionID: String?
+    private var recoverySchedule = NetworkRecoverySchedule()
     private lazy var dnsDiagnostics = TUNDNSDiagnostics(stateQueue: queue)
 
     public init(root: URL = ServicePaths.root, clientRequirement: String) throws {
@@ -40,8 +43,12 @@ public final class NetworkService {
             try SecureFiles.requireRootOwned(directory, directory: true)
         }
         // Journal recovery always precedes stopping an orphaned TUN process.
-        try settings.restore()
-        try Self.recoverChildren(root: root, state: state)
+        do {
+            try restoreRecoveryOwner()
+            try settings.restore()
+            try Self.recoverChildren(root: root, state: state)
+            owner = nil; ownerDisconnected = false; recoverySessionID = nil
+        } catch { noteRecoveryFailure(error) }
         let grantURL = state.appendingPathComponent("authorized-users.json")
         if FileManager.default.fileExists(atPath: grantURL.path) { grants = try SecureFiles.loadJSON(grantURL) }
         let authorizationStatus = keq_authorization_check_right()
@@ -54,6 +61,8 @@ public final class NetworkService {
         let state = root.appendingPathComponent("state", isDirectory: true)
         guard FileManager.default.fileExists(atPath: state.path) else { return }
         try SecureFiles.requireRootOwned(state, directory: true)
+        let journal = state.appendingPathComponent("session-journal.json")
+        if FileManager.default.fileExists(atPath: journal.path) { _ = try loadSessionJournal(journal, root: root) }
         try NetworkSettings(stateDirectory: state).restore()
         try recoverChildren(root: root, state: state)
     }
@@ -88,31 +97,48 @@ public final class NetworkService {
         }
     }
 
+    /// Called exclusively by the native XPC invalidation callback, never by a
+    /// request envelope. A client cannot self-report this ownership fact.
+    public func clientDisconnected(identity: ClientIdentity) {
+        queue.async {
+            guard self.owner?.uid == identity.uid && self.owner?.connectionID == identity.connectionID else { return }
+            self.ownerDisconnected = true
+            do {
+                try SecureFiles.requireRootOwned(self.root, directory: true)
+                try SecureFiles.requireRootOwned(self.state, directory: true)
+                try self.stop()
+            } catch {
+                if !self.recoveryPending { self.noteRecoveryFailure(error) }
+            }
+        }
+    }
+
     private func isAuthorized(_ uid: uid_t) -> Bool {
         guard uid >= 500, let grant = grants[String(uid)] as? [String: Any] else { return false }
         return grant["packageFingerprint"] as? String == packageFingerprint
     }
-    private func serviceStatus(_ uid: uid_t) -> [String: Any] {
-        ["installed": true, "authorized": isAuthorized(uid), "proxyWithoutElevation": true, "protocolVersion": ServicePaths.protocolVersion, "version": ServicePaths.version, "busy": owner != nil && owner?.uid != uid, "recoveryRequired": recoveryPending]
+    private func serviceStatus(_ identity: ClientIdentity) -> [String: Any] {
+        var result: [String: Any] = ["installed": true, "authorized": isAuthorized(identity.uid), "proxyWithoutElevation": true,
+            "protocolVersion": ServicePaths.protocolVersion, "version": ServicePaths.version,
+            "busy": SessionAccessPolicy.isBusy(owner: owner, caller: identity), "recoveryRequired": recoveryPending,
+            "helperEpoch": helperEpoch, "networkStatus": settings.networkStatus(context: activeContext, ownTunnel: tunnelInterface?.name).dictionary]
+        if recoveryPending { result["recoveryErrorCode"] = recoverySchedule.errorCode ?? "recoveryRequired" }
+        return result
     }
     private func handle(method: String, arguments: [String: Any], identity: ClientIdentity) throws -> [String: Any] {
         try SecureFiles.requireRootOwned(root, directory: true)
         try SecureFiles.requireRootOwned(state, directory: true)
-        if method == "clientDisconnected" {
-            if owner?.connectionID == identity.connectionID { try stop() }
-            return [:]
-        }
-        if method == "getServiceStatus" { return serviceStatus(identity.uid) }
+        if method == "getServiceStatus" { return serviceStatus(identity) }
         if method == "authorize" {
             guard identity.uid >= 500, let encoded = arguments["authorization"] as? String, let bytes = Data(base64Encoded: encoded), bytes.count == 32 else { throw ServiceFailure("authorizationDenied", "A macOS administrator authorization is required.") }
             let result = bytes.withUnsafeBytes { keq_authorization_validate($0.bindMemory(to: UInt8.self).baseAddress, bytes.count) }
             guard result == 0 else { throw ServiceFailure("authorizationDenied", "Administrator authorization was not valid (\(result)).") }
             grants[String(identity.uid)] = ["packageFingerprint": packageFingerprint, "version": ServicePaths.version, "grantedAt": Date().timeIntervalSince1970]
             try SecureFiles.writeJSON(grants, to: state.appendingPathComponent("authorized-users.json"))
-            return serviceStatus(identity.uid)
+            return serviceStatus(identity)
         }
-        try SessionAccessPolicy.validate(method: method, arguments: arguments, identity: identity, tunAuthorized: isAuthorized(identity.uid), owner: owner, activeSessionID: activeRequest?.id ?? recoverySessionID)
-        if owner?.connectionID == identity.connectionID { lastContact = Date() }
+        try SessionAccessPolicy.validate(method: method, arguments: arguments, identity: identity, tunAuthorized: isAuthorized(identity.uid), owner: owner, activeSessionID: activeRequest?.id ?? recoverySessionID, ownerDisconnected: ownerDisconnected, recoveryPending: recoveryPending)
+        if owner?.connectionID == identity.connectionID { lastContact = NetworkClockSample.capture().awake }
         switch method {
         case "prepareNetworkContext":
             guard activeRequest == nil else { throw ServiceFailure("busy", "Disconnect before preparing a new physical network context.") }
@@ -126,7 +152,19 @@ public final class NetworkService {
             try requireRecovered()
             let request = try SessionRequest(arguments: arguments)
             if method == "startProxySession", request.mode != "proxy" { throw ServiceFailure("invalidRequest", "A proxy request cannot start a TUN session.") }
-            return try start(request, identity: identity)
+            // Preflight failures belong to this attempt too. Do not return a
+            // previous session's failure while reconciling a lost start reply.
+            snapshotOwner = identity
+            snapshot = ["sessionId": request.id, "connectionMode": request.mode, "status": "disconnected", "helperEpoch": helperEpoch, "recoveryRequired": false]
+            do { return try start(request, identity: identity) }
+            catch {
+                if !recoveryPending {
+                    let failure = error as? ServiceFailure ?? ServiceFailure("startFailed", error.localizedDescription)
+                    snapshot["status"] = "error"; snapshot["error"] = failure.message; snapshot["errorCode"] = failure.code
+                    if let stage = failure.stage { snapshot["errorStage"] = stage }
+                }
+                throw error
+            }
         case "stopSession":
             // An idle caller may stop idempotently, but cannot erase another
             // connection's last failure after active ownership was released.
@@ -135,11 +173,12 @@ public final class NetworkService {
                 if SessionDiagnostics.canRead(owner: snapshotOwner, caller: identity) { snapshot = stopped }
                 return stopped
             }
+            recoverySchedule.reset() // Explicit user retry; status polling never resets it.
             try stop()
             snapshot = SessionDiagnostics.snapshot(snapshot, owner: snapshotOwner, caller: identity, disconnected: true)
             return snapshot
         case "getSession":
-            guard SessionDiagnostics.canRead(owner: snapshotOwner, caller: identity) else { return ["status": "disconnected"] }
+            guard SessionDiagnostics.canRead(owner: snapshotOwner, caller: identity) else { return ["status": "disconnected", "helperEpoch": helperEpoch, "recoveryRequired": recoveryPending] }
             updateSnapshot()
             if activeRequest == nil && !recoveryPending { return SessionDiagnostics.snapshot(snapshot, owner: snapshotOwner, caller: identity) }
             return snapshot
@@ -148,8 +187,9 @@ public final class NetworkService {
     }
 
     private func start(_ request: SessionRequest, identity: ClientIdentity) throws -> [String: Any] {
-        for port in [request.socksPort, request.httpPort, request.apiPort] {
-            guard keq_port_available(UInt16(port)) == 1 else { throw ServiceFailure("portUnavailable", "Local port \(port) is already in use.") }
+        for port in request.allListenerPorts {
+            let available = request.lanPorts.contains(port) ? keq_lan_port_available(UInt16(port)) : keq_port_available(UInt16(port))
+            guard available == 1 else { throw ServiceFailure("portUnavailable", "Local port \(port) is already in use.") }
         }
         let context: NetworkContext
         if request.mode == "tun" {
@@ -160,9 +200,10 @@ public final class NetworkService {
             try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode)
         } else { context = try settings.prepare(uid: identity.uid) }
         let before = request.mode == "tun" ? try TunnelInterfaceRecovery.capture() : [:]
-        owner = identity; snapshotOwner = identity; activeRequest = request; activeContext = context; lastContact = Date()
+        owner = identity; ownerDisconnected = false; snapshotOwner = identity; activeRequest = request; activeContext = context; lastContact = NetworkClockSample.capture().awake
         interfacesBeforeSession = before; tunnelInterface = nil
-        snapshot = ["sessionId": request.id, "status": "connecting", "connectionMode": request.mode, "core": request.core]
+        recoverySchedule.reset()
+        snapshot = ["sessionId": request.id, "status": "connecting", "connectionMode": request.mode, "core": request.core, "helperEpoch": helperEpoch, "recoveryRequired": false]
         var stage = "sessionSetup"
         do {
             let directory = root.appendingPathComponent("sessions", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -182,7 +223,7 @@ public final class NetworkService {
             try waitUntilReady(timeout: 20) {
                 let portsReady = keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
                 let apiReady = keq_socket_ready("127.0.0.1", UInt16(request.apiPort), 100) == 1
-                return portsReady && apiReady
+                return portsReady && apiReady && request.lanPorts.allSatisfy { keq_process_lan_listener(process.pid, UInt16($0)) == 1 }
             }
             if request.mode == "tun" {
                 var interface: String?
@@ -222,10 +263,15 @@ public final class NetworkService {
             stage = "finalReadiness"
             try waitUntilReady(timeout: 1) {
                 keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 &&
-                keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
+                keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1 &&
+                request.lanPorts.allSatisfy { keq_process_lan_listener(process.pid, UInt16($0)) == 1 }
             }
             try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress, timeout: 0)
-            connectedAt = Date(); lastContact = Date(); lastMonitor = Date(); snapshot["status"] = "connected"
+            connectedAt = Date(); lastMonitor = NetworkClockSample.capture(); lastContact = lastMonitor.awake; snapshot["status"] = "connected"
+            if let lan = request.lan {
+                let addresses = settings.networkStatus(context: context, ownTunnel: tunnelInterface?.name).semantic?.ipv4["Addresses"] as? [String] ?? []
+                snapshot["lan"] = ["socksPort": lan.socksPort, "httpPort": lan.httpPort, "addresses": addresses]
+            }
             try persistSession(); updateSnapshot()
             if request.mode == "tun", let address = request.dnsAddress {
                 dnsDiagnostics.start(sessionID: request.id, address: address) { [weak self] result in
@@ -238,7 +284,7 @@ public final class NetworkService {
         } catch {
             let original = error as? ServiceFailure ?? ServiceFailure("startFailed", error.localizedDescription)
             let failure = ServiceFailure(original.code, original.message, stage: original.stage ?? stage)
-            do { try stop() } catch { snapshot["recoveryError"] = error.localizedDescription }
+            do { try stop() } catch { throw currentRecoveryFailure() }
             snapshot["status"] = "error"; snapshot["error"] = failure.localizedDescription
             snapshot["errorCode"] = failure.code
             snapshot["errorStage"] = failure.stage
@@ -266,12 +312,12 @@ public final class NetworkService {
     }
 
     private func waitUntilReady(timeout: TimeInterval, predicate: () -> Bool) throws {
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = NetworkClockSample.capture().continuous + timeout
         repeat {
             try checkStartupProcessesAndInterface()
             if predicate() { return }
             Thread.sleep(forTimeInterval: 0.1)
-        } while Date() < deadline
+        } while NetworkClockSample.capture().continuous < deadline
         throw ServiceFailure("readinessTimeout", "Core or local tunnel readiness timed out.")
     }
 
@@ -305,29 +351,68 @@ public final class NetworkService {
     private func persistSession() throws {
         var journal: [String: Any] = ["processes": processes.map(\.journal), "directory": sessionDirectory?.lastPathComponent ?? ""]
         if let tunnelInterface { journal["tunnelInterface"] = tunnelInterface.dictionary }
+        if let owner { journal["ownerUid"] = Int(owner.uid) }
+        if let activeRequest { journal["sessionId"] = activeRequest.id }
         try SecureFiles.writeJSON(journal, to: state.appendingPathComponent("session-journal.json"))
     }
     private func requireRecovered() throws {
         let files = ["network-journal.json", "session-journal.json"]
         guard !recoveryPending, !files.contains(where: { FileManager.default.fileExists(atPath: state.appendingPathComponent($0).path) }) else {
             recoveryPending = true
-            throw ServiceFailure("recoveryRequired", "Previous network state has not been recovered. Disconnect to retry recovery before starting another session.")
+            throw currentRecoveryFailure()
         }
+    }
+    private func currentRecoveryFailure() -> ServiceFailure {
+        ServiceFailure(recoverySchedule.errorCode ?? "recoveryRequired", snapshot["recoveryError"] as? String ?? "Previous network state must be recovered before starting another session.", stage: "networkRecovery")
+    }
+    private func noteRecoveryFailure(_ error: Error) {
+        recoveryPending = true
+        recoverySchedule.failed(error, now: NetworkClockSample.capture().continuous)
+        snapshot["status"] = "error"; snapshot["recoveryRequired"] = true; snapshot["helperEpoch"] = helperEpoch
+        snapshot["recoveryError"] = error.localizedDescription
+        snapshot["error"] = error.localizedDescription
+        snapshot["errorCode"] = recoverySchedule.errorCode ?? "recoveryRequired"
+        snapshot["errorStage"] = "networkRecovery"
+        snapshot.removeValue(forKey: "requiresReconnect")
+    }
+    private func restoreRecoveryOwner() throws {
+        let url = state.appendingPathComponent("session-journal.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let document = try Self.loadSessionJournal(url, root: root)
+        // Old packages did not persist a UID: automatic recovery remains
+        // possible, but no account is allowed to claim its residual session.
+        if document["ownerUid"] != nil || document["sessionId"] != nil {
+            guard let uid = document["ownerUid"] as? UInt32, uid >= 500,
+                  let identifier = document["sessionId"] as? String,
+                  identifier.range(of: "^[A-Za-z0-9-]{1,128}$", options: .regularExpression) != nil else {
+                throw ServiceFailure("recoveryCorrupt", "Invalid recovery session owner.")
+            }
+            owner = ClientIdentity(uid: uid, gid: 0, connectionID: 0)
+            ownerDisconnected = true; recoverySessionID = identifier
+        }
+    }
+    private static func loadSessionJournal(_ url: URL, root: URL) throws -> [String: Any] {
+        do {
+            let document = try SecureFiles.loadJSON(url)
+            _ = try SessionRecoveryJournal(dictionary: document, root: root)
+            return document
+        } catch let failure as ServiceFailure where failure.code == "unsafeInstallation" { throw failure }
+        catch { throw ServiceFailure("recoveryCorrupt", "The protected session recovery journal is invalid.") }
     }
     private static func recoverChildren(root: URL, state: URL) throws {
         let journal = state.appendingPathComponent("session-journal.json")
         guard FileManager.default.fileExists(atPath: journal.path) else { return }
-        let document = try SessionRecoveryJournal(dictionary: SecureFiles.loadJSON(journal), root: root)
+        let document = try SessionRecoveryJournal(dictionary: loadSessionJournal(journal, root: root), root: root)
         for record in document.processes {
             let path = record.executable, pid = record.pid, time = record.startTime
             if keq_process_matches(pid, time, path) == 1 {
                 kill(-pid, SIGTERM)
-                let deadline = Date().addingTimeInterval(4)
-                while keq_process_matches(pid, time, path) == 1 && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+                let deadline = NetworkClockSample.capture().continuous + 4
+                while keq_process_matches(pid, time, path) == 1 && NetworkClockSample.capture().continuous < deadline { Thread.sleep(forTimeInterval: 0.05) }
                 if keq_process_matches(pid, time, path) == 1 {
                     kill(-pid, SIGKILL)
-                    let killDeadline = Date().addingTimeInterval(2)
-                    while keq_process_matches(pid, time, path) == 1 && Date() < killDeadline { Thread.sleep(forTimeInterval: 0.05) }
+                    let killDeadline = NetworkClockSample.capture().continuous + 2
+                    while keq_process_matches(pid, time, path) == 1 && NetworkClockSample.capture().continuous < killDeadline { Thread.sleep(forTimeInterval: 0.05) }
                     guard keq_process_matches(pid, time, path) == 0 else { throw ServiceFailure("recoveryFailed", "An old core process could not be stopped.") }
                 }
             }
@@ -341,11 +426,19 @@ public final class NetworkService {
     private func stop() throws {
         dnsDiagnostics.cancel()
         snapshot.removeValue(forKey: "dnsDiagnostics")
+        snapshot.removeValue(forKey: "lan")
         if activeRequest == nil && recoveryPending {
-            try Self.recoverInstallation(root: root)
+            do {
+                try Self.recoverInstallation(root: root)
+                try settings.restore() // Also release this instance's in-memory ownership.
+            }
+            catch { noteRecoveryFailure(error); throw currentRecoveryFailure() }
             recoveryPending = false
-            owner = nil; recoverySessionID = nil
+            recoverySchedule.reset()
+            owner = nil; ownerDisconnected = false; recoverySessionID = nil
             snapshot.removeValue(forKey: "recoveryError")
+            for key in ["error", "errorCode", "errorStage"] { snapshot.removeValue(forKey: key) }
+            snapshot["recoveryRequired"] = false; snapshot["status"] = "disconnected"
             return
         }
         snapshot["status"] = "disconnecting"
@@ -357,11 +450,11 @@ public final class NetworkService {
         if tunnelInterface == nil {
             do { try recordTunnelInterfaceIfAvailable() } catch { recoveryError = error }
         }
-        do { try settings.restore() } catch { recoveryError = recoveryError ?? error }
+        do { try settings.restore() } catch { recoveryError = NetworkRecoverySchedule.preferredFailure(recoveryError, error) }
         for process in processes.reversed() {
-            do { try process.stop() } catch { recoveryError = recoveryError ?? error }
+            do { try process.stop() } catch { recoveryError = NetworkRecoverySchedule.preferredFailure(recoveryError, error) }
         }
-        do { try TunnelInterfaceRecovery.waitUntilRemoved(tunnelInterface) } catch { recoveryError = recoveryError ?? error }
+        do { try TunnelInterfaceRecovery.waitUntilRemoved(tunnelInterface) } catch { recoveryError = NetworkRecoverySchedule.preferredFailure(recoveryError, error) }
         let logs = processes.map { "[\($0.name)]\n\(String(decoding: $0.log, as: UTF8.self))" }.joined(separator: "\n")
         processes.removeAll()
         if recoveryError == nil, let directory = sessionDirectory, keq_remove_tree(directory.path) != 0 {
@@ -379,22 +472,22 @@ public final class NetworkService {
         // Failed recovery still belongs to the original connection. Another
         // account must not gain control merely because the core has stopped.
         recoverySessionID = recoveryPending ? activeRequest?.id : nil
-        if !recoveryPending { owner = nil }
+        if !recoveryPending { owner = nil; ownerDisconnected = false; recoverySchedule.reset() }
         activeRequest = nil; activeContext = nil; sessionDirectory = nil; connectedAt = nil
         tunnelInterface = nil; interfacesBeforeSession = [:]
         snapshot.removeValue(forKey: "networkContext")
         snapshot["status"] = recoveryError == nil ? "disconnected" : "error"
+        snapshot["recoveryRequired"] = recoveryPending
         snapshot["pids"] = [:] as [String: Int]; snapshot.removeValue(forKey: "apiSecret")
         if !logs.isEmpty { snapshot["log"] = String(logs.suffix(64 * 1024)) }
         if let recoveryError {
-            snapshot["recoveryError"] = recoveryError.localizedDescription
-            snapshot["errorCode"] = (recoveryError as? ServiceFailure)?.code ?? "recoveryFailed"
-            throw recoveryError
+            noteRecoveryFailure(recoveryError)
+            throw currentRecoveryFailure()
         }
     }
 
     private func updateSnapshot() {
-        for process in processes { process.collectOutput() }
+        for process in processes { process.collectOutput(maximumReads: 8) }
         snapshot["pids"] = Dictionary(uniqueKeysWithValues: processes.filter(\.isAlive).map { ($0.name, Int($0.pid)) })
         if let request = activeRequest {
             snapshot["apiPort"] = request.apiPort; snapshot["apiSecret"] = request.apiSecret
@@ -408,21 +501,33 @@ public final class NetworkService {
     }
 
     private func monitor() {
-        let resumedFromSleep = Date().timeIntervalSince(lastMonitor) > 15
-        lastMonitor = Date()
-        guard activeRequest != nil else { return }
-        for process in processes { process.collectOutput() }
-        let exited = processes.first { !$0.isAlive }
-        let networkChanged = resumedFromSleep || (activeContext.map(settings.physicalNetworkChanged) ?? false)
-        let tunnelRoutesChanged = exited == nil && activeRequest?.mode == "tun" && connectedAt != nil &&
-            !((snapshot["interfaceName"] as? String).map { IPv4RouteSnapshot.capture().usesTunnel($0) } ?? false)
-        let expired = Date().timeIntervalSince(lastContact) > 30
-        if exited != nil || networkChanged || tunnelRoutesChanged || expired {
-            let reason = tunnelRoutesChanged ? "IPv4 routes no longer belong to this tunnel. The connection was stopped to restore network settings." : (networkChanged ? "The physical network changed. Reconnect with a fresh DNS context." : (expired ? "The application connection expired." : "\(exited!.name) exited unexpectedly."))
-            do { try stop() } catch { snapshot["recoveryError"] = error.localizedDescription }
-            snapshot["status"] = "error"; snapshot["error"] = reason
-            snapshot["errorCode"] = tunnelRoutesChanged ? "vpnRouteConflict" : (networkChanged ? "network_changed" : (expired ? "clientDisconnected" : "coreExited"))
-            snapshot["requiresReconnect"] = networkChanged
+        let clock = NetworkClockSample.capture()
+        let resumedFromSleep = clock.resumed(after: lastMonitor)
+        lastMonitor = clock
+        if recoveryPending {
+            if recoverySchedule.takeDue(now: clock.continuous) { do { try stop() } catch {} }
+            return
         }
+        guard activeRequest != nil else { return }
+        for process in processes { process.collectOutput(maximumReads: 8) }
+        let exited = processes.first { !$0.isAlive }
+        let routes = IPv4RouteSnapshot.capture()
+        let networkChanged = activeContext.map(settings.physicalNetworkChanged) ?? false
+        let foreign = activeRequest?.mode == "tun" ? routes.foreignTunnel(excluding: tunnelInterface?.name) : nil
+        var failure: ServiceFailure?
+        do { if try settings.managedSettingsChanged() { failure = ServiceFailure("networkSettingsChanged", "Network settings were changed by the user or another application.") } }
+        catch { failure = ServiceFailure("networkInspectionFailed", "Cannot verify ownership of the network settings.") }
+        if failure == nil, let foreign { failure = ServiceFailure("vpnRouteConflict", "Another VPN owns IPv4 routes through \(foreign).") }
+        if failure == nil && resumedFromSleep { failure = ServiceFailure("systemWake", "The system resumed from sleep. Refresh the physical network context.") }
+        if failure == nil && networkChanged { failure = ServiceFailure("network_changed", "The physical network changed. Refresh the DNS context when it is available.") }
+        if failure == nil, let exited { failure = ServiceFailure("coreExited", "\(exited.name) exited unexpectedly.") }
+        if failure == nil && activeRequest?.mode == "tun" && connectedAt != nil && !(tunnelInterface.map { routes.usesTunnel($0.name) } ?? false) {
+            failure = ServiceFailure("ipv4RoutesUnavailable", "The managed IPv4 routes are no longer available.")
+        }
+        if failure == nil && clock.awake - lastContact > 30 { failure = ServiceFailure("clientDisconnected", "The application connection expired.") }
+        guard let failure else { return }
+        do { try stop() } catch { return } // Recovery failures always take precedence.
+        snapshot["status"] = "error"; snapshot["error"] = failure.message; snapshot["errorCode"] = failure.code
+        snapshot["requiresReconnect"] = ["network_changed", "systemWake", "coreExited", "ipv4RoutesUnavailable"].contains(failure.code)
     }
 }

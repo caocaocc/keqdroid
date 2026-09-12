@@ -2522,4 +2522,33 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get macosAuthorizeAccount => 'Authorize TUN for this account';
+
+  @override
+  String get macosWaitingNetwork => 'Waiting for network to recover';
+
+  @override
+  String get macosRestoringNetwork => 'Restoring previous network settings';
+
+  @override
+  String get macosRetryingNetwork => 'Reconnecting automatically';
+
+  @override
+  String get macosRecoveryPaused => 'Automatic recovery paused; connect manually to retry';
+
+  @override
+  String get macosRetryRecovery => 'Retry network restoration';
+
+  @override
+  String get pingTimingWarm => 'Warm connection';
+
+  @override
+  String get pingTimingCold => 'Full request';
+
+  @override
+  String get pingTimingFallback => 'First request';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return 'Stage $stage; elapsed $elapsed ms / $budget ms';
+  }
 }

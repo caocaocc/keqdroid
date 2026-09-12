@@ -25,6 +25,16 @@ jobs:
   checks:
     uses: ./.github/workflows/ci.yml
 
+  transport-windows:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: windows-2022, platform: windows-x64}
+  transport-arm64:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: macos-15, platform: macos-arm64}
+  transport-x64:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: macos-15-intel, platform: macos-x64}
+
   keqrnel-arm64:
     uses: ./.github/workflows/macos-component.yml
     with: {component: keqrnel, arch: arm64, runner: macos-15}
@@ -52,7 +62,7 @@ jobs:
     with: {component: app, arch: x64, runner: macos-15-intel}
 
   package-arm64:
-    needs: [checks, keqrnel-arm64, mihomo-arm64, helper-arm64, app-arm64]
+    needs: [checks, transport-arm64, keqrnel-arm64, mihomo-arm64, helper-arm64, app-arm64]
     uses: ./.github/workflows/macos-package.yml
     with:
       arch: arm64
@@ -65,7 +75,7 @@ jobs:
       session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}
 
   package-x64:
-    needs: [checks, keqrnel-x64, mihomo-x64, helper-x64, app-x64]
+    needs: [checks, transport-x64, keqrnel-x64, mihomo-x64, helper-x64, app-x64]
     uses: ./.github/workflows/macos-package.yml
     with:
       arch: x64

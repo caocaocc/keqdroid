@@ -54,14 +54,20 @@ class MacOSSessionConfig {
         );
       }
     }
-    for (final port in [request.socksPort, request.httpPort, apiPort]) {
+    final ports = [
+      request.socksPort,
+      request.httpPort,
+      apiPort,
+      if (request.lan case final lan?) ...[lan.socksPort, lan.httpPort],
+    ];
+    for (final port in ports) {
       if (port < 1024 || port > 65535) {
         throw const FormatException(
           'Local core ports must be between 1024 and 65535.',
         );
       }
     }
-    if ({request.socksPort, request.httpPort, apiPort}.length != 3) {
+    if (ports.toSet().length != ports.length) {
       throw const FormatException('Local core ports must be distinct.');
     }
     if (!RegExp(r'^[A-Za-z0-9-]{1,128}$').hasMatch(sessionId) ||
@@ -169,6 +175,7 @@ class MacOSSessionConfig {
       'httpPort': request.httpPort,
       'apiPort': apiPort,
       'apiSecret': apiSecret,
+      if (request.lan case final lan?) 'lan': lan.toMap(),
       'systemProxy':
           request.mode == ConnectionMode.proxy && request.systemProxy,
       'blockIpv6Leak': request.blockIpv6Leak,

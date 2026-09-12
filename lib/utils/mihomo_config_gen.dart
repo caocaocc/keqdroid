@@ -542,6 +542,8 @@ class MihomoConfigGen {
     AppSettings settings, {
     required int socksPort,
     bool httpInbound = false,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
     final proxy = buildProxy(input.trim());
     return jsonEncode(<String, dynamic>{
@@ -555,12 +557,14 @@ class MihomoConfigGen {
       'mode': 'rule',
       // Логи замера никому не показываются, а ядро на `info` пишет строку на
       // каждое соединение — в короткоживущем процессе это чистые расходы.
-      'log-level': 'silent',
+      'log-level': desktopDns ? 'warning' : 'silent',
       'find-process-mode': 'off',
       // Ядро иначе полезет в сеть за своими копиями geo-баз — на замере это
       // лишний трафик и лишняя задержка старта.
       'geo-auto-update': false,
-      'dns': _pingDns(),
+      'dns': desktopDns
+          ? _desktopPingDns(settings, physicalBootstrapDns: physicalBootstrapDns)
+          : _pingDns(),
       'proxies': [proxy],
       // Единственное правило: всё в прокси. Своё же соединение до сервера ядро
       // правилами не гоняет, так что закольцевать здесь нечего.
@@ -585,6 +589,38 @@ class MihomoConfigGen {
           'system',
         ],
       };
+
+  static Map<String, dynamic> _desktopPingDns(
+    AppSettings settings, {required bool physicalBootstrapDns}
+  ) {
+    final core = settings.xrayCore;
+    final custom = core.dnsUseCustom
+        ? _parseList(core.dnsServers).map(_dnsAddress).whereType<String>()
+            .where((server) => server != 'fakedns').toList()
+        : const <String>[];
+    final split = core.dnsSplitDirectDomains &&
+        splitDomainsAndIps(_parseList(settings.directRules)).domains.isNotEmpty && custom.length > 1;
+    final selected = physicalBootstrapDns && !core.dnsUseCustom
+        ? const <String>[]
+        : custom.isEmpty
+            ? const ['https://1.1.1.1/dns-query']
+            : (split ? custom.take(1) : custom.take(2));
+    final servers = <String>[];
+    for (final server in selected) {
+      final direct = server == 'system' ? server : '${server.split('#').first}#DIRECT';
+      if (!servers.contains(direct)) servers.add(direct);
+    }
+    if (!servers.contains('system')) servers.add('system');
+    final ipServers = servers.where(_hasIpAddress).map((s) => s.split('#').first).toList();
+    return {
+      'enable': true,
+      'ipv6': false,
+      'enhanced-mode': 'normal',
+      'default-nameserver': ipServers.isEmpty ? ['system'] : ipServers,
+      'proxy-server-nameserver': servers,
+      'nameserver': servers,
+    };
+  }
 
   // ─────────────────────────────── DNS ───────────────────────────────
 

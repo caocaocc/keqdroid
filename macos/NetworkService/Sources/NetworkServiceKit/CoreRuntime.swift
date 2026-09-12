@@ -63,16 +63,16 @@ public final class CoreProcess {
         if isAlive {
             // Child creates its own session before exec; target only that group.
             if kill(-pid, SIGTERM) != 0 { kill(pid, SIGTERM) }
-            let deadline = Date().addingTimeInterval(4)
-            while isAlive && Date() < deadline { collectOutput(); Thread.sleep(forTimeInterval: 0.05) }
+            let deadline = NetworkClockSample.capture().continuous + 4
+            while isAlive && NetworkClockSample.capture().continuous < deadline { collectOutput(maximumReads: 8); Thread.sleep(forTimeInterval: 0.05) }
             if isAlive {
                 if kill(-pid, SIGKILL) != 0 { kill(pid, SIGKILL) }
-                let killDeadline = Date().addingTimeInterval(2)
-                while isAlive && Date() < killDeadline { collectOutput(); Thread.sleep(forTimeInterval: 0.05) }
+                let killDeadline = NetworkClockSample.capture().continuous + 2
+                while isAlive && NetworkClockSample.capture().continuous < killDeadline { collectOutput(maximumReads: 8); Thread.sleep(forTimeInterval: 0.05) }
                 guard !isAlive else { throw ServiceFailure("recoveryFailed", "The core process could not be stopped.") }
             }
         }
-        collectOutput()
+        collectOutput(maximumReads: 8)
     }
 }
 

@@ -21,6 +21,15 @@ public struct IPv4RouteSnapshot {
         IPv4RouteSnapshot(lowerHalf: interface(for: "64.0.0.1"), upperHalf: interface(for: "192.0.2.1"))
     }
 
+    public static func isPhysical(_ name: String) -> Bool {
+        ["en", "bridge", "bond", "vlan"].contains(where: name.hasPrefix)
+    }
+    public func foreignTunnel(excluding ownTunnel: String? = nil) -> String? {
+        [lowerHalf, upperHalf].compactMap { $0 }.first {
+            $0 != ownTunnel && ["utun", "ppp", "ipsec", "tun", "tap"].contains(where: $0.hasPrefix)
+        }
+    }
+
     public func validateBeforeStarting(mode: String) throws {
         guard mode == "tun" else { return }
         guard let lowerHalf, let upperHalf else {

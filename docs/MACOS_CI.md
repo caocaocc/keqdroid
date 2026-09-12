@@ -60,3 +60,11 @@ swift run --package-path macos/NetworkService --scratch-path build/macos-native-
 当前本机为 Apple Silicon、macOS 15.6。所提供测试订阅包含两个 VLESS 节点，用于 keqrnel/Mihomo 的 Proxy、TUN、DNS、分流和恢复测试。未提供 AWG 测试节点。当前本机验收不能代表 Intel 或 macOS 12，完整发布矩阵见 [macOS 开发与验收](MACOS.md)。
 
 CI 通过、安装成功、节点连通和网络恢复分别记录结果，任何一项未执行都不能标记为通过。
+
+## 桌面传输与恢复回归
+
+`desktop-transport.yml` 在 `windows-2022`、`macos-15`、`macos-15-intel` 独立运行真实回环 CONNECT/TLS、临时核心启动、DNS 配置和恢复状态测试。证书仅在测试自建的 `SecurityContext` 中受信任，不安装到系统证书库。macOS 打包依赖公共检查及本架构传输检查；另一架构或 Windows 失败不会取消已完成组件。
+
+公共 Flutter 测试导出的 LAN 请求包含两个核心 × Proxy/TUN × 有/无认证 8 种组合。打包使用本次 helper 组件中的预编译验证器逐个校验，不重新编译组件。
+
+物理断网验收必须先启动本地独立监督程序。仅给 GUI 设置退出定时器不能恢复 Wi-Fi；监督程序需在 Codex 断线后仍恢复自己改变的电源状态，并核对断开后的系统配置。实际睡眠/唤醒和 LAN 跨设备测试需要对应人工或设备条件，不能由合成时钟或回环测试替代。

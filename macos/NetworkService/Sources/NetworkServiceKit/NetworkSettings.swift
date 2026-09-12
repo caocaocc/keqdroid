@@ -19,15 +19,14 @@ public struct NetworkContext {
 public final class NetworkSettings {
     private let journalURL: URL
     private var appliedDNS: (serviceIDs: [String], address: String)?
+    private var appliedFields: (serviceIDs: [String], fields: [String: [String: Any]])?
     public init(stateDirectory: URL) { journalURL = stateDirectory.appendingPathComponent("network-journal.json") }
 
     public func prepare(uid: uid_t, forTUN: Bool = false) throws -> NetworkContext {
-        guard let store = SCDynamicStoreCreate(nil, "KEQDIS context" as CFString, nil, nil),
-              let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
-              let primary = global["PrimaryInterface"] as? String, ["en", "bridge", "bond", "vlan"].contains(where: primary.hasPrefix),
-              let primaryService = global["PrimaryService"] as? String else {
-            throw ServiceFailure("physicalNetworkUnavailable", "No physical default network is available. Disconnect another VPN and retry.")
-        }
+        let availability = networkStatus()
+        let mode = forTUN ? availability.tun : availability.proxy
+        guard mode.state == "ready", let semantic = availability.semantic else { throw ServiceFailure(mode.reason, mode.message) }
+        let primary = semantic.interface, primaryService = semantic.service
         if forTUN { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: "tun") }
         let preferences = try preferences()
         guard let current = SCNetworkSetCopyCurrent(preferences), let services = SCNetworkSetCopyServices(current) as? [SCNetworkService] else {
@@ -37,50 +36,61 @@ public final class NetworkSettings {
             guard SCNetworkServiceGetEnabled(service), let interface = SCNetworkServiceGetInterface(service), let device = SCNetworkInterfaceGetBSDName(interface) as String? else { return false }
             return device.hasPrefix("en") || device.hasPrefix("bridge") || device.hasPrefix("bond") || device.hasPrefix("vlan")
         }.compactMap { SCNetworkServiceGetServiceID($0) as String? }
-        let dnsState = SCDynamicStoreCopyValue(store, "State:/Network/Service/\(primaryService)/DNS" as CFString) as? [String: Any]
-        let primaryConfiguration = services.first { (SCNetworkServiceGetServiceID($0) as String?) == primaryService }
-            .flatMap { SCNetworkServiceCopyProtocol($0, kSCNetworkProtocolTypeDNS) }
-            .flatMap { SCNetworkProtocolGetConfiguration($0) as? [String: Any] }
-        let servers = (dnsState?[kSCPropNetDNSServerAddresses as String] as? [String] ?? primaryConfiguration?[kSCPropNetDNSServerAddresses as String] as? [String] ?? []).filter(isPhysicalDNSAddress)
-        let ipv6 = physicalIPv6Addresses()
-        guard ipv6["unavailable"] == nil else { throw ServiceFailure("physicalNetworkUnavailable", "Cannot inspect physical IPv6 interfaces.") }
-        let hasIPv6 = !ipv6.isEmpty
-        return NetworkContext(id: UUID().uuidString, interfaceName: primary, dnsServers: Array(NSOrderedSet(array: servers)) as? [String] ?? servers, serviceIDs: serviceIDs, hasIPv6: hasIPv6, created: Date(), uid: uid, primaryServiceID: primaryService, physicalSignature: physicalSignature(store: store, service: primaryService, interface: primary))
+        return NetworkContext(id: UUID().uuidString, interfaceName: primary, dnsServers: semantic.dns, serviceIDs: serviceIDs, hasIPv6: semantic.hasIPv6, created: Date(), uid: uid, primaryServiceID: primaryService, physicalSignature: semantic.revision)
     }
 
-    private func physicalSignature(store: SCDynamicStore, service: String, interface: String) -> String {
-        let keys = ["State:/Network/Service/\(service)/IPv4", "State:/Network/Service/\(service)/IPv6", "State:/Network/Interface/\(interface)/Link", "State:/Network/Service/\(service)/DHCP"]
-        func canonical(_ value: Any) -> Any {
-            if let dictionary = value as? [String: Any] { return dictionary.mapValues(canonical) }
-            if let values = value as? [Any] { return values.map(canonical) }
-            if let data = value as? Data { return data.base64EncodedString() }
-            if let date = value as? Date { return date.timeIntervalSince1970 }
-            return value
+    /// A read-only summary also works when there is no active session. It never
+    /// performs a DNS lookup, network probe, authorization or settings write.
+    public func networkStatus(context: NetworkContext? = nil, ownTunnel: String? = nil) -> NetworkAvailability {
+        let routes = IPv4RouteSnapshot.capture()
+        guard let store = SCDynamicStoreCreate(nil, "KEQDIS network availability" as CFString, nil, nil) else {
+            let failed = NetworkModeAvailability("blocked", "networkInspectionFailed", "Cannot inspect the system network configuration.")
+            return NetworkAvailability(semantic: nil, proxy: failed, tun: failed)
         }
-        let values = keys.map { canonical(SCDynamicStoreCopyValue(store, $0 as CFString) ?? NSDictionary()) } + [physicalIPv6Addresses()]
-        return (try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]).base64EncodedString()) ?? ""
+        let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any] ?? [:]
+        guard let primary = global["PrimaryInterface"] as? String, let service = global["PrimaryService"] as? String else {
+            return NetworkAvailability.evaluate(nil, routes: routes, ownTunnel: ownTunnel)
+        }
+        func value(_ key: String) -> [String: Any] { SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] ?? [:] }
+        let ipv4 = value("State:/Network/Service/\(service)/IPv4")
+        var ipv6 = value("State:/Network/Service/\(service)/IPv6")
+        let addresses6 = physicalIPv6Addresses()
+        guard addresses6["unavailable"] == nil else {
+            let failed = NetworkModeAvailability("blocked", "networkInspectionFailed", "Cannot inspect physical IPv6 interfaces.")
+            return NetworkAvailability(semantic: nil, proxy: failed, tun: failed)
+        }
+        ipv6["AvailableInterfaces"] = addresses6.keys.sorted()
+        let configuredDNS = value("Setup:/Network/Service/\(service)/DNS")[kSCPropNetDNSServerAddresses as String] as? [String] ?? []
+        let currentDNS = value("State:/Network/Service/\(service)/DNS")[kSCPropNetDNSServerAddresses as String] as? [String] ?? configuredDNS
+        var servers = currentDNS.filter(isPhysicalDNSAddress)
+        // Our virtual DNS must not replace the saved physical bootstrap or
+        // change its revision on every status poll. User edits are checked
+        // separately against committed fields below.
+        if let appliedDNS, currentDNS == [appliedDNS.address], let context, context.primaryServiceID == service { servers = context.dnsServers }
+        var seen: Set<String> = []
+        servers = servers.filter { seen.insert($0).inserted }
+        let semantic = NetworkSemanticState(interface: primary, service: service, ipv4: ipv4, ipv6: ipv6,
+            link: value("State:/Network/Interface/\(primary)/Link"), dns: servers, hasIPv6: !addresses6.isEmpty)
+        return NetworkAvailability.evaluate(semantic, routes: routes, ownTunnel: ownTunnel)
     }
 
     public func physicalNetworkChanged(_ context: NetworkContext) -> Bool {
-        guard let store = SCDynamicStoreCreate(nil, "KEQDIS monitor" as CFString, nil, nil) else { return true }
-        if let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any], let primary = global["PrimaryInterface"] as? String,
-           !primary.hasPrefix("utun"), primary != context.interfaceName { return true }
-        if let appliedDNS {
-            // Check the committed user-editable fields, not effective resolver
-            // state (which can lag SCPreferencesApplyChanges). A third-party
-            // DNS edit must trigger fresh bootstrap and survive restoration.
-            guard let prefs = try? preferences() else { return true }
-            for identifier in appliedDNS.serviceIDs {
-                guard let service = SCNetworkServiceCopy(prefs, identifier as CFString),
-                      let proto = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeDNS),
-                      let config = SCNetworkProtocolGetConfiguration(proto) as? [String: Any],
-                      config[kSCPropNetDNSServerAddresses as String] as? [String] == [appliedDNS.address] else { return true }
+        networkStatus(context: context).semantic?.revision != context.physicalSignature
+    }
+
+    public func managedSettingsChanged() throws -> Bool {
+        guard let appliedFields else { return false }
+        let prefs = try preferences()
+        SCPreferencesSynchronize(prefs)
+        for identifier in appliedFields.serviceIDs {
+            guard let service = SCNetworkServiceCopy(prefs, identifier as CFString) else { continue }
+            for (kind, expected) in appliedFields.fields {
+                guard let proto = SCNetworkServiceCopyProtocol(service, kind as CFString), SCNetworkProtocolGetEnabled(proto),
+                      let current = SCNetworkProtocolGetConfiguration(proto) as? [String: Any],
+                      expected.allSatisfy({ jsonEqual(current[$0.key], $0.value) }) else { return true }
             }
-        } else {
-            let dns = SCDynamicStoreCopyValue(store, "State:/Network/Service/\(context.primaryServiceID)/DNS" as CFString) as? [String: Any]
-            if let current = dns?[kSCPropNetDNSServerAddresses as String] as? [String], current.filter(isPhysicalDNSAddress) != context.dnsServers { return true }
         }
-        return physicalSignature(store: store, service: context.primaryServiceID, interface: context.interfaceName) != context.physicalSignature
+        return false
     }
 
     private func preferences() throws -> SCPreferences {
@@ -93,7 +103,7 @@ public final class NetworkSettings {
     public func apply(context: NetworkContext, proxyPorts: (socks: Int, http: Int)?, dnsAddress: String?) throws {
         if proxyPorts == nil && dnsAddress == nil { return }
         let prefs = try preferences()
-        guard SCPreferencesLock(prefs, true) else { throw ServiceFailure("networkSettingsBusy", "Another process is editing network settings.") }
+        guard SCPreferencesLock(prefs, false) else { throw ServiceFailure("networkSettingsBusy", "Another process is editing network settings.") }
         defer { SCPreferencesUnlock(prefs) }
         var records: [[String: Any]] = []
         var pending: [(SCNetworkProtocol, [String: Any])] = []
@@ -123,6 +133,7 @@ public final class NetworkSettings {
             throw ServiceFailure("networkSettingsFailed", "Cannot apply the network settings change.")
         }
         if let dnsAddress { appliedDNS = (context.serviceIDs, dnsAddress) }
+        appliedFields = (context.serviceIDs, plans)
     }
 
     /// Reads fresh committed preferences and configd's merged default resolver /
@@ -156,18 +167,23 @@ public final class NetworkSettings {
     }
 
     public func restore() throws {
-        guard FileManager.default.fileExists(atPath: journalURL.path) else { appliedDNS = nil; return }
-        let document = try SecureFiles.loadJSON(journalURL)
-        guard document["version"] as? Int == 1, let records = document["records"] as? [[String: Any]], !records.isEmpty else { throw ServiceFailure("recoveryFailed", "Network recovery journal is invalid.") }
+        guard FileManager.default.fileExists(atPath: journalURL.path) else { appliedDNS = nil; appliedFields = nil; return }
+        let document: [String: Any]
+        do { document = try SecureFiles.loadJSON(journalURL) }
+        catch let failure as ServiceFailure where failure.code == "unsafeInstallation" { throw failure }
+        catch { throw ServiceFailure("recoveryCorrupt", "Cannot read the protected network recovery journal.") }
+        guard document["version"] as? Int == 1, let records = document["records"] as? [[String: Any]], !records.isEmpty else { throw ServiceFailure("recoveryCorrupt", "Network recovery journal is invalid.") }
         let prefs = try preferences()
-        guard SCPreferencesLock(prefs, true) else { throw ServiceFailure("networkSettingsBusy", "Cannot lock network settings for recovery.") }
+        // Never block the state queue indefinitely on another preferences
+        // writer. The service retries this transient failure with a budget.
+        guard SCPreferencesLock(prefs, false) else { throw ServiceFailure("networkSettingsBusy", "Cannot lock network settings for recovery.") }
         defer { SCPreferencesUnlock(prefs) }
         for record in records {
             guard let identifier = record["serviceId"] as? String, let kind = record["protocol"] as? String,
                   [kSCNetworkProtocolTypeDNS as String, kSCNetworkProtocolTypeProxies as String].contains(kind),
                   record["enabledBefore"] is Bool,
                   let rawFields = record["fields"] as? [String: [String: Any]], !rawFields.isEmpty,
-                  rawFields.values.allSatisfy({ Set($0.keys) == Set(["before", "applied"]) }) else { throw ServiceFailure("recoveryFailed", "Network recovery record is invalid.") }
+                  rawFields.values.allSatisfy({ Set($0.keys) == Set(["before", "applied"]) }) else { throw ServiceFailure("recoveryCorrupt", "Network recovery record is invalid.") }
             guard let service = SCNetworkServiceCopy(prefs, identifier as CFString), let proto = SCNetworkServiceCopyProtocol(service, kind as CFString) else { continue }
             let current = SCNetworkProtocolGetConfiguration(proto) as? [String: Any] ?? [:]
             let changes = rawFields.mapValues(FieldChange.init(dictionary:))
@@ -182,5 +198,6 @@ public final class NetworkSettings {
         guard SCPreferencesCommitChanges(prefs), SCPreferencesApplyChanges(prefs) else { throw ServiceFailure("recoveryFailed", "Cannot commit restored network settings.") }
         try FileManager.default.removeItem(at: journalURL)
         appliedDNS = nil
+        appliedFields = nil
     }
 }

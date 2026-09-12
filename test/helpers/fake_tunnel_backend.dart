@@ -1,3 +1,4 @@
+import 'package:keqdroid/tunnel/url_test_diagnostics.dart';
 import 'dart:async';
 
 import 'package:keqdroid/tunnel/tunnel_backend.dart';
@@ -62,6 +63,7 @@ class FakeTunnelBackend extends TunnelBackend {
         int? latencyMs,
         String error,
         int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
       })>> xrayUrlTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,
@@ -78,6 +80,7 @@ class FakeTunnelBackend extends TunnelBackend {
             latencyMs: null,
             error: 'fake backend',
             httpStatus: null,
+            diagnostics: null,
           ),
       ];
 }

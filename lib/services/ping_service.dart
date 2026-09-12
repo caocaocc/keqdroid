@@ -1,3 +1,5 @@
+import '../tunnel/url_test_diagnostics.dart';
+import '../tunnel/macos_network_context.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -30,6 +32,7 @@ class PingResult {
   final int? latencyMs;
   final bool success;
   final String error;
+  final UrlTestDiagnostics? diagnostics;
 
   /// метод, которым получили результат (нужен для порогов цвета)
   final PingType pingType;
@@ -40,6 +43,7 @@ class PingResult {
     this.latencyMs,
     required this.success,
     this.error = '',
+    this.diagnostics,
     this.pingType = PingType.tcp,
   });
 
@@ -530,6 +534,8 @@ class PingService {
           settings,
           socksPort: socksPort,
           httpInbound: !Platform.isAndroid,
+          desktopDns: !Platform.isAndroid,
+          physicalBootstrapDns: Platform.isMacOS && MacOSNetworkContext.active != null,
         )
       : ConfigGeneratorV2.generatePingConfig(
           serverConfig,
@@ -537,6 +543,8 @@ class PingService {
           socksPort: socksPort,
           resolvedServerIp: resolvedServerIp,
           httpInbound: !Platform.isAndroid,
+          desktopDns: !Platform.isAndroid,
+          physicalBootstrapDns: Platform.isMacOS && MacOSNetworkContext.active != null,
         );
 
   static Future<PingResult> _pingUrlSingle(
@@ -580,6 +588,7 @@ class PingService {
         latencyMs: raw.latencyMs,
         success: raw.success,
         error: raw.error,
+        diagnostics: raw.diagnostics,
         pingType: PingType.url,
       );
     } catch (e) {

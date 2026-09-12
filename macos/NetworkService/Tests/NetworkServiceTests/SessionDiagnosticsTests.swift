@@ -12,7 +12,7 @@ final class SessionDiagnosticsTests: XCTestCase {
         XCTAssertEqual(stopped["log"] as? String, "last core output")
         XCTAssertEqual(stopped["errorCode"] as? String, "readinessTimeout")
         XCTAssertEqual(stopped["errorStage"] as? String, "virtualDNS")
-        XCTAssertEqual(Set(stopped.keys), ["status", "log", "error", "errorCode", "errorStage"])
+        XCTAssertEqual(Set(stopped.keys), ["status", "log", "error", "errorCode", "errorStage", "sessionId"])
         let again = SessionDiagnostics.snapshot(stopped, owner: owner, caller: owner, disconnected: true)
         XCTAssertTrue(NSDictionary(dictionary: stopped).isEqual(to: again))
     }
@@ -30,7 +30,7 @@ final class SessionDiagnosticsTests: XCTestCase {
         let read = SessionDiagnostics.snapshot(monitored, owner: owner, caller: owner)
         XCTAssertEqual(read["requiresReconnect"] as? Bool, true)
         XCTAssertEqual(read["status"] as? String, "error")
-        XCTAssertNil(read["sessionId"])
+        XCTAssertEqual(read["sessionId"] as? String, "old")
         let stopped = SessionDiagnostics.snapshot(read, owner: owner, caller: owner, disconnected: true)
         XCTAssertNil(stopped["requiresReconnect"])
         XCTAssertEqual(stopped["status"] as? String, "disconnected")

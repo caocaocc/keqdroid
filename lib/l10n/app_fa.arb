@@ -774,5 +774,15 @@
   "macosNetworkServiceTitle": "سرویس شبکه",
   "macosNetworkServiceHint": "Proxy بدون مجوز مدیر متصل می‌شود و پراکسی سیستم را تغییر می‌دهد. TUN برای هر نسخهٔ نصب‌شده یک بار به مجوز نیاز دارد.",
   "macosNetworkServiceMissing": "برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.",
-  "macosAuthorizeAccount": "اجازهٔ TUN به این حساب"
+  "macosAuthorizeAccount": "اجازهٔ TUN به این حساب",
+  "macosWaitingNetwork": "Waiting for network to recover",
+  "macosRestoringNetwork": "Restoring previous network settings",
+  "macosRetryingNetwork": "Reconnecting automatically",
+  "macosRecoveryPaused": "Automatic recovery paused; connect manually to retry",
+  "macosRetryRecovery": "Retry network restoration",
+  "pingTimingWarm": "Warm connection",
+  "pingTimingCold": "Full request",
+  "pingTimingFallback": "First request",
+  "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
 }

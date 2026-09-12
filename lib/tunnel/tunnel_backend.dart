@@ -1,3 +1,4 @@
+import 'url_test_diagnostics.dart';
 import 'tunnel_session_request.dart';
 import 'vpn_backend.dart';
 import 'tunnel_state.dart';
@@ -43,6 +44,7 @@ abstract class TunnelBackend {
         int? latencyMs,
         String error,
         int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
       })>> xrayUrlTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,

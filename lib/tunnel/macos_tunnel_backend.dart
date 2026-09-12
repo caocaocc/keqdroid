@@ -10,13 +10,16 @@ import '../utils/mihomo_api_session.dart';
 import 'connection_mode.dart';
 import 'desktop_traffic_stats.dart';
 import 'desktop_dns_diagnostics.dart';
+import '../platform/desktop_lan_state.dart';
 import 'macos_network_context.dart';
 import 'macos_session_config.dart';
+import 'macos_service_observation.dart';
 import 'socks_credential_generator.dart';
 import 'tunnel_backend.dart';
 import 'tunnel_session_request.dart';
 import 'tunnel_state.dart';
 import 'vpn_backend.dart';
+import 'url_test_diagnostics.dart';
 
 /// Helper владеет сетевыми настройками и процессами даже при падении UI.
 /// Dart передаёт конфиги и отображает подтверждённое сервисом состояние.
@@ -32,6 +35,9 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   final MethodChannel _desktopChannel;
   final bool _enablePolling;
   final _states = StreamController<VpnState>.broadcast();
+  final _observations = StreamController<MacOSServiceObservation>.broadcast();
+  Map<String, dynamic> _serviceInfo = const {};
+  Map<String, dynamic> _snapshot = const {'status': 'disconnected'};
   Future<void> _operations = Future.value();
   Timer? _pollTimer;
   bool _polling = false;
@@ -42,6 +48,8 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   bool _networkChangePending = false;
   String? _networkChangeSession;
   String? _sessionId;
+  bool _startOutcomeUnknown = false;
+  String? _pendingStartEpoch;
   String _logs = '';
   Map<String, int> _pids = const {};
   VpnState _state = VpnState.disconnected;
@@ -65,6 +73,15 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   ConnectionMode? get activeMode => _state.activeMode;
   @override
   Stream<VpnState> get stateStream => _states.stream;
+  Stream<MacOSServiceObservation> get observations => _observations.stream;
+  Map<String, dynamic> get lastSnapshot => Map.unmodifiable(_snapshot);
+  String get failureOccurrence =>
+      '${_serviceInfo['helperEpoch']}/${_snapshot['sessionId']}/${_snapshot['errorCode']}/${_snapshot['errorStage']}';
+  Future<Map<String, dynamic>> fetchServiceStatus() async {
+    final info = await _call('getServiceStatus');
+    _serviceInfo = info;
+    return info;
+  }
 
   bool takeNetworkChangeRequest() {
     final pending = _networkChangePending && !_stopRequested;
@@ -134,11 +151,13 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       desktopDnsDiagnostics.value = null;
     }
     unawaited(_states.close());
+    unawaited(_observations.close());
   }
 
   @override
   void emit(VpnState state) {
     if (_disposed) return;
+    if (state.status != VpnStatus.connected) desktopLanState.value = null;
     if (state.status != VpnStatus.connected &&
         desktopDnsDiagnostics.value?.sessionId == _sessionId) {
       desktopDnsDiagnostics.value = null;
@@ -166,22 +185,47 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   }
 
   @override
-  Future<void> startSession(TunnelSessionRequest request) {
+  Future<void> startSession(
+    TunnelSessionRequest request, {
+    bool allowPermissionPrompt = true,
+  }) {
     _stopRequested = false;
     final generation = ++_operationGeneration;
-    return _serial(() => _start(request, generation));
+    return _serial(() => _start(request, generation, allowPermissionPrompt));
   }
 
-  Future<void> _start(TunnelSessionRequest request, int generation) async {
+  Future<void> _start(
+    TunnelSessionRequest request,
+    int generation,
+    bool allowPermissionPrompt,
+  ) async {
     if (generation != _operationGeneration) return;
     init();
-    if (_sessionId != null) await _stop();
+    if (_startOutcomeUnknown) {
+      if (await _reconcileUnknownStart(generation)) return;
+      if (generation != _operationGeneration) return;
+    }
+    if (!allowPermissionPrompt &&
+        (_sessionId != null || _serviceInfo['recoveryRequired'] == true)) {
+      _serviceInfo = await _call('getServiceStatus');
+      if (generation != _operationGeneration) return;
+      if (_serviceInfo['recoveryRequired'] == true) {
+        throw _recoveryFailure(_serviceInfo);
+      }
+    }
+    if (_sessionId != null || _serviceInfo['recoveryRequired'] == true) {
+      await _stop();
+    }
     if (generation != _operationGeneration) return;
     _logs = '';
     emit(VpnState(status: VpnStatus.connecting, activeMode: request.mode));
     try {
       final service = await _call('getServiceStatus');
+      _serviceInfo = service;
       if (generation != _operationGeneration) return;
+      if (service['recoveryRequired'] == true) {
+        throw _recoveryFailure(service);
+      }
       if (service['installed'] != true) {
         throw const VpnPermissionDeniedException(
           'Install the macOS network service using the package inside the DMG.',
@@ -200,7 +244,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       }
       if (request.mode == ConnectionMode.tun &&
           service['authorized'] != true &&
-          !await requestTunnelPermission()) {
+          (!allowPermissionPrompt || !await requestTunnelPermission())) {
         throw const VpnPermissionDeniedException(
           'TUN is not authorized for this macOS account.',
         );
@@ -209,7 +253,14 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       final context = request.mode == ConnectionMode.tun
           ? MacOSNetworkContext.fromMap(await _call('prepareNetworkContext'))
           : null;
-      final ports = <int>{request.socksPort, request.httpPort};
+      final ports = <int>{
+        request.socksPort,
+        request.httpPort,
+        if (request.lan != null) ...[
+          request.lan!.socksPort,
+          request.lan!.httpPort,
+        ],
+      };
       final apiPort = await _freePort(ports);
       ports.add(apiPort);
       final secret = SocksCredentialGenerator.randomToken(32);
@@ -233,6 +284,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       totalDownload = 0;
       _lastStats = null;
       sessionStartedAt = DateTime.now();
+      _pendingStartEpoch = service['helperEpoch'] as String?;
       final snapshot = await _call(
         request.mode == ConnectionMode.proxy
             ? 'startProxySession'
@@ -243,6 +295,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
         await _stop();
         return;
       }
+      _pendingStartEpoch = null;
       _acceptSnapshot(snapshot);
       if (_state.status != VpnStatus.connected) {
         throw VpnStartException(
@@ -255,21 +308,124 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       }
     } catch (error) {
       final cancelled = generation != _operationGeneration;
-      try {
-        await _stop();
-      } catch (_) {}
-      if (cancelled) return;
+      Object failure = error;
+      final unknownStart =
+          macOSFailureCode(error) == 'requestOutcomeUnknown' &&
+          _sessionId != null;
+      if (unknownStart) {
+        _startOutcomeUnknown = true;
+        if (!cancelled) {
+          try {
+            if (await _reconcileUnknownStart(generation)) return;
+          } catch (reconciliationError) {
+            failure = reconciliationError;
+          }
+        }
+      }
+      if (!unknownStart &&
+          !_isRecoveryFailure(failure) &&
+          _serviceInfo['recoveryRequired'] != true) {
+        try {
+          await _stop();
+        } catch (cleanupError) {
+          // A failed cleanup is the actionable error and must not be hidden by
+          // the original core/start failure or reset by an automatic retry.
+          failure = cleanupError;
+        }
+      }
+      if (cancelled || generation != _operationGeneration) return;
       emit(
         VpnState(
           status: VpnStatus.error,
-          errorMessage: error.toString(),
+          errorMessage: failure.toString(),
           activeMode: request.mode,
         ),
       );
-      if (error is AppException) rethrow;
-      throw VpnStartException(error.toString(), cause: error);
+      if (failure is AppException) throw failure;
+      throw VpnStartException(failure.toString(), cause: failure);
     }
   }
+
+  static bool _isRecoveryFailure(Object error) => const {
+    'recoveryRequired',
+    'recoveryFailed',
+    'recoveryCorrupt',
+    'unsafeInstallation',
+  }.contains(macOSFailureCode(error));
+
+  static PlatformException _recoveryFailure(Map<String, dynamic> service) =>
+      PlatformException(
+        code:
+            service['recoveryErrorCode'] as String? ??
+            service['errorCode'] as String? ??
+            'recoveryRequired',
+        message:
+            service['recoveryError'] as String? ??
+            'The previous network state has not been restored.',
+      );
+
+  /// An unanswered start is not proof of failure. These bounded, read-only RPCs
+  /// resolve it without replaying the start or stopping a possibly healthy core.
+  Future<bool> _reconcileUnknownStart(int generation) async {
+    try {
+      final id = _sessionId;
+      final epoch = _pendingStartEpoch;
+      final service = await _call('getServiceStatus');
+      if (_disposed || generation != _operationGeneration) {
+        throw _unknownStartFailure();
+      }
+      _serviceInfo = service;
+      if (service['recoveryRequired'] == true) throw _recoveryFailure(service);
+      final snapshot = await _call('getSession');
+      if (_disposed || generation != _operationGeneration) {
+        throw _unknownStartFailure();
+      }
+      if (snapshot['recoveryRequired'] == true) {
+        throw _recoveryFailure(snapshot);
+      }
+      final sameSession =
+          id != null &&
+          snapshot['sessionId'] == id &&
+          epoch != null &&
+          service['helperEpoch'] == epoch &&
+          snapshot['helperEpoch'] == epoch;
+      if (service['busy'] != true &&
+          sameSession &&
+          snapshot['status'] == 'connected') {
+        _acceptSnapshot(snapshot);
+        _startOutcomeUnknown = false;
+        _pendingStartEpoch = null;
+        return true;
+      }
+      if (service['busy'] != true &&
+          snapshot['status'] == 'disconnected' &&
+          (snapshot['sessionId'] == null || snapshot['sessionId'] == id)) {
+        _acceptSnapshot(snapshot);
+        return false;
+      }
+      if (service['busy'] != true &&
+          sameSession &&
+          snapshot['status'] == 'error') {
+        _acceptSnapshot(snapshot);
+        _startOutcomeUnknown = false;
+        _pendingStartEpoch = null;
+        throw PlatformException(
+          code: snapshot['errorCode'] as String? ?? 'startFailed',
+          message: snapshot['error'] as String?,
+        );
+      }
+      throw _unknownStartFailure();
+    } catch (error) {
+      if (_isRecoveryFailure(error) || !_startOutcomeUnknown) rethrow;
+      throw _unknownStartFailure();
+    }
+  }
+
+  static PlatformException _unknownStartFailure() => PlatformException(
+    code: 'requestOutcomeUnknown',
+    message:
+        'The start result is not confirmed. Waiting for the network service before starting another session.',
+  );
 
   @override
   Future<void> stopSession() {
@@ -281,7 +437,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
 
   Future<void> _stop() async {
     final id = _sessionId;
-    if (id != null) {
+    if (id != null || _serviceInfo['recoveryRequired'] == true) {
       emit(
         VpnState(
           status: VpnStatus.disconnecting,
@@ -289,7 +445,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
         ),
       );
       try {
-        final snapshot = await _call('stopSession', {'sessionId': id});
+        final snapshot = await _call('stopSession', {'sessionId': ?id});
         _acceptSnapshot(snapshot);
         if (_state.status != VpnStatus.disconnected) {
           throw VpnStartException(
@@ -313,11 +469,14 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   }
 
   void _clearSession() {
+    desktopLanState.value = null;
     lastSessionLogs = exportSessionLogs(maxLines: 2000);
     if (desktopDnsDiagnostics.value?.sessionId == _sessionId) {
       desktopDnsDiagnostics.value = null;
     }
     _sessionId = null;
+    _startOutcomeUnknown = false;
+    _pendingStartEpoch = null;
     _apiPort = null;
     _apiSecret = '';
     _pids = const {};
@@ -350,8 +509,29 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     _polling = true;
     final generation = _operationGeneration;
     try {
+      if (_startOutcomeUnknown) {
+        await _reconcileUnknownStart(generation);
+        if (_disposed || generation != _operationGeneration) return;
+        if (_observations.hasListener) {
+          _observations.add(MacOSServiceObservation(_serviceInfo, _snapshot));
+        }
+        return;
+      }
+      if (_observations.hasListener) {
+        final previousEpoch = _serviceInfo['helperEpoch'];
+        _serviceInfo = await _call('getServiceStatus');
+        if (_disposed || generation != _operationGeneration) return;
+        if (previousEpoch != null &&
+            _serviceInfo['helperEpoch'] != null &&
+            previousEpoch != _serviceInfo['helperEpoch']) {
+          _clearSession();
+        }
+      }
       final snapshot = await _call('getSession');
       if (_disposed || generation != _operationGeneration) return;
+      if (_observations.hasListener) {
+        _observations.add(MacOSServiceObservation(_serviceInfo, snapshot));
+      }
       // Preserve a startup error until a new user action or an actual session.
       if (_state.status == VpnStatus.error &&
           _sessionId == null &&
@@ -364,6 +544,19 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
         await pollTrafficStats(_state.activeMode ?? ConnectionMode.proxy);
       }
     } catch (error) {
+      if (!_disposed &&
+          generation == _operationGeneration &&
+          _observations.hasListener) {
+        _observations.add(
+          MacOSServiceObservation(_serviceInfo, {
+            'status': 'error',
+            'sessionId': _sessionId,
+            'errorCode': macOSFailureCode(error),
+            'error': error.toString(),
+            'transportUnavailable': true,
+          }),
+        );
+      }
       if (_sessionId != null &&
           !_disposed &&
           generation == _operationGeneration) {
@@ -398,6 +591,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     if (_sessionId != null && incomingId != null && incomingId != _sessionId) {
       return;
     }
+    _snapshot = Map.of(snapshot);
     if (status == 'connected' && incomingId == null) {
       throw const FormatException(
         'The macOS service did not identify its active session.',
@@ -439,6 +633,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       desktopDnsDiagnostics.value = null;
     }
     if (mapped.status == VpnStatus.connected) {
+      desktopLanState.value = DesktopLanState.fromSnapshot(snapshot['lan']);
       if (snapshot['networkContext'] is Map) {
         _context = MacOSNetworkContext.fromMap(
           snapshot['networkContext'] as Map,
@@ -579,7 +774,14 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   @override
   Future<
     List<
-      ({String id, bool success, int? latencyMs, String error, int? httpStatus})
+      ({
+        String id,
+        bool success,
+        int? latencyMs,
+        String error,
+        int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
+      })
     >
   >
   xrayUrlTestBatch({
@@ -608,6 +810,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
             latencyMs: result.latencyMs,
             error: result.error,
             httpStatus: result.httpStatus,
+            diagnostics: result.diagnostics,
           ),
         )
         .toList();

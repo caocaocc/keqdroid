@@ -9,7 +9,7 @@ class _LanSharingCard extends ConsumerStatefulWidget {
 }
 
 class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
-  String? _localIp;
+  List<String> _localIps = const [];
   late TextEditingController _socksCtrl;
   late TextEditingController _httpCtrl;
   late TextEditingController _userCtrl;
@@ -25,15 +25,21 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
     _userCtrl = TextEditingController(text: s.lanUsername);
     _passCtrl = TextEditingController(text: s.lanPassword);
     _fetchLocalIp();
+    desktopLanState.addListener(_runtimeChanged);
   }
 
   @override
   void dispose() {
+    desktopLanState.removeListener(_runtimeChanged);
     _socksCtrl.dispose();
     _httpCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
+  }
+
+  void _runtimeChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _fetchLocalIp() async {
@@ -42,25 +48,11 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
         type: InternetAddressType.IPv4,
         includeLoopback: false,
       );
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback &&
-              (addr.address.startsWith('192.168') ||
-                  addr.address.startsWith('10.') ||
-                  addr.address.startsWith('172.'))) {
-            if (mounted) setState(() => _localIp = addr.address);
-            return;
-          }
-        }
-      }
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback) {
-            if (mounted) setState(() => _localIp = addr.address);
-            return;
-          }
-        }
-      }
+      final addresses = DesktopLanState.physicalAddresses(
+        interfaces.map((i) => (name: i.name, addresses: i.addresses.map((a) => a.address).toList())),
+        macos: Platform.isMacOS,
+      );
+      if (mounted) setState(() => _localIps = addresses);
     } catch (_) {}
   }
 
@@ -87,14 +79,21 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
     final textTheme = Theme.of(context).textTheme;
     final settings = widget.settingsAsync.value ?? const AppSettings();
     final isLan = settings.lanSharing;
-    final isConnected = ref.watch(
-      vpnStateProvider.select((a) {
-        final status = a.value?.status;
-        return status == VpnStatus.connected ||
-            status == VpnStatus.connecting;
-      }),
-    );
-    final ip = _localIp ?? '...';
+    final status = ref.watch(vpnStateProvider.select((a) => a.value?.status));
+    final isConnected = status == VpnStatus.connected ||
+        status == VpnStatus.connecting || status == VpnStatus.disconnecting;
+    final canEdit = Platform.isMacOS || !isConnected;
+    final runtime = Platform.isMacOS ? desktopLanState.value : null;
+    final sharing = status == VpnStatus.connected &&
+        (Platform.isMacOS ? runtime != null : isLan);
+    final addresses = runtime?.addresses ?? _localIps;
+    final ip = addresses.isEmpty ? '...' : addresses.join('\n');
+    final socksPort = sharing
+        ? runtime?.socksPort ?? ActiveLocalPorts().lanSocksPort ?? settings.lanSocksPort
+        : settings.lanSocksPort;
+    final httpPort = sharing
+        ? runtime?.httpPort ?? ActiveLocalPorts().lanHttpPort ?? settings.lanHttpPort
+        : settings.lanHttpPort;
 
     // Включённое состояние показываем цветом иконки-контейнера, а не рамкой:
     // у M3E `tertiary` — это ровно роль «обратите внимание, тут что-то
@@ -121,7 +120,9 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                     Text(l10n.settingsLanProxyTitle,
                         style: textTheme.titleMedium?.copyWith(color: AppTheme.text(context))),
                     Text(
-                      isLan ? l10n.settingsLanSharingOnIp(ip) : l10n.settingsOff,
+                      sharing ? l10n.settingsLanSharingOnIp(addresses.join(', '))
+                          : !isLan ? l10n.settingsOff
+                          : status == VpnStatus.connecting ? l10n.vpnConnecting : l10n.trayStatusDisconnected,
                       style: textTheme.bodyMedium?.copyWith(
                         color: isLan ? AppTheme.accent(context) : AppTheme.textLight(context),
                       ),
@@ -132,11 +133,11 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
               Switch(
                 value: isLan,
                 activeThumbColor: AppTheme.accent(context),
-                onChanged: isConnected ? null : (_) => _saveSettings(settings, lanSharing: !isLan),
+                onChanged: canEdit ? (_) => _saveSettings(settings, lanSharing: !isLan) : null,
               ),
             ],
           ),
-          if (isLan) ...[
+          if (isLan || sharing) ...[
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -153,13 +154,13 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text(
+                      Expanded(child: Text(
                         ip,
                         style: textTheme.titleMedium?.copyWith(
                           fontFamily: 'monospace',
                           color: AppTheme.text(context),
                         ),
-                      ),
+                      )),
                       const SizedBox(width: 8),
                       InkWell(
                         onTap: () {
@@ -170,15 +171,22 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                         },
                         child: Icon(Icons.copy_rounded, size: 16, color: AppTheme.textLight(context)),
                       ),
+                      IconButton(
+                        tooltip: l10n.settingsRefresh,
+                        onPressed: _fetchLocalIp,
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(l10n.settingsSetupAnotherDeviceTitle,
                       style: textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context))),
                   const SizedBox(height: 4),
-                  _proxyLine(context, 'SOCKS5', ip, settings.lanSocksPort),
-                  const SizedBox(height: 2),
-                  _proxyLine(context, 'HTTP', ip, settings.lanHttpPort),
+                  for (final address in addresses.isEmpty ? ['...'] : addresses) ...[
+                    _proxyLine(context, 'SOCKS5', address, socksPort),
+                    const SizedBox(height: 2),
+                    _proxyLine(context, 'HTTP', address, httpPort),
+                  ],
                 ],
               ),
             ),
@@ -191,7 +199,7 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                     if (port != null && port > 0 && port < 65536) {
                       _saveSettings(settings, socksPort: port);
                     }
-                  }),
+                  }, enabled: canEdit),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -200,7 +208,7 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                     if (port != null && port > 0 && port < 65536) {
                       _saveSettings(settings, httpPort: port);
                     }
-                  }),
+                  }, enabled: canEdit),
                 ),
               ],
             ),
@@ -213,6 +221,7 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                     l10n.settingsLanUsernameLabel,
                     _userCtrl,
                     (v) => _saveSettings(settings, username: v.trim()),
+                    enabled: canEdit,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -223,6 +232,7 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
                     _passCtrl,
                     (v) => _saveSettings(settings, password: v),
                     obscurable: true,
+                    enabled: canEdit,
                   ),
                 ),
               ],
@@ -233,10 +243,10 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
               style: textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context)),
             ),
           ],
-          if (isConnected && isLan)
+          if (isConnected && (Platform.isMacOS || isLan))
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(l10n.settingsTurnOffToChange,
+              child: Text(Platform.isMacOS ? l10n.settingsCoreHint : l10n.settingsTurnOffToChange,
                   style: textTheme.bodySmall?.copyWith(color: AppTheme.orange(context))),
             ),
         ],
@@ -278,8 +288,9 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
     );
   }
 
-  Widget _textField(BuildContext context, String label, TextEditingController ctrl, ValueChanged<String> onSubmit, {bool obscurable = false}) {
+  Widget _textField(BuildContext context, String label, TextEditingController ctrl, ValueChanged<String> onSubmit, {bool obscurable = false, bool enabled = true}) {
     return TextField(
+      enabled: enabled,
       controller: ctrl,
       obscureText: obscurable && !_lanPassVisible,
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.text(context)),
@@ -314,8 +325,9 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
     );
   }
 
-  Widget _portField(BuildContext context, String label, TextEditingController ctrl, ValueChanged<String> onSubmit) {
+  Widget _portField(BuildContext context, String label, TextEditingController ctrl, ValueChanged<String> onSubmit, {bool enabled = true}) {
     return TextField(
+      enabled: enabled,
       controller: ctrl,
       keyboardType: TextInputType.number,
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.text(context)),
@@ -340,4 +352,3 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
     );
   }
 }
-

@@ -4900,6 +4900,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Authorize TUN for this account'**
   String get macosAuthorizeAccount;
+
+  /// No description provided for @macosWaitingNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for network to recover'**
+  String get macosWaitingNetwork;
+
+  /// No description provided for @macosRestoringNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Restoring previous network settings'**
+  String get macosRestoringNetwork;
+
+  /// No description provided for @macosRetryingNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting automatically'**
+  String get macosRetryingNetwork;
+
+  /// No description provided for @macosRecoveryPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic recovery paused; connect manually to retry'**
+  String get macosRecoveryPaused;
+
+  /// No description provided for @macosRetryRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry network restoration'**
+  String get macosRetryRecovery;
+
+  /// No description provided for @pingTimingWarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Warm connection'**
+  String get pingTimingWarm;
+
+  /// No description provided for @pingTimingCold.
+  ///
+  /// In en, this message translates to:
+  /// **'Full request'**
+  String get pingTimingCold;
+
+  /// No description provided for @pingTimingFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'First request'**
+  String get pingTimingFallback;
+
+  /// No description provided for @pingProbeDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Stage {stage}; elapsed {elapsed} ms / {budget} ms'**
+  String pingProbeDetails(String stage, int elapsed, int budget);
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

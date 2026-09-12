@@ -1063,5 +1063,15 @@
   "macosNetworkServiceTitle": "网络服务",
   "macosNetworkServiceHint": "Proxy 连接时无需管理员授权，并会自动切换系统代理。TUN 每个已安装版本需要授权一次。",
   "macosNetworkServiceMissing": "请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。",
-  "macosAuthorizeAccount": "授权当前账户使用 TUN"
+  "macosAuthorizeAccount": "授权当前账户使用 TUN",
+  "macosWaitingNetwork": "等待网络恢复",
+  "macosRestoringNetwork": "正在恢复原网络设置",
+  "macosRetryingNetwork": "正在自动重连",
+  "macosRecoveryPaused": "自动恢复已暂停，请手动连接重试",
+  "macosRetryRecovery": "重试恢复网络",
+  "pingTimingWarm": "复用连接",
+  "pingTimingCold": "完整请求",
+  "pingTimingFallback": "首次请求",
+  "pingProbeDetails": "阶段 {stage}；总耗时 {elapsed} ms / {budget} ms",
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
 }

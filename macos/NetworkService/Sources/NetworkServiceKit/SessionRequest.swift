@@ -13,6 +13,9 @@ public struct SessionRequest {
     public let blockIpv6Leak: Bool
     public let contextID: String?
     public let dnsAddress: String?
+    public let lan: LANConfiguration?
+    public var lanPorts: Set<Int> { lan?.ports ?? [] }
+    public var allListenerPorts: Set<Int> { Set([socksPort, httpPort, apiPort]).union(lanPorts) }
 
     public init(arguments: [String: Any]) throws {
         guard arguments["protocolVersion"] as? Int == ServicePaths.protocolVersion else { throw ServiceFailure("protocolMismatch", "Install matching application and network service versions.") }
@@ -28,6 +31,7 @@ public struct SessionRequest {
         socksPort = try port("socksPort"); httpPort = try port("httpPort"); apiPort = try port("apiPort")
         let ports = [socksPort, httpPort, apiPort]
         guard Set(ports).count == ports.count else { throw ServiceFailure("invalidPort", "Local ports must be distinct.") }
+        lan = try arguments["lan"].map { try LANConfiguration(arguments: $0, reservedPorts: Set(ports)) }
         guard let secret = arguments["apiSecret"] as? String, secret.count >= 16, secret.count <= 256 else { throw ServiceFailure("invalidRequest", "The local API requires a per-session secret.") }
         apiSecret = secret
         systemProxy = arguments["systemProxy"] as? Bool ?? true
@@ -47,7 +51,7 @@ public struct SessionRequest {
         for (name, text) in configs {
             guard !text.isEmpty, text.utf8.count <= 2 * 1024 * 1024 else { throw ServiceFailure("invalidConfiguration", "Core configuration is empty or too large.") }
             guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw ServiceFailure("invalidConfiguration", "Core configuration must be a JSON object.") }
-            try ConfigPolicy.validateJSON(object, core: name, mode: mode, ports: Set(ports), apiPort: apiPort, secret: secret)
+            try ConfigPolicy.validateJSON(object, core: name, mode: mode, ports: Set(ports), apiPort: apiPort, secret: secret, lan: lan)
         }
         configurations = configs
     }
@@ -95,7 +99,9 @@ public enum ConfigPolicy {
 
     /// File paths and executable hooks are not part of the privileged API.
     /// Rule process paths and HTTP URL paths are match/transport data, not files.
-    public static func validateJSON(_ root: [String: Any], core: String, mode: String, ports: Set<Int>, apiPort: Int, secret: String) throws {
+    public static func validateJSON(_ root: [String: Any], core: String, mode: String, ports: Set<Int>, apiPort: Int, secret: String, lan: LANConfiguration? = nil) throws {
+        let validationRoot = try lan.map { try LANPolicy.configurationForValidation(root, core: core, mode: mode, lan: $0) } ?? root
+        let allocatedPorts = ports.union(lan?.ports ?? [])
         var count = 0
         let forbidden: Set<String> = ["script", "scripts", "command", "commands", "exec", "externalui", "externaluiurl", "externaluidownloadurl", "geoxurl", "geoupdateinterval", "geodataupdateinterval", "geodataupdate", "externalcontrollerunix", "externalcontrollerpipe", "externalcontrollertls", "controllerunix", "workingdirectory", "directory", "dir", "tunfd", "filedescriptor", "certificatefile", "keyfile", "privatekeyfile", "publickeyfile", "masterkeylog", "keylog", "keylogwriter", "planet", "listeners", "tunnels", "output", "access", "error"]
         let pathExceptions: Set<String> = ["processpath", "processpathregex"]
@@ -135,13 +141,13 @@ public enum ConfigPolicy {
                                 let allowed: Set<String> = type == "tun" ? ["type", "tag", "address", "auto_route", "stack", "mtu", "strict_route"] : ["type", "tag", "listen", "listen_port", "users"]
                                 guard Set(inbound.keys).isSubset(of: allowed) else { throw ServiceFailure("unsafeConfiguration", "Unmanaged inbound options are not permitted.") }
                                 if type != "tun" {
-                                    guard ["127.0.0.1", "::1"].contains(inbound["listen"] as? String ?? ""), let port = inbound["listen_port"] as? Int, ports.contains(port) else { throw ServiceFailure("unsafeConfiguration", "A local inbound must declare its allocated loopback listener.") }
+                                    guard ["127.0.0.1", "::1"].contains(inbound["listen"] as? String ?? ""), let port = inbound["listen_port"] as? Int, allocatedPorts.contains(port) else { throw ServiceFailure("unsafeConfiguration", "A local inbound must declare its allocated loopback listener.") }
                                 }
                             } else {
                                 let allowed: Set<String> = ["tag", "listen", "port", "protocol", "settings", "sniffing"]
                                 guard ["socks", "http"].contains(inbound["protocol"] as? String ?? ""),
                                       Set(inbound.keys).isSubset(of: allowed), ["127.0.0.1", "::1"].contains(inbound["listen"] as? String ?? ""),
-                                      let port = inbound["port"] as? Int, ports.contains(port) else { throw ServiceFailure("unsafeConfiguration", "Embedded Xray may expose only plain local SOCKS/HTTP inbounds, without server transports or TLS.") }
+                                      let port = inbound["port"] as? Int, allocatedPorts.contains(port) else { throw ServiceFailure("unsafeConfiguration", "Embedded Xray may expose only plain local SOCKS/HTTP inbounds, without server transports or TLS.") }
                             }
                         }
                     }
@@ -184,9 +190,9 @@ public enum ConfigPolicy {
                     if ["externalcontroller", "externalcontrolleraddress"].contains(normalized) {
                         guard value as? String == "127.0.0.1:\(apiPort)" else { throw ServiceFailure("unsafeConfiguration", "The local control API must use the allocated loopback port.") }
                     }
-                    if normalized == "listenport", let number = value as? Int, !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected listener port.") }
-                    if normalized == "port", parents.contains("inbounds"), let number = value as? Int, !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected embedded listener port.") }
-                    if ["socksport", "mixedport", "redirport", "tproxyport"].contains(normalized), let number = value as? Int, number != 0 && !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected proxy port.") }
+                    if normalized == "listenport", let number = value as? Int, !allocatedPorts.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected listener port.") }
+                    if normalized == "port", parents.contains("inbounds"), let number = value as? Int, !allocatedPorts.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected embedded listener port.") }
+                    if ["socksport", "mixedport", "redirport", "tproxyport"].contains(normalized), let number = value as? Int, number != 0 && !allocatedPorts.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected proxy port.") }
                     // Only actual top-level proxy transport objects get this
                     // scope. A nested array/dictionary with the same names must
                     // not exempt filesystem paths elsewhere in the request.
@@ -219,7 +225,7 @@ public enum ConfigPolicy {
                 }
             }
         }
-        try walk(root, parents: [], depth: 0)
+        try walk(validationRoot, parents: [], depth: 0)
         if core == "keqrnel" {
             guard Set(root.keys).isSubset(of: ["log", "dns", "inbounds", "outbounds", "route", "experimental"]) else {
                 throw ServiceFailure("unsafeConfiguration", "Only the managed core routing configuration is permitted; auxiliary services and endpoints are disabled.")

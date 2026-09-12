@@ -28,6 +28,7 @@ class DesktopCapabilities {
       applicationRouting: true,
       globalHotkeys: true,
       loginStartup: true,
+      lanSharing: true,
     ),
     'windows' => const DesktopCapabilities(
       isDesktop: true,

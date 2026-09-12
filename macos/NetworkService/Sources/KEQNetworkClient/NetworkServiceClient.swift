@@ -21,8 +21,9 @@ public struct NetworkServiceError: LocalizedError {
 }
 
 private final class ResponseBox {
+    let method: String
     let completion: (Result<[String: Any], Error>) -> Void
-    init(_ completion: @escaping (Result<[String: Any], Error>) -> Void) { self.completion = completion }
+    init(method: String, _ completion: @escaping (Result<[String: Any], Error>) -> Void) { self.method = method; self.completion = completion }
     func receive(_ text: String) {
         let result: Result<[String: Any], Error>
         do {
@@ -30,12 +31,17 @@ private final class ResponseBox {
                 throw NetworkServiceError(code: "invalidResponse", message: "Invalid network service response.")
             }
             if envelope["ok"] as? Bool == true {
-                result = .success(envelope["result"] as? [String: Any] ?? [:])
+                guard let value = envelope["result"] as? [String: Any] else { throw NetworkServiceError(code: "invalidResponse", message: "Invalid network service result.") }
+                result = .success(value)
             } else {
-                let error = envelope["error"] as? [String: Any] ?? [:]
-                result = .failure(NetworkServiceError(response: error))
+                guard envelope["ok"] as? Bool == false, let error = envelope["error"] as? [String: Any], error["code"] is String else { throw NetworkServiceError(code: "invalidResponse", message: "Invalid network service error response.") }
+                let failure = NetworkServiceError(response: error)
+                result = .failure(NetworkServiceClient.classify(failure, method: method))
             }
-        } catch { result = .failure(error) }
+        } catch {
+            let failure = error as? NetworkServiceError ?? NetworkServiceError(code: "invalidResponse", message: "Cannot decode the network service response.")
+            result = .failure(NetworkServiceClient.classify(failure, method: method))
+        }
         DispatchQueue.main.async { self.completion(result) }
     }
 }
@@ -47,13 +53,21 @@ public final class NetworkServiceClient {
     public init() { connection = keq_client_create() }
     deinit { keq_client_destroy(connection) }
 
+    public static func classify(_ error: NetworkServiceError, method: String) -> NetworkServiceError {
+        if ["startSession", "startProxySession"].contains(method),
+           ["timeout", "serviceInterrupted", "serviceInvalidated", "serviceUnavailable", "invalidResponse"].contains(error.code) {
+            return NetworkServiceError(code: "requestOutcomeUnknown", message: "The start request lost its reply. Check the existing session before starting again.", stage: error.code)
+        }
+        return error
+    }
+
     public func call(method: String, arguments: [String: Any] = [:], completion: @escaping (Result<[String: Any], Error>) -> Void) {
         do {
             let data = try JSONSerialization.data(withJSONObject: ["method": method, "arguments": arguments])
             guard data.count <= 4 * 1024 * 1024, let json = String(data: data, encoding: .utf8) else {
                 throw NetworkServiceError(code: "invalidRequest", message: "Network request is too large.")
             }
-            let context = Unmanaged.passRetained(ResponseBox(completion)).toOpaque()
+            let context = Unmanaged.passRetained(ResponseBox(method: method, completion)).toOpaque()
             keq_client_call(connection, json, { response, context in
                 guard let context else { return }
                 let box = Unmanaged<ResponseBox>.fromOpaque(context).takeRetainedValue()

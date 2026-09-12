@@ -57,16 +57,27 @@ class ConfigGeneratorV2 {
     required int socksPort,
     String? resolvedServerIp,
     bool httpInbound = false,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
-    return jsonEncode(
-      _buildXrayConfig(
-        input,
-        settings,
-        resolvedServerIp: resolvedServerIp,
-        pingSocksPort: socksPort,
-        pingHttpInbound: httpInbound,
-      ),
+    final config = _buildXrayConfig(
+      input,
+      settings,
+      resolvedServerIp: resolvedServerIp,
+      pingSocksPort: socksPort,
+      pingHttpInbound: httpInbound,
     );
+    // A complete hand-written config retains its author's resolver choices.
+    // The explicit flag keeps Android's existing ping output unchanged.
+    if (desktopDns) {
+      final custom = CustomXrayConfig.tryParse(input.trim());
+      config['dns'] = custom?.authorDns ?? settings.xrayCore.buildBootstrapDnsBlock(
+        splitDirectDomains: splitDomainsAndIps(_parseRuleList(settings.directRules)).domains.isNotEmpty,
+        physicalBootstrapDns: physicalBootstrapDns,
+      );
+      config['log'] = {'loglevel': 'warning'};
+    }
+    return jsonEncode(config);
   }
 
   /// Запасной localhost-порт для временного ядра замера. Рабочий путь порт не

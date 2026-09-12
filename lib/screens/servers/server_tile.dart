@@ -120,6 +120,7 @@ class _ServerTile extends ConsumerWidget {
       pingMs: pingMs,
       lastTestedAt: lastTestedAt,
       pingColorType: pingColorType,
+      pingDiagnostics: ref.watch(pingDiagnosticsProvider.select((all) => all[server.id])),
       foreground: isActive
           ? (accent?.onContainer ?? scheme.onSecondaryContainer)
           : null,
@@ -731,4 +732,3 @@ String _vpnErrorStatusLabel(String? errorMessage, BuildContext context) {
     UiErrorKind.unknown => l10n.errorConnectionGeneric,
   };
 }
-

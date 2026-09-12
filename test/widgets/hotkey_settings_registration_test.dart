@@ -109,9 +109,11 @@ void main() {
     );
     await _frames(tester);
     await tester.ensureVisible(find.text('Advanced'));
+    await _frames(tester);
     await tester.tap(find.text('Advanced'));
     await _frames(tester);
     await tester.ensureVisible(find.text('Hotkeys'));
+    await _frames(tester);
     await tester.tap(find.text('Hotkeys'));
     await _frames(tester);
     return notifier;

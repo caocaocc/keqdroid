@@ -1063,5 +1063,15 @@
   "macosNetworkServiceTitle": "Сетевая служба",
   "macosNetworkServiceHint": "Proxy подключается и переключает системный прокси без прав администратора. Для TUN нужно разрешение один раз для установленной версии.",
   "macosNetworkServiceMissing": "Установите или обновите KEQDIS полным пакетом PKG, чтобы включить сетевую службу.",
-  "macosAuthorizeAccount": "Разрешить TUN этому аккаунту"
+  "macosAuthorizeAccount": "Разрешить TUN этому аккаунту",
+  "macosWaitingNetwork": "Waiting for network to recover",
+  "macosRestoringNetwork": "Restoring previous network settings",
+  "macosRetryingNetwork": "Reconnecting automatically",
+  "macosRecoveryPaused": "Automatic recovery paused; connect manually to retry",
+  "macosRetryRecovery": "Retry network restoration",
+  "pingTimingWarm": "Warm connection",
+  "pingTimingCold": "Full request",
+  "pingTimingFallback": "First request",
+  "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
 }

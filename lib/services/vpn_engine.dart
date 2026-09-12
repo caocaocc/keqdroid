@@ -1,3 +1,4 @@
+import '../tunnel/url_test_diagnostics.dart';
 // фасад над TunnelBackend: android (VpnService) и windows (Xray / Xray→sing-box).
 
 import '../tunnel/connection_mode.dart';
@@ -29,6 +30,7 @@ class VpnEngine {
   Stream<VpnState> get stateStream => _backend.stateStream;
 
   bool get usesMacOSNetworkService => _backend is MacOSTunnelBackend;
+  MacOSTunnelBackend? get macOSBackend => _backend is MacOSTunnelBackend ? _backend : null;
 
   void init() => _backend.init();
 
@@ -62,8 +64,8 @@ class VpnEngine {
     return null;
   }
 
-  Future<void> startSession(TunnelSessionRequest request) =>
-      _backend.startSession(request);
+  Future<void> startSession(TunnelSessionRequest request, {bool allowPermissionPrompt = true}) =>
+      macOSBackend?.startSession(request, allowPermissionPrompt: allowPermissionPrompt) ?? _backend.startSession(request);
 
   /// Android: TUN через VpnService, пакеты читает само ядро.
   Future<void> startVpn(
@@ -89,7 +91,7 @@ class VpnEngine {
 
   Future<
     List<
-      ({String id, bool success, int? latencyMs, String error, int? httpStatus})
+      ({String id, bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})
     >
   >
   xrayUrlTestBatch({
@@ -108,7 +110,7 @@ class VpnEngine {
     keepAlive: keepAlive,
   );
 
-  Future<({bool success, int? latencyMs, String error, int? httpStatus})>
+  Future<({bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})>
   xrayUrlTest({
     required String xrayConfig,
     required int socksPort,
@@ -131,6 +133,7 @@ class VpnEngine {
         latencyMs: null,
         error: 'null response',
         httpStatus: null,
+        diagnostics: null,
       );
     }
     final r = batch.first;
@@ -139,6 +142,7 @@ class VpnEngine {
       latencyMs: r.latencyMs,
       error: r.error,
       httpStatus: r.httpStatus,
+      diagnostics: r.diagnostics,
     );
   }
 

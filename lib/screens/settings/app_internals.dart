@@ -156,6 +156,7 @@ class _AppInternalsScreen extends ConsumerWidget {
       ExpressiveSectionHeader(l10n.settingsInternalsSession),
       ExpressiveGroup(children: _sessionRows(context, l10n, data.session)),
       if (Platform.isMacOS) const DesktopDnsNotice(showDetails: true),
+      if (Platform.isMacOS) const DesktopRecoveryNotice(showDetails: true),
     ];
   }
 

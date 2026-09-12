@@ -634,6 +634,29 @@ class XrayCoreSettings {
     };
   }
 
+  /// Desktop measurement needs only bootstrap DNS, without Geo/domain rules.
+  /// Use the same direct resolver selection and limits as a real connection.
+  Map<String, dynamic> buildBootstrapDnsBlock({
+    bool splitDirectDomains = false,
+    bool physicalBootstrapDns = false,
+  }) {
+    final custom = dnsUseCustom
+        ? xrayDnsServers(dnsServers).servers
+        : const <Map<String, dynamic>>[];
+    return {
+      'servers': [
+        if (!physicalBootstrapDns || dnsUseCustom)
+          for (final server in _bootstrapResolvers(
+            splitDirectDomains && dnsSplitDirectDomains && custom.length > 1
+                ? [custom.first] : custom,
+          )) _withDnsLimits(server),
+        _withDnsLimits({'address': 'localhost'}),
+      ],
+      'queryStrategy': 'UseIPv4',
+      if (dnsDisableCache) 'disableCache': true,
+    };
+  }
+
   /// Чем искать адрес самого сервера, в порядке опроса. Системный резолвер
   /// идёт после них и добавляется вызывающим.
   ///

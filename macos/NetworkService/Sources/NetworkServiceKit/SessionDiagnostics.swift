@@ -13,6 +13,10 @@ public enum SessionDiagnostics {
         for key in ["log", "error", "errorCode", "errorStage", "recoveryError"] {
             if let value = source[key] as? String { result[key] = value }
         }
+        for key in ["sessionId", "connectionMode", "helperEpoch"] {
+            if let value = source[key] as? String { result[key] = value }
+        }
+        if let pending = source["recoveryRequired"] as? Bool { result["recoveryRequired"] = pending }
         // Monitor-triggered cleanup still asks the client to reconnect. An
         // explicit stop cancels that request even when it retains the log.
         if !disconnected, let reconnect = source["requiresReconnect"] as? Bool {

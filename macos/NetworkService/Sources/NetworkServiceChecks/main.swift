@@ -24,6 +24,10 @@ if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--mihomo-tra
     print("Passed \(runMihomoTransportPathChecks()) Mihomo HTTP transport path checks (no network operations).")
     exit(0)
 }
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--lan-policy-only" {
+    print("Passed \(runLANPolicyChecks()) LAN policy checks (no network operations).")
+    exit(0)
+}
 if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--privileged-file-permissions",
    let uid = UInt32(CommandLine.arguments[2]), let gid = UInt32(CommandLine.arguments[3]) {
     print("Passed \(runPrivilegedFilePermissionChecks(uid: uid, gid: gid)) privileged file permission checks (temporary fixtures only).")
@@ -36,7 +40,9 @@ if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--file-creat
 
 var checks = 0
 checks += runMihomoTransportPathChecks()
+checks += runLANPolicyChecks()
 checks += runSecureCreationChecks()
+checks += runNetworkRecoveryChecks()
 func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
     guard condition() else { fputs("FAIL: \(label)\n", stderr); exit(1) }
     checks += 1
@@ -599,7 +605,7 @@ let stoppedDiagnostic = SessionDiagnostics.snapshot(failedDiagnostic, owner: dia
 expect(stoppedDiagnostic["status"] as? String == "disconnected", "diagnostics do not keep a stopped session active")
 expect(stoppedDiagnostic["log"] as? String == "last output", "failed startup log survives stop")
 expect(stoppedDiagnostic["errorStage"] as? String == "virtualDNS", "failure phase survives stop")
-expect(Set(stoppedDiagnostic.keys) == ["status", "log", "error", "errorCode", "errorStage"], "stopped diagnostics omit runtime secrets and session identifiers")
+expect(Set(stoppedDiagnostic.keys) == ["status", "log", "error", "errorCode", "errorStage", "sessionId"], "stopped diagnostics retain owner session identity but omit runtime secrets")
 expect(NSDictionary(dictionary: stoppedDiagnostic).isEqual(to: SessionDiagnostics.snapshot(stoppedDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)), "repeated stop preserves diagnostics")
 for caller in [ClientIdentity(uid: 502, gid: 20, connectionID: 10), ClientIdentity(uid: 501, gid: 20, connectionID: 11)] {
     expect(SessionDiagnostics.snapshot(failedDiagnostic, owner: diagnosticOwner, caller: caller).keys.sorted() == ["status"], "last diagnostics stay with original account and XPC connection")
@@ -617,7 +623,7 @@ expect(diagnosticFallback.code == "macos_network" && diagnosticFallback.details 
 let monitorDiagnostic: [String: Any] = ["status": "error", "errorCode": "network_changed", "requiresReconnect": true, "sessionId": "old"]
 let monitorRead = SessionDiagnostics.snapshot(monitorDiagnostic, owner: diagnosticOwner, caller: diagnosticOwner)
 expect(monitorRead["requiresReconnect"] as? Bool == true, "monitor reconnect request survives getSession diagnostics")
-expect(monitorRead["status"] as? String == "error" && monitorRead["sessionId"] == nil, "monitor diagnostics retain error without old session credentials")
+expect(monitorRead["status"] as? String == "error" && monitorRead["sessionId"] as? String == "old", "monitor diagnostics retain owner session identity without credentials")
 let monitorStopped = SessionDiagnostics.snapshot(monitorRead, owner: diagnosticOwner, caller: diagnosticOwner, disconnected: true)
 expect(monitorStopped["requiresReconnect"] == nil && monitorStopped["status"] as? String == "disconnected", "explicit stop clears automatic reconnect request")
 for caller in [ClientIdentity(uid: 502, gid: 20, connectionID: 10), ClientIdentity(uid: 501, gid: 20, connectionID: 11)] {

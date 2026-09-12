@@ -1063,5 +1063,15 @@
   "macosNetworkServiceTitle": "Netzwerkdienst",
   "macosNetworkServiceHint": "Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.",
   "macosNetworkServiceMissing": "Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.",
-  "macosAuthorizeAccount": "TUN für dieses Konto autorisieren"
+  "macosAuthorizeAccount": "TUN für dieses Konto autorisieren",
+  "macosWaitingNetwork": "Waiting for network to recover",
+  "macosRestoringNetwork": "Restoring previous network settings",
+  "macosRetryingNetwork": "Reconnecting automatically",
+  "macosRecoveryPaused": "Automatic recovery paused; connect manually to retry",
+  "macosRetryRecovery": "Retry network restoration",
+  "pingTimingWarm": "Warm connection",
+  "pingTimingCold": "Full request",
+  "pingTimingFallback": "First request",
+  "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
 }

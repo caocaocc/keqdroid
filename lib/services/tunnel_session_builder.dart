@@ -100,6 +100,14 @@ class TunnelSessionBuilder {
       mihomoConfig: mihomoConfig,
       socksPort: settings.localPort,
       httpPort: settings.httpPort,
+      lan: settings.lanSharing
+          ? LanProxySettings(
+              socksPort: settings.lanSocksPort,
+              httpPort: settings.lanHttpPort,
+              username: settings.lanUsername,
+              password: settings.lanPassword,
+            )
+          : null,
       singboxConfig: singboxConfig,
       excludePackages: excludePackages,
       includePackages: includePackages,

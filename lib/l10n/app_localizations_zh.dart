@@ -2520,4 +2520,33 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get macosAuthorizeAccount => '授权当前账户使用 TUN';
+
+  @override
+  String get macosWaitingNetwork => '等待网络恢复';
+
+  @override
+  String get macosRestoringNetwork => '正在恢复原网络设置';
+
+  @override
+  String get macosRetryingNetwork => '正在自动重连';
+
+  @override
+  String get macosRecoveryPaused => '自动恢复已暂停，请手动连接重试';
+
+  @override
+  String get macosRetryRecovery => '重试恢复网络';
+
+  @override
+  String get pingTimingWarm => '复用连接';
+
+  @override
+  String get pingTimingCold => '完整请求';
+
+  @override
+  String get pingTimingFallback => '首次请求';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return '阶段 $stage；总耗时 $elapsed ms / $budget ms';
+  }
 }

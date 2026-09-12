@@ -26,23 +26,38 @@ static const char *transportError = "{\"ok\":false,\"error\":{\"code\":\"service
 @interface KEQConnection : NSObject
 @property(nonatomic, strong) xpc_connection_t connection;
 @property(nonatomic, strong) dispatch_queue_t queue;
+@property(nonatomic) BOOL invalidated;
+@property(nonatomic) BOOL destroyed;
+@property(nonatomic) NSUInteger generation;
 @end
 @implementation KEQConnection
 @end
 
+static BOOL clientConnect(KEQConnection *client) {
+    client.connection = xpc_connection_create_mach_service(serviceName, client.queue, XPC_CONNECTION_MACH_SERVICE_PRIVILEGED);
+    if (!client.connection) return NO;
+    client.invalidated = NO;
+    const NSUInteger generation = ++client.generation;
+    __weak KEQConnection *weakClient = client;
+    xpc_connection_set_event_handler(client.connection, ^(xpc_object_t event) {
+        KEQConnection *current = weakClient;
+        if (current.generation == generation && event == XPC_ERROR_CONNECTION_INVALID) current.invalidated = YES;
+        // INTERRUPTED retains the XPC connection; libxpc reconnects it. A
+        // mutation whose reply was lost is never replayed by this bridge.
+    });
+    xpc_connection_resume(client.connection);
+    return YES;
+}
 void *keq_client_create(void) {
     KEQConnection *client = [KEQConnection new];
     client.queue = dispatch_queue_create("io.github.caocaocc.keqdroid.client", DISPATCH_QUEUE_SERIAL);
-    client.connection = xpc_connection_create_mach_service(serviceName, client.queue, XPC_CONNECTION_MACH_SERVICE_PRIVILEGED);
-    if (!client.connection) return NULL;
-    xpc_connection_set_event_handler(client.connection, ^(xpc_object_t event) { (void)event; });
-    xpc_connection_resume(client.connection);
+    if (!clientConnect(client)) return NULL;
     return (__bridge_retained void *)client;
 }
 void keq_client_destroy(void *opaque) {
     if (!opaque) return;
     KEQConnection *client = CFBridgingRelease(opaque);
-    xpc_connection_cancel(client.connection);
+    dispatch_async(client.queue, ^{ client.destroyed = YES; xpc_connection_cancel(client.connection); });
 }
 void keq_client_call(void *opaque, const char *json, keq_reply_callback callback, void *context) {
     if (!opaque) { callback(transportError, context); return; }
@@ -51,11 +66,21 @@ void keq_client_call(void *opaque, const char *json, keq_reply_callback callback
     xpc_dictionary_set_string(request, "json", json);
     __block BOOL completed = NO;
     dispatch_async(client.queue, ^{
+        if (client.destroyed) { callback(transportError, context); return; }
+        // Only a new explicit call creates a replacement for an INVALID
+        // connection. The failed request is not recursively retried.
+        if (client.invalidated && !clientConnect(client)) { callback(transportError, context); return; }
+        const NSUInteger generation = client.generation;
         xpc_connection_send_message_with_reply(client.connection, request, client.queue, ^(xpc_object_t reply) {
             if (completed) return;
             completed = YES;
             const char *response = xpc_get_type(reply) == XPC_TYPE_DICTIONARY ? xpc_dictionary_get_string(reply, "json") : NULL;
-            callback(response ?: transportError, context);
+            if (response) callback(response, context);
+            else if (reply == XPC_ERROR_CONNECTION_INTERRUPTED) callback("{\"ok\":false,\"error\":{\"code\":\"serviceInterrupted\",\"message\":\"The network service connection was interrupted. Check session state before retrying.\"}}", context);
+            else if (reply == XPC_ERROR_CONNECTION_INVALID) {
+                if (client.generation == generation) client.invalidated = YES;
+                callback("{\"ok\":false,\"error\":{\"code\":\"serviceInvalidated\",\"message\":\"The network service connection is invalid. Check service status before retrying.\"}}", context);
+            } else callback(transportError, context);
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), client.queue, ^{
             if (completed) return;
@@ -159,7 +184,7 @@ void keq_server_reply(void *opaque, const char *json) {
     xpc_dictionary_set_string(response, "json", json);
     xpc_connection_send_message(reply.connection, response);
 }
-int keq_server_start(const char *requirement, const char *app_path, keq_request_callback callback, void *context) {
+int keq_server_start(const char *requirement, const char *app_path, keq_request_callback callback, keq_disconnect_callback disconnected, void *context) {
     NSString *req = @(requirement), *app = @(app_path);
     dispatch_queue_t queue = dispatch_queue_create("io.github.caocaocc.keqdroid.server", DISPATCH_QUEUE_SERIAL);
     xpc_connection_t listener = xpc_connection_create_mach_service(serviceName, queue, XPC_CONNECTION_MACH_SERVICE_LISTENER);
@@ -174,8 +199,8 @@ int keq_server_start(const char *requirement, const char *app_path, keq_request_
         gid_t gid = xpc_connection_get_egid(peer);
         __block BOOL validatedBundle = NO;
         xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
-            if (xpc_get_type(event) == XPC_TYPE_ERROR) {
-                callback("{\"method\":\"clientDisconnected\",\"arguments\":{}}", uid, gid, clientID, NULL, context);
+            if (event == XPC_ERROR_CONNECTION_INVALID) {
+                if (disconnected) disconnected(uid, gid, clientID, context);
                 return;
             }
             if (xpc_get_type(event) != XPC_TYPE_DICTIONARY) return;
@@ -392,6 +417,38 @@ int keq_port_available(uint16_t port) {
     int result = bind(fd, (struct sockaddr *)&address, sizeof(address));
     close(fd);
     return result == 0;
+}
+int keq_lan_port_available(uint16_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    struct sockaddr_in address = {0};
+    address.sin_family = AF_INET; address.sin_len = sizeof(address);
+    address.sin_addr.s_addr = htonl(INADDR_ANY); address.sin_port = htons(port);
+    int result = bind(fd, (struct sockaddr *)&address, sizeof(address));
+    if (!result) result = listen(fd, 1);
+    close(fd);
+    return result == 0;
+}
+// Inspect only this session's process. A loopback listener or another process
+// using the same port cannot satisfy the advertised LAN sharing capability.
+int keq_process_lan_listener(pid_t pid, uint16_t port) {
+    int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+    if (bytes <= 0 || bytes > 1024 * 1024) return 0;
+    struct proc_fdinfo *fds = calloc(1, (size_t)bytes);
+    if (!fds) return 0;
+    int count = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, bytes) / (int)sizeof(*fds);
+    int result = 0;
+    for (int i = 0; i < count; ++i) {
+        if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+        struct socket_fdinfo info = {0};
+        if (proc_pidfdinfo(pid, fds[i].proc_fd, PROC_PIDFDSOCKETINFO, &info, sizeof(info)) != sizeof(info)) continue;
+        if (info.psi.soi_kind != SOCKINFO_TCP || info.psi.soi_family != AF_INET) continue;
+        const struct tcp_sockinfo *tcp = &info.psi.soi_proto.pri_tcp;
+        if (tcp->tcpsi_state == TSI_S_LISTEN && ntohs((uint16_t)tcp->tcpsi_ini.insi_lport) == port &&
+            tcp->tcpsi_ini.insi_laddr.ina_46.i46a_addr4.s_addr == htonl(INADDR_ANY)) { result = 1; break; }
+    }
+    free(fds);
+    return result;
 }
 static int removeContents(int fd, unsigned depth) {
     if (depth > 128) { errno = ELOOP; return -1; }

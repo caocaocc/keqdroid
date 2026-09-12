@@ -33,6 +33,10 @@ do {
         service.submit(json: String(cString: json), identity: ClientIdentity(uid: uid, gid: gid, connectionID: connection)) { response in
             keq_server_reply(reply, response)
         }
+    }, { uid, gid, connection, context in
+        guard let context else { return }
+        Unmanaged<NetworkService>.fromOpaque(context).takeUnretainedValue()
+            .clientDisconnected(identity: ClientIdentity(uid: uid, gid: gid, connectionID: connection))
     }, context)
     guard status == 0 else { throw ServiceFailure("serviceRegistrationFailed", "Cannot register the launchd Mach service (\(status)).") }
     service.startMonitoring()
