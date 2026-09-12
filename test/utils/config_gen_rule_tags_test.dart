@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
+import 'package:keqdroid/models/xray_core_settings.dart';
 import 'package:keqdroid/utils/config_gen.dart';
 import 'package:keqdroid/utils/socks5_credentials.dart';
 
@@ -10,6 +11,12 @@ import 'package:keqdroid/utils/socks5_credentials.dart';
 /// этому тегу дебаг-экран «Соединения» показывает правило. Без тега в логе только
 /// «taking detour [proxy]» — куда ушло, но не почему.
 const _server = 'vless://uuid@example.com:443?type=tcp&security=none#demo';
+
+// Existing behavior fixtures use the pre-China DNS/routing defaults.
+const _legacySettings = AppSettings(
+  directRules: 'ru, yandex.ru, vk.com',
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
+);
 
 List<Map<String, dynamic>> _rules(String config) =>
     (((jsonDecode(config) as Map)['routing'] as Map)['rules'] as List)
@@ -54,7 +61,7 @@ void main() {
   test('tagging does not disturb the rule bodies', () {
     final rules = _rules(ConfigGeneratorV2.generateConfig(
       _server,
-      const AppSettings(proxyRules: 'youtube.com'),
+      _legacySettings.copyWith(proxyRules: 'youtube.com'),
     ));
     final proxyRule =
         rules.firstWhere((r) => r['ruleTag'] == 'proxy-domains');
@@ -78,7 +85,7 @@ void main() {
     // Каждый DNS-запрос устройства = отдельное TCP до сервера. Пачка из
     // семи запросов выносила лимит новых соединений на стороне сервера.
     test('порт 53 уходит в dns-аутбаунд, а не в туннель', () {
-      final config = ConfigGeneratorV2.generateConfig(_server, const AppSettings());
+      final config = ConfigGeneratorV2.generateConfig(_server, _legacySettings);
       final dns = _rules(config).firstWhere((r) => r['ruleTag'] == 'dns-out');
       expect(dns['port'], '53');
       expect(dns['network'], 'tcp,udp');
@@ -94,7 +101,7 @@ void main() {
     test('перехват стоит ПОСЛЕ запрета входа в LAN-инбаунды', () {
       final rules = _rules(ConfigGeneratorV2.generateConfig(
         _server,
-        const AppSettings(lanSharing: true),
+        _legacySettings.copyWith(lanSharing: true),
       ));
       expect(
         rules.indexWhere((r) => r['ruleTag'] == 'lan-deny'),
@@ -109,7 +116,7 @@ void main() {
     test('адрес сервера резолвится локально, DoH уходит в туннель', () {
       final dns = dnsBlock(ConfigGeneratorV2.generateConfig(
         'vless://uuid@vpn.example.net:443?type=tcp&security=none#demo',
-        const AppSettings(),
+        _legacySettings,
       ));
       final servers = (dns['servers'] as List).cast<Map<String, dynamic>>();
       final bootstrap = servers
@@ -141,7 +148,7 @@ void main() {
     test('сервер по IP не плодит bootstrap-запись — резолвить нечего', () {
       final dns = dnsBlock(ConfigGeneratorV2.generateConfig(
         'vless://uuid@203.0.113.9:443?type=tcp&security=none#demo',
-        const AppSettings(),
+        _legacySettings,
       ));
       final servers = (dns['servers'] as List).cast<Map<String, dynamic>>();
       expect(
@@ -160,7 +167,7 @@ void main() {
       ]) {
         final dns = dnsBlock(ConfigGeneratorV2.generateConfig(
           _server,
-          AppSettings(finalOutbound: mode),
+          _legacySettings.copyWith(finalOutbound: mode),
         ));
         expect(
           (dns['servers'] as List).cast<Map<String, dynamic>>()
@@ -174,7 +181,7 @@ void main() {
     test('в ping-конфиге ни правила, ни аутбаунда нет', () {
       final config = ConfigGeneratorV2.generatePingConfig(
         _server,
-        const AppSettings(),
+        _legacySettings,
         socksPort: 28150,
       );
       expect(outbounds(config).any((o) => o['tag'] == 'dns-out'), isFalse);
@@ -196,7 +203,7 @@ void main() {
     test('vision + глобал-прокси: QUIC уходит в block до proxy-правил', () {
       final rules = _rules(ConfigGeneratorV2.generateConfig(
         vision,
-        const AppSettings(proxyRules: 'youtube.com'),
+        _legacySettings.copyWith(proxyRules: 'youtube.com'),
       ));
       final quic = rules.firstWhere((r) => r['ruleTag'] == 'block-quic');
       expect(quic['network'], 'udp');
@@ -211,7 +218,7 @@ void main() {
     test('без vision правило не появляется — QUIC там работает', () {
       final rules = _rules(ConfigGeneratorV2.generateConfig(
         _server,
-        const AppSettings(),
+        _legacySettings,
       ));
       expect(rules.any((r) => r['ruleTag'] == 'block-quic'), isFalse);
     });
@@ -219,7 +226,7 @@ void main() {
     test('флоу -udp443 умеет UDP/443 сам, его не режем', () {
       final rules = _rules(ConfigGeneratorV2.generateConfig(
         vision.replaceAll('xtls-rprx-vision', 'xtls-rprx-vision-udp443'),
-        const AppSettings(),
+        _legacySettings,
       ));
       expect(rules.any((r) => r['ruleTag'] == 'block-quic'), isFalse);
     });
@@ -227,7 +234,7 @@ void main() {
     test('«остальное — direct»: чужой QUIC не наше дело', () {
       final rules = _rules(ConfigGeneratorV2.generateConfig(
         vision,
-        const AppSettings(finalOutbound: AppSettings.finalOutboundDirect),
+        _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundDirect),
       ));
       expect(rules.any((r) => r['ruleTag'] == 'block-quic'), isFalse);
     });
@@ -236,7 +243,7 @@ void main() {
   test('ping config stays untagged (log level none, nothing reads it)', () {
     final rules = _rules(ConfigGeneratorV2.generatePingConfig(
       _server,
-      const AppSettings(proxyRules: 'youtube.com'),
+      _legacySettings.copyWith(proxyRules: 'youtube.com'),
       socksPort: 28150,
     ));
     expect(rules.every((r) => !r.containsKey('ruleTag')), isTrue);

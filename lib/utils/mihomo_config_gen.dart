@@ -605,6 +605,36 @@ class MihomoConfigGen {
   }) {
     final core = settings.xrayCore;
     final servers = dnsServers(core);
+    final directDomains = splitDomainsAndIps(_parseList(settings.directRules)).domains;
+    final splitCustom = core.dnsUseCustom && core.dnsSplitDirectDomains &&
+        directDomains.isNotEmpty && servers.length > 1 &&
+        _parseList(core.dnsServers).where((raw) => _dnsAddress(raw) != null).length > 1;
+    final directServer = servers.first;
+    final policy = <String, dynamic>{};
+    if (splitCustom) {
+      for (final raw in directDomains) {
+        final rule = raw.trim().toLowerCase();
+        if (rule.startsWith('geosite:')) {
+          policy[rule] = [directServer];
+        } else if (rule.startsWith('full:')) {
+          policy[rule.substring(5)] = [directServer];
+        } else if (!rule.startsWith('regexp:')) {
+          var domain = rule.startsWith('domain:') ? rule.substring(7).trim() : rule;
+          if (domain.startsWith('.')) domain = domain.substring(1);
+          if (domain.isNotEmpty) policy['+.$domain'] = [directServer];
+        }
+      }
+      // Reserved LAN names remain local. '*' matches one label in mihomo's
+      // domain trie; it does not match arbitrary multi-label enterprise zones.
+      for (final local in ['+.local', '+.home.arpa', '*']) {
+        policy[local] = ['system'];
+      }
+    }
+    // The first DNS resolves node/bootstrap names directly. A hostname-only
+    // first entry is bootstrapped by the OS, never the foreign proxy DNS.
+    final bootstrap = splitCustom
+        ? [_hasIpAddress(directServer) ? directServer : 'system']
+        : bootstrapNameservers(core);
     // Тот же смысл, что у `proxiedDoh` в xray-генераторе: перехват провайдером
     // имеет значение только там, где «всё остальное» и так идёт в туннель.
     final globalProxy =
@@ -630,12 +660,16 @@ class MihomoConfigGen {
         // туннеле.
         'fake-ip-filter': fakeIpFilter,
       },
-      'default-nameserver': bootstrapNameservers(core),
+      'default-nameserver': bootstrap,
       // Адрес прокси-сервера — отдельной записью и всегда мимо туннеля (у xray
       // это `bootstrapDomains` со `skipFallback`): запрос по нему через прокси
       // означал бы круг.
-      'proxy-server-nameserver': servers,
-      'nameserver': servers,
+      'proxy-server-nameserver': splitCustom
+          ? [directServer == 'system'
+              ? 'system' : '${directServer.split('#').first}#DIRECT']
+          : servers,
+      'nameserver': splitCustom ? servers.skip(1).toList() : servers,
+      if (policy.isNotEmpty) 'nameserver-policy': policy,
       // `respect-rules` гоняет DNS ядра по тем же правилам, что и трафик, то
       // есть в туннель. Ровно то, что делает схема `https://` вместо
       // `https+local://` у xray.

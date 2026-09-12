@@ -7,6 +7,7 @@ import '../tunnel/app_routing_mode.dart';
 import '../tunnel/connection_mode.dart';
 import '../tunnel/tunnel_session_request.dart';
 import '../tunnel/vpn_backend.dart';
+import '../utils/geo_dat_reader.dart';
 import '../utils/singbox_tun_config.dart';
 
 /// собирает TunnelSessionRequest под платформу и режим proxy/tun
@@ -50,6 +51,7 @@ class TunnelSessionBuilder {
     List<String> excludeProcesses = const [],
     List<String> includeProcesses = const [],
     List<String> managedProcessPaths = const [],
+    List<GeoDomain> chinaDnsDomains = const [],
     String? serverName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     ConnectionMode? modeOverride,
@@ -65,7 +67,8 @@ class TunnelSessionBuilder {
     // В proxy-режиме sing-box не нужен (системный прокси).
     String? singboxConfig;
     if ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
-        mode == ConnectionMode.tun) {
+        mode == ConnectionMode.tun &&
+        vpnBackend == VpnBackend.xray) {
       final managed = switch (routingMode) {
         AppRoutingMode.onlySelected => includeProcesses,
         AppRoutingMode.allExceptSelected => excludeProcesses,
@@ -77,6 +80,7 @@ class TunnelSessionBuilder {
         socksPassword: socksPassword,
         serverIpToExclude: resolvedServerIp,
         settings: settings,
+        chinaDnsDomains: chinaDnsDomains,
         managedProcessNames: managed,
         managedProcessPaths: managedProcessPaths,
         routingMode: routingMode,

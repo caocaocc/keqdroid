@@ -10,6 +10,7 @@ import 'package:keqdroid/utils/socks5_credentials.dart';
 const _node =
     'vless://test-id@node.example.com:443?security=tls&sni=decoy.example.com';
 const _settings = AppSettings(
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
   directRules: 'corp.example',
   proxyRules: 'proxied.example',
   blockedRules: 'blocked.example',
@@ -173,6 +174,8 @@ void main() {
 
   test('physical bootstrap keeps DNS query and cache options', () {
     const core = XrayCoreSettings(
+        dnsUseCustom: false,
+        dnsServers: XrayCoreSettings.legacyDnsServers,
       dnsQueryStrategy: 'UseIP',
       dnsDisableCache: true,
     );

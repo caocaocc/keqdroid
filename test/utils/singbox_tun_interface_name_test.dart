@@ -4,6 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 /// Имя TUN-интерфейса задаём САМИ на всех платформах.
 ///
 /// Иначе sing-box берёт `tun.CalculateInterfaceName("")` → «tun0», а wintun
@@ -20,7 +23,7 @@ void main() {
         socksUsername: 'u',
         socksPassword: 'p',
         serverIpToExclude: '203.0.113.10',
-        settings: const AppSettings(),
+        settings: _legacySettings,
         windows: true,
       ),
     ) as Map<String, dynamic>;

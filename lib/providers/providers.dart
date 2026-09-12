@@ -53,6 +53,7 @@ import '../utils/mihomo_config_gen.dart';
 import '../utils/proxy_chain.dart';
 import '../utils/routing_rules_fold.dart';
 import '../utils/singbox_outbounds.dart';
+import '../utils/geo_dat_reader.dart';
 import '../utils/singbox_tun_config.dart';
 import '../utils/socks5_credentials.dart';
 import '../utils/split_tunnel_routing.dart';

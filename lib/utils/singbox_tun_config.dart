@@ -4,6 +4,7 @@ import 'dart:io';
 import '../models/app_settings.dart';
 import '../models/tun_settings.dart';
 import '../tunnel/app_routing_mode.dart';
+import 'geo_dat_reader.dart';
 import 'process_name_utils.dart';
 import 'routing_entry.dart';
 
@@ -126,6 +127,7 @@ class SingBoxTunConfigGen {
     required String socksPassword,
     required String serverIpToExclude,
     required AppSettings settings,
+    List<GeoDomain> chinaDnsDomains = const [],
     List<String> managedProcessNames = const [],
     List<String> managedProcessPaths = const [],
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
@@ -157,6 +159,12 @@ class SingBoxTunConfigGen {
         .where((e) => e.isNotEmpty)
         .toList();
 
+    final splitCustomDns = usesSplitCustomDns(settings);
+    final customServers = [
+      for (final address in customDnsList(settings))
+        ?_singBoxDnsServerFromXray(address),
+    ];
+
     Map<String, dynamic> buildProxyDnsServer() {
       final customDns = customDnsList(settings);
 
@@ -173,16 +181,10 @@ class SingBoxTunConfigGen {
 
       if (customDns.isEmpty) return defaultDoh();
 
-      // Поле DNS хранит адреса в xray-синтаксисе (https+local://, tls://,
-      // quic://, tcp://, голый ip[:port]). sing-box же ждёт типизированный
-      // объект сервера, а не сырую xray-строку: если скормить её как есть,
-      // keqrnel падал на разборе конфига (exit code 2 — «ошибка подключения»).
-      // Берём первый переводимый адрес, а не просто первый: непереводимая
-      // строка в начале списка (localhost, fakedns) иначе отправляла в дефолт
-      // весь список, включая нормальный DoH следующей строкой.
-      for (final address in customDns) {
-        final server = _singBoxDnsServerFromXray(address);
-        if (server != null) return server;
+      // Preserve one-server behavior; splitting reserves the first usable
+      // address for direct domains and uses the second for everything else.
+      if (customServers.isNotEmpty) {
+        return customServers[splitCustomDns ? 1 : 0];
       }
       return defaultDoh();
     }
@@ -564,29 +566,45 @@ class SingBoxTunConfigGen {
       'password': socksPassword,
     };
 
-    // Direct-домены резолвим системным резолвером (local-dns): он знает
-    // корпоративные/LAN-зоны сплит-DNS, которых у публичного DoH нет — иначе
-    // домен из Direct-списка получает NXDOMAIN, хотя маршрут для него direct.
-    // hijack-dns при этом перехватывает все запросы (анти-leak, см. dns.final),
-    // поэтому выбор резолвера возможен только здесь, через dns.rules.
-    //
-    // Под тем же выключателем, что и у xray: настройка обещает одно поведение
-    // на оба ядра, а раньше здесь сплит стоял всегда — выключить его в TUN не
-    // получалось вовсе.
+    // The traffic geo rules still belong to embedded Xray. Only DNS needs
+    // the typed CN domains because sing-box cannot read Xray's geosite.dat.
     final directDnsParts = classifyDomains(directDomains);
+    if (needsChinaDnsDomains(settings)) {
+      if (chinaDnsDomains.isEmpty) {
+        throw const FormatException('geosite:cn DNS data is missing or empty');
+      }
+      for (final entry in chinaDnsDomains) {
+        switch (entry.type) {
+          case GeoDomainType.full:
+            directDnsParts.domain.add(entry.value);
+          case GeoDomainType.domain:
+            directDnsParts.domainSuffix.add(entry.value);
+          case GeoDomainType.regex:
+            directDnsParts.domainRegex.add(entry.value);
+          case GeoDomainType.plain:
+            directDnsParts.domainRegex.add(RegExp.escape(entry.value));
+        }
+      }
+    }
     final dnsRules = <Map<String, dynamic>>[
+      if (splitCustomDns)
+        {
+          'domain_suffix': ['local', 'home.arpa'],
+          'domain_regex': [r'^[^.]+$'],
+          'server': 'local-dns',
+        },
       if (settings.xrayCore.dnsSplitDirectDomains &&
           (directDnsParts.domain.isNotEmpty ||
               directDnsParts.domainSuffix.isNotEmpty ||
               directDnsParts.domainRegex.isNotEmpty))
         {
           if (directDnsParts.domain.isNotEmpty)
-            'domain': directDnsParts.domain,
+            'domain': directDnsParts.domain.toSet().toList(),
           if (directDnsParts.domainSuffix.isNotEmpty)
-            'domain_suffix': directDnsParts.domainSuffix,
+            'domain_suffix': directDnsParts.domainSuffix.toSet().toList(),
           if (directDnsParts.domainRegex.isNotEmpty)
-            'domain_regex': directDnsParts.domainRegex,
-          'server': 'local-dns',
+            'domain_regex': directDnsParts.domainRegex.toSet().toList(),
+          'server': splitCustomDns ? 'direct-dns' : 'local-dns',
         },
     ];
 
@@ -628,6 +646,7 @@ class SingBoxTunConfigGen {
       'dns': {
         'servers': [
           {'tag': 'local-dns', 'type': 'local'},
+          if (splitCustomDns) {...customServers.first, 'tag': 'direct-dns'},
           buildProxyDnsServer(),
         ],
         if (dnsRules.isNotEmpty) 'rules': dnsRules,
@@ -674,20 +693,29 @@ class SingBoxTunConfigGen {
               .where((e) => e.isNotEmpty)
               .toList();
 
-  /// Что из этого списка в TUN не сработает.
-  ///
-  /// Резолвер тут ровно один: `dns.final` принимает один тег, а транспорта с
-  /// откатом на следующий сервер у ядра нет вовсе (реестр — udp/tcp/tls/https/
-  /// quic/h3/local/hosts/fakeip/dhcp). Поэтому работает первый пригодный адрес,
-  /// а остальные строки — включая непереводимые (`localhost`, `fakedns`) —
-  /// молча не участвуют. У xray список опрашивается по очереди, так что разница
-  /// заметна, и вызывающий пишет её в лог.
+  /// A split needs two usable addresses and a direct-domain rule, just as
+  /// Xray does. There is one transport per group, not a fallback pool.
+  static bool usesSplitCustomDns(AppSettings settings) =>
+      settings.xrayCore.dnsSplitDirectDomains &&
+      splitDomainsAndIps(settings.directRules.split(RegExp(r'[\r\n,]+')))
+          .domains.isNotEmpty &&
+      customDnsList(settings)
+          .where((address) => _singBoxDnsServerFromXray(address) != null)
+          .length > 1;
+
+  static bool needsChinaDnsDomains(AppSettings settings) =>
+      usesSplitCustomDns(settings) &&
+      settings.directRules.split(RegExp(r'[\r\n,]+')).any(
+        (rule) => rule.trim().toLowerCase() == 'geosite:cn',
+      );
+
+  /// Extra or unsupported addresses cannot participate in sing-box DNS.
   static List<String> ignoredCustomDnsServers(AppSettings settings) {
-    var used = false;
+    var remaining = usesSplitCustomDns(settings) ? 2 : 1;
     final ignored = <String>[];
     for (final address in customDnsList(settings)) {
-      if (!used && _singBoxDnsServerFromXray(address) != null) {
-        used = true;
+      if (remaining > 0 && _singBoxDnsServerFromXray(address) != null) {
+        remaining--;
         continue;
       }
       ignored.add(address);

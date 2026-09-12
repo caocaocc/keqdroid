@@ -6,6 +6,7 @@ import '../core/app_logger.dart';
 import '../models/app_settings.dart';
 import '../tunnel/desktop_core_paths.dart';
 import '../utils/geo_asset_index.dart';
+import '../utils/geo_dat_reader.dart';
 import '../utils/geo_rule_sanitizer.dart';
 
 /// Находит geoip.dat/geosite.dat там же, где их читает ядро, и чистит по ним
@@ -14,6 +15,7 @@ class GeoAssetService {
   GeoAssetService._();
 
   static Future<GeoAssetIndex>? _cached;
+  static Future<List<GeoDomain>>? _chinaDns;
 
   /// Индекс кодов geo-баз. Кэшируется на процесс: файлы едут в сборке и в
   /// рантайме не меняются, а разбор дёргается на каждое подключение.
@@ -21,7 +23,27 @@ class GeoAssetService {
 
   /// Сбросить кэш индекса. Нужен после подмены базы на диске — иначе
   /// санитайзер продолжит судить о правилах по старому списку кодов.
-  static void invalidate() => _cached = null;
+  static void invalidate() {
+    _cached = null;
+    _chinaDns = null;
+  }
+
+  /// Only the CN DNS rule is expanded; routing continues to use geosite.dat.
+  /// Missing data must not silently send domestic queries to the other DNS.
+  static Future<List<GeoDomain>> chinaDnsDomains() =>
+      _chinaDns ??= _loadChinaDnsDomains();
+
+  static Future<List<GeoDomain>> _loadChinaDnsDomains() async {
+    final dir = await _geoDir();
+    if (dir == null) {
+      throw const FormatException('geosite:cn DNS database is unavailable');
+    }
+    final domains = await GeoDatReader.domains(File('$dir/geosite.dat'), 'cn');
+    if (domains.isEmpty) {
+      throw const FormatException('geosite:cn DNS data is missing or empty');
+    }
+    return List.unmodifiable(domains);
+  }
 
   /// Только для тестов: сбросить кэш.
   static void resetCacheForTests() => invalidate();
@@ -61,6 +83,7 @@ class GeoAssetService {
   /// единственный след, по которому можно понять, почему.
   static Future<AppSettings> sanitizeRules(AppSettings settings) async {
     final assets = await index();
+    requireChinaRules(settings, assets);
     final result = stripUnknownGeoTokens(settings, assets);
     if (result.dropped.isNotEmpty) {
       // Отдельная подсказка про урезанную базу: «правило исчезло» и «страны в
@@ -77,6 +100,28 @@ class GeoAssetService {
       );
     }
     return result.settings;
+  }
+
+  /// The China preset must never degrade silently on any core or platform.
+  /// Other unknown geo rules retain the existing sanitizer behavior.
+  static void requireChinaRules(AppSettings settings, GeoAssetIndex assets) {
+    final missing = <String>{};
+    for (final raw in [settings.directRules, settings.proxyRules, settings.blockedRules]) {
+      for (final token in raw.split(RegExp(r'[\r\n,]+'))) {
+        final match = RegExp(r'^(geoip|geosite):!?cn(?:@.*)?$')
+            .firstMatch(token.trim().toLowerCase());
+        if (match == null) continue;
+        final kind = match.group(1)!;
+        final codes = kind == 'geoip' ? assets.geoipCodes : assets.geositeCodes;
+        if (!codes.contains('cn')) missing.add('$kind:cn');
+      }
+    }
+    if (missing.isNotEmpty) {
+      throw FormatException(
+        'Required China routing database is missing or unreadable: '
+        '${missing.join(', ')}. Restore the bundled geo databases.',
+      );
+    }
   }
 
   /// Полная ли база стран сейчас на диске — по ней экран «Внутренности»

@@ -3,7 +3,7 @@
 //
 // Зачем: полная база v2fly несёт 263 страны и весит 23.5 МБ, из которых
 // us=5.0, au=3.3, nl=2.4, be=1.7, ch=1.2 — 58% файла. Дефолтным правилам
-// приложения нужны четыре кода на 0.6 МБ. В APK это разница между 4.8 МБ и
+// приложения нужны пять кодов. В APK это разница между 4.8 МБ и
 // примерно 150 КБ, а всё, чего не хватит пользователю, догружается по кнопке
 // (GeoBaseDownloader) поверх вшитой базы.
 //
@@ -18,7 +18,7 @@
 // Использование:
 //   dart run tool/geo_lite.dart
 //   dart run tool/geo_lite.dart --source assets/bin/windows/geoip.dat \
-//       --out assets/geo/geoip-lite.dat --codes private,ru,telegram,refilter
+//       --out assets/geo/geoip-lite.dat --codes private,cn,ru,telegram,refilter
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -32,7 +32,7 @@ import 'package:keqdroid/utils/geo_dat_reader.dart';
 /// участия пользователя. Иначе свежая установка молча потеряет часть
 /// маршрутизации: неизвестный код санитайзер выбрасывает до генерации конфига,
 /// потому что xray на нём роняет конфиг целиком.
-const _defaultCodes = ['private', 'ru', 'telegram', 'refilter'];
+const _defaultCodes = ['private', 'cn', 'ru', 'telegram', 'refilter'];
 
 const _defaultSource = 'assets/bin/windows/geoip.dat';
 const _defaultOut = 'assets/geo/geoip-lite.dat';

@@ -5,6 +5,9 @@ import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/tunnel/app_routing_mode.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 String _routeFinal(String json) =>
     (jsonDecode(json) as Map<String, dynamic>)['route']['final'] as String;
 
@@ -35,13 +38,13 @@ String _gen(AppSettings settings,
 void main() {
   group('SingBoxTunConfigGen route.final', () {
     test('allProxy + proxy → final proxy', () {
-      expect(_routeFinal(_gen(const AppSettings())), 'proxy');
+      expect(_routeFinal(_gen(_legacySettings)), 'proxy');
     });
 
     test('allProxy + direct → final direct (bypass)', () {
       expect(
         _routeFinal(_gen(
-            const AppSettings(finalOutbound: AppSettings.finalOutboundDirect))),
+            _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundDirect))),
         'direct',
       );
     });
@@ -49,19 +52,19 @@ void main() {
     test('allProxy + block → final block', () {
       expect(
         _routeFinal(_gen(
-            const AppSettings(finalOutbound: AppSettings.finalOutboundBlock))),
+            _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundBlock))),
         'block',
       );
     });
 
     test('kill switch on proxy final forces block + adds proxy catch rule', () {
-      final json = _gen(const AppSettings(killSwitch: true));
+      final json = _gen(_legacySettings.copyWith(killSwitch: true));
       expect(_routeFinal(json), 'block');
       expect(_hasKillSwitchCatch(_rules(json)), isTrue);
     });
 
     test('kill switch does not hijack a direct final (no forced block)', () {
-      final json = _gen(const AppSettings(
+      final json = _gen(_legacySettings.copyWith(
         killSwitch: true,
         finalOutbound: AppSettings.finalOutboundDirect,
       ));
@@ -70,7 +73,7 @@ void main() {
     });
 
     test('kill switch leaves a block final as block, no proxy catch rule', () {
-      final json = _gen(const AppSettings(
+      final json = _gen(_legacySettings.copyWith(
         killSwitch: true,
         finalOutbound: AppSettings.finalOutboundBlock,
       ));
@@ -81,7 +84,7 @@ void main() {
     test('onlySelected split keeps final direct regardless of finalOutbound',
         () {
       final json = _gen(
-        const AppSettings(finalOutbound: AppSettings.finalOutboundProxy),
+        _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundProxy),
         routingMode: AppRoutingMode.onlySelected,
       );
       expect(_routeFinal(json), 'direct');
@@ -89,7 +92,7 @@ void main() {
 
     test('allExceptSelected split keeps final proxy (per-app mode governs)', () {
       final json = _gen(
-        const AppSettings(finalOutbound: AppSettings.finalOutboundDirect),
+        _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundDirect),
         routingMode: AppRoutingMode.allExceptSelected,
       );
       expect(_routeFinal(json), 'proxy');

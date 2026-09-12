@@ -335,12 +335,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Затем выкидываем geoip:/geosite:-коды, которых нет в поставляемых базах:
       // xray на неизвестном коде не игнорирует правило, а падает на разборе
       // всего конфига, и подключение умирает с «SOCKS port not ready».
-      var settings = await GeoAssetService.sanitizeRules(
-        applyRoutingRules(
-          await ref.read(storageProvider).getSettings(),
-          await ref.read(storageProvider).getRules(),
-        ),
+      final requestedSettings = applyRoutingRules(
+        await ref.read(storageProvider).getSettings(),
+        await ref.read(storageProvider).getRules(),
       );
+      var settings = await GeoAssetService.sanitizeRules(requestedSettings);
       // Свои DNS-адреса, которых ядро не исполнит, генератор выбрасывает молча
       // (иначе они не «не сработают», а не дадут ядру подняться). Пользователю
       // это видно только по тому, что его DNS «не применился» — говорим прямо.
@@ -722,8 +721,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         );
       }
 
-      // Свои DNS в десктопном TUN исполняет sing-box, а он держит ровно один
-      // резолвер (см. [SingBoxTunConfigGen.ignoredCustomDnsServers]). На xray
+      // Свои DNS в десктопном TUN исполняет sing-box: один адрес на группу
+      // DNS (см. [SingBoxTunConfigGen.ignoredCustomDnsServers]). На xray
       // тот же список опрашивается по очереди, поэтому «у меня три сервера, а
       // работает первый» — не поломка, но и не то, о чём можно молчать.
       if (!mihomoPicked &&
@@ -732,15 +731,23 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         final ignored = SingBoxTunConfigGen.ignoredCustomDnsServers(settings);
         if (ignored.isNotEmpty) {
           AppLogger.instance.warn(
-            'Custom DNS: in TUN mode the core runs a single resolver, so only '
-            'the first usable address is in effect. Not used: '
+            'Custom DNS: TUN uses one address per DNS group. Not used: '
             '${ignored.join(', ')}.',
           );
         }
       }
 
+      // Check the original rules: sanitization must not hide a missing CN
+      // database when the user asked to split domestic DNS.
+      final chinaDnsDomains = !mihomoPicked && !Platform.isAndroid &&
+              connectionMode == ConnectionMode.tun &&
+              SingBoxTunConfigGen.needsChinaDnsDomains(requestedSettings)
+          ? await GeoAssetService.chinaDnsDomains()
+          : const <GeoDomain>[];
+
       final session = TunnelSessionBuilder.build(
         settings: settings,
+        chinaDnsDomains: chinaDnsDomains,
         xrayConfig: xrayConfig,
         vpnBackend: vpnBackend,
         mihomoConfig: mihomoConfig,

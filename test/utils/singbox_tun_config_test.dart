@@ -8,6 +8,12 @@ import 'package:keqdroid/models/xray_core_settings.dart';
 import 'package:keqdroid/tunnel/app_routing_mode.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Existing routing regression fixtures retain the pre-China defaults.
+const _legacySettings = AppSettings(
+  directRules: 'ru, yandex.ru, vk.com',
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
+);
+
 List<Map<String, dynamic>> _rules(String json) {
   final map = jsonDecode(json) as Map<String, dynamic>;
   return ((map['route'] as Map)['rules'] as List)
@@ -29,7 +35,7 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(),
+      settings: _legacySettings,
     );
     final map = jsonDecode(json) as Map<String, dynamic>;
     final inbound = (map['inbounds'] as List).first as Map<String, dynamic>;
@@ -62,7 +68,7 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(),
+      settings: _legacySettings,
       appProcessName: 'keqdroid.exe',
     ));
 
@@ -89,7 +95,7 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(),
+      settings: _legacySettings,
       managedProcessNames: const ['chrome.exe'],
       routingMode: AppRoutingMode.onlySelected,
     );
@@ -108,7 +114,7 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(),
+      settings: _legacySettings,
       managedProcessNames: const ['Telegram.exe'],
       routingMode: AppRoutingMode.onlySelected,
     ));
@@ -128,7 +134,7 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(),
+      settings: _legacySettings,
       managedProcessNames: const ['chrome.exe'],
       routingMode: AppRoutingMode.allExceptSelected,
     );
@@ -162,7 +168,7 @@ void main() {
   test('default proxy-dns is DoH over the tunnel (port 53 may be blocked)', () {
     // Многие VPS режут исходящий 53 → UDP/TCP DNS через прокси умирали с EOF,
     // «сайты не грузятся» при живом туннеле. DoH:443 неотличим от HTTPS.
-    final proxyDns = proxyDnsFor(const AppSettings());
+    final proxyDns = proxyDnsFor(_legacySettings);
     expect(proxyDns['type'], 'https');
     expect(proxyDns['server'], '1.1.1.1');
     expect(proxyDns['detour'], 'proxy');
@@ -171,6 +177,7 @@ void main() {
   test('custom plain-IP DNS rides TCP (never UDP) over the SOCKS detour', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(dnsUseCustom: true, dnsServers: '8.8.8.8'),
       ),
     );
@@ -179,15 +186,17 @@ void main() {
     expect(proxyDns['detour'], 'proxy');
   });
 
-  test('default custom DNS (https+local://) becomes a valid DoH server, not raw tcp', () {
+  test('legacy custom DNS (https+local://) becomes a valid DoH server, not raw tcp', () {
     // Регрессия: раньше xray-адрес скармливался sing-box как {type:tcp,
     // server:"https+local://1.1.1.1/dns-query"} — невалидный адрес ронял
     // keqrnel (exit code 2) при любом включении кастомного DNS.
     final proxyDns = proxyDnsFor(
       AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
-          dnsServers: const XrayCoreSettings().dnsServers, // дефолт из UI
+          dnsSplitDirectDomains: false,
+          dnsServers: XrayCoreSettings.legacyDnsServers,
         ),
       ),
     );
@@ -205,6 +214,7 @@ void main() {
     // всем подряд, и настройка молча не работала.
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'https+local://9.9.9.9/dns-query',
@@ -219,6 +229,7 @@ void main() {
   test('без +local резолвер остаётся в туннеле', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'https://9.9.9.9/dns-query',
@@ -234,18 +245,19 @@ void main() {
     expect(
       SingBoxTunConfigGen.ignoredCustomDnsServers(
         const AppSettings(
+          directRules: 'ru, yandex.ru, vk.com',
           xrayCore: XrayCoreSettings(
             dnsUseCustom: true,
             dnsServers: 'localhost\nhttps://1.1.1.1/dns-query\ntls://9.9.9.9',
           ),
         ),
       ),
-      // localhost непереводим и идёт в список сам, 1.1.1.1 занимает
-      // единственное место, tls остаётся не у дел.
-      ['localhost', 'tls://9.9.9.9'],
+      // localhost is unsupported; the two usable addresses fill the direct
+      // and general DNS groups.
+      ['localhost'],
     );
     expect(
-      SingBoxTunConfigGen.ignoredCustomDnsServers(const AppSettings()),
+      SingBoxTunConfigGen.ignoredCustomDnsServers(_legacySettings),
       isEmpty,
     );
   });
@@ -253,23 +265,31 @@ void main() {
   test('«отключить кэш DNS» доезжает до ядра', () {
     expect(
       dnsBlockFor(const AppSettings(
-        xrayCore: XrayCoreSettings(dnsDisableCache: true),
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: false,
+          dnsDisableCache: true,
+        ),
       ))['disable_cache'],
       isTrue,
     );
     expect(
-      dnsBlockFor(const AppSettings()).containsKey('disable_cache'),
+      dnsBlockFor(_legacySettings).containsKey('disable_cache'),
       isFalse,
     );
   });
 
   test('«отдельный резолвер для direct» выключается', () {
-    const direct = AppSettings(directRules: 'corp.example');
+    const direct = AppSettings(
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),directRules: 'corp.example');
     expect(dnsBlockFor(direct)['rules'], isNotNull);
     expect(
       dnsBlockFor(const AppSettings(
         directRules: 'corp.example',
-        xrayCore: XrayCoreSettings(dnsSplitDirectDomains: false),
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: false,
+          dnsSplitDirectDomains: false,
+        ),
       ))['rules'],
       isNull,
     );
@@ -278,6 +298,7 @@ void main() {
   test('plain https:// DoH keeps host and path', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'https://dns.google/dns-query',
@@ -292,6 +313,7 @@ void main() {
   test('tls:// (DoT) maps to a tls server with port', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'tls://1.1.1.1:853',
@@ -309,6 +331,7 @@ void main() {
     // unknown transport type: quic», ядро не стартует, TUN не поднимается.
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'quic://dns.adguard-dns.com:784',
@@ -326,6 +349,7 @@ void main() {
     // дефолт весь список, включая нормальный DoH следующей строкой.
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'localhost\nhttps+local://9.9.9.9/dns-query',
@@ -339,6 +363,7 @@ void main() {
   test('plain host:port DNS rides TCP with the given port', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: '8.8.8.8:5353',
@@ -353,6 +378,7 @@ void main() {
   test('non-networkable resolver (localhost) falls back to default DoH', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(
           dnsUseCustom: true,
           dnsServers: 'localhost',
@@ -369,7 +395,9 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(killSwitch: true),
+      settings: const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),killSwitch: true),
     );
     final map = jsonDecode(json) as Map<String, dynamic>;
     final rules = _rules(json);
@@ -389,7 +417,9 @@ void main() {
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
-      settings: const AppSettings(killSwitch: true),
+      settings: const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),killSwitch: true),
       routingMode: AppRoutingMode.onlySelected,
     );
     final map = jsonDecode(json) as Map<String, dynamic>;
@@ -409,7 +439,7 @@ void main() {
   }
 
   test('default tun inbound is gvisor/9000', () {
-    final inbound = tunInboundFor(const AppSettings());
+    final inbound = tunInboundFor(_legacySettings);
     expect(inbound['stack'], 'gvisor');
     expect(inbound['mtu'], 9000);
     expect(inbound['auto_route'], isTrue);
@@ -420,6 +450,8 @@ void main() {
 
   test('tun settings flow into the inbound (stack, mtu, udp_timeout, EIN)', () {
     final inbound = tunInboundFor(const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       tun: TunSettings(
         stack: 'gvisor',
         mtu: 9000,
@@ -439,6 +471,8 @@ void main() {
   test('endpoint_independent_nat is dropped on the system stack', () {
     // system-стек его не поддерживает — не шлём ядру бессмысленный ключ
     final inbound = tunInboundFor(const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       tun: TunSettings(stack: 'system', endpointIndependentNat: true),
     ));
     expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
@@ -446,11 +480,15 @@ void main() {
 
   test('strict route on/off is honored on platforms that implement it', () {
     final on = tunInboundFor(const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       tun: TunSettings(strictRoute: TunSettings.strictRouteOn),
     ));
     expect(on['strict_route'], Platform.isMacOS ? isNull : isTrue);
 
     final off = tunInboundFor(const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       tun: TunSettings(strictRoute: TunSettings.strictRouteOff),
     ));
     expect(off['strict_route'], Platform.isMacOS ? isNull : isFalse);
@@ -458,6 +496,8 @@ void main() {
 
   test('auto_route can be disabled for manual route management', () {
     final inbound = tunInboundFor(const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       tun: TunSettings(autoRoute: false),
     ));
     expect(inbound['auto_route'], isFalse);
@@ -466,6 +506,7 @@ void main() {
   test('custom DNS is ignored while dnsUseCustom is off', () {
     final proxyDns = proxyDnsFor(
       const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
         xrayCore: XrayCoreSettings(dnsUseCustom: false, dnsServers: '8.8.8.8'),
       ),
     );
@@ -489,6 +530,7 @@ void main() {
     // достижимы только через dns.rules → local-dns; без правила домен из
     // Direct-списка получает NXDOMAIN от публичного DoH при direct-маршруте.
     final dns = dnsFor(const AppSettings(
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
       directRules: 'ru, .corp.example, full:host.exact, 10.0.0.0/8',
     ));
 
@@ -505,7 +547,8 @@ void main() {
   });
 
   test('no dns.rules emitted when the direct list has no domains', () {
-    final dns = dnsFor(const AppSettings(directRules: '10.0.0.0/8'));
+    final dns = dnsFor(const AppSettings(
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),directRules: '10.0.0.0/8'));
     expect(dns.containsKey('rules'), isFalse);
     expect(dns['final'], 'proxy-dns');
   });
@@ -517,6 +560,7 @@ void main() {
       socksPassword: 'p',
       serverIpToExclude: '1.2.3.4',
       settings: const AppSettings(
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
         directRules: 'yandex.ru\n192.168.50.0/24\nvk.com',
       ),
     ));

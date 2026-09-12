@@ -5,7 +5,7 @@ restoring both artifacts from this workflow run. KEQDIS_MACOS_CONTRACT_REQUIRED=
 makes missing inputs a failure. No Swift/Flutter compilation, core execution,
 service connection, or network operation occurs in this test.
 
-For a local run, export the two macos_*session_contract_test.dart suites to a
+For a local run, export the macos_*contract_test.dart suites to a
 fresh directory, then pass that directory and a freshly compiled
 keqdis-network-tests binary through the same environment variables.
 """
@@ -25,6 +25,7 @@ REQUEST_NAMES = tuple(
 ) + tuple(f"xray-tun-dns-{name}" for name in (
     "default", "doh-direct", "doh-proxy", "bare-ip",
 ))
+REQUEST_NAMES += ("xray-tun-china-default", "mihomo-tun-china-default")
 
 
 class MacOSSessionContractTests(unittest.TestCase):

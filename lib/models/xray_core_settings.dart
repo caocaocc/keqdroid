@@ -111,8 +111,8 @@ class XrayCoreSettings {
   const XrayCoreSettings({
     this.logLevel = 'warning',
     this.routingDomainStrategy = 'AsIs',
-    this.dnsUseCustom = false,
-    this.dnsServers = 'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query',
+    this.dnsUseCustom = true,
+    this.dnsServers = defaultDnsServers,
     this.dnsQueryStrategy = 'UseIPv4',
     this.dnsDisableCache = false,
     this.dnsSplitDirectDomains = true,
@@ -141,6 +141,11 @@ class XrayCoreSettings {
     this.sniffingEnabled = true,
     this.sniffingRouteOnly = false,
   });
+
+  static const defaultDnsServers =
+      'tcp+local://223.5.5.5:53\nhttps://1.1.1.1/dns-query';
+  static const legacyDnsServers =
+      'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query';
 
   static const logLevels = ['none', 'error', 'warning', 'info', 'debug'];
 
@@ -247,7 +252,13 @@ class XrayCoreSettings {
       };
 
   factory XrayCoreSettings.fromJson(Map<String, dynamic>? json) {
-    if (json == null) return const XrayCoreSettings();
+    // Missing fields belong to an existing installation/backup, not a new one.
+    if (json == null) {
+      return const XrayCoreSettings(
+        dnsUseCustom: false,
+        dnsServers: legacyDnsServers,
+      );
+    }
     String str(String k, String def) => (json[k] as String?)?.trim().isNotEmpty == true
         ? (json[k] as String).trim()
         : def;
@@ -273,8 +284,7 @@ class XrayCoreSettings {
       routingDomainStrategy:
           routingDomainStrategies.contains(domain) ? domain : 'AsIs',
       dnsUseCustom: b('dnsUseCustom', false),
-      dnsServers: json['dnsServers'] as String? ??
-          'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query',
+      dnsServers: json['dnsServers'] as String? ?? legacyDnsServers,
       dnsQueryStrategy: dnsQueryStrategies.contains(query) ? query : 'UseIPv4',
       dnsDisableCache: b('dnsDisableCache', false),
       dnsSplitDirectDomains: b('dnsSplitDirectDomains', true),
@@ -518,11 +528,27 @@ class XrayCoreSettings {
         ? xrayDnsServers(dnsServers).servers
         : const <Map<String, dynamic>>[];
 
+    final splitCustom = dnsSplitDirectDomains &&
+        directDomains.isNotEmpty &&
+        custom.length > 1;
+    if (splitCustom) {
+      // Reserved local names stay with the OS; public DNS cannot resolve LAN
+      // names. Do not guess or rewrite enterprise scoped DNS zones.
+      servers.add({
+        'address': 'localhost',
+        'domains': ['domain:local', 'domain:home.arpa', r'regexp:^[^.]+$'],
+        'skipFallback': true,
+        'finalQuery': true,
+      });
+    }
+
     if (bootstrapDomains.isNotEmpty) {
       // macOS TUN's localhost resolver uses the protected physical snapshot.
       // Skip automatic public DoH delays without replacing explicit user DNS.
       if (!physicalBootstrapDns || dnsUseCustom) {
-        for (final server in _bootstrapResolvers(custom)) {
+        for (final server in _bootstrapResolvers(
+          splitCustom ? [custom.first] : custom,
+        )) {
           servers.add({
             ...server,
             'domains': bootstrapDomains,
@@ -545,7 +571,7 @@ class XrayCoreSettings {
       // вообще — всё, чего нет в Direct-списке, не резолвится ничем, и это
       // выглядит как «прописал свой DNS, и интернет пропал». С одним сервером
       // сплит и не нужен: он и так отвечает на всё, включая Direct-домены.
-      if (dnsSplitDirectDomains && directDomains.isNotEmpty && custom.length > 1) {
+      if (splitCustom) {
         servers.add({
           ...custom.first,
           'domains': directDomains,
