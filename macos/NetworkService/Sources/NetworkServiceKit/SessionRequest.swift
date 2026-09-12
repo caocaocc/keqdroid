@@ -54,6 +54,31 @@ public struct SessionRequest {
 }
 
 public enum ConfigPolicy {
+    private enum MihomoHTTPPathScope {
+        case scalar, list, xhttp
+    }
+
+    private static func mihomoHTTPPathScope(proxy: [String: Any], option: String) -> MihomoHTTPPathScope? {
+        let type = proxy["type"] as? String ?? ""
+        let network = proxy["network"] as? String ?? ""
+        switch (option, network) {
+        case ("ws-opts", "ws") where ["vless", "vmess", "trojan"].contains(type): return .scalar
+        case ("h2-opts", "h2") where ["vless", "vmess"].contains(type): return .scalar
+        case ("http-opts", "http") where ["vless", "vmess"].contains(type): return .list
+        case ("xhttp-opts", "xhttp") where type == "vless": return .xhttp
+        default: return nil
+        }
+    }
+
+    private static func validateHTTPURLPath(_ value: Any, label: String) throws {
+        guard let path = value as? String, path.utf8.count <= 2048,
+              path.isEmpty || path.hasPrefix("/"),
+              let decoded = path.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw ServiceFailure("unsafeConfiguration", "\(label) must be an HTTP URL path of at most 2048 bytes without control characters.")
+        }
+    }
+
     public static func validateIPv6Protection(configurations: [String: String], core: String, required: Bool) throws {
         guard required else { return }
         guard core != "mihomo", let text = configurations["keqrnel"],
@@ -82,7 +107,8 @@ public enum ConfigPolicy {
             if let value = value as? [String: Any] { return !value.isEmpty }
             return true
         }
-        func walk(_ node: Any, parents: [String], depth: Int, isTopLevelDNSServer: Bool = false) throws {
+        func walk(_ node: Any, parents: [String], depth: Int, isTopLevelDNSServer: Bool = false,
+                  isTopLevelMihomoProxy: Bool = false, mihomoPaths: MihomoHTTPPathScope? = nil) throws {
             count += 1
             guard depth < 48, count < 100_000 else { throw ServiceFailure("invalidConfiguration", "Configuration nesting or size exceeds limits.") }
             if let dictionary = node as? [String: Any] {
@@ -122,11 +148,17 @@ public enum ConfigPolicy {
                     let httpPath = normalized == "path" && ["wssettings", "httpupgrade", "httpupgradesettings", "xhttpsettings", "http", "httpupgrade", "ws", "grpc", "transport", "httpheaders", "httpsettings"].contains(parent)
                     let dnsHTTPPath = isTopLevelDNSServer && dictionary["type"] as? String == "https" && key == "path"
                     if dnsHTTPPath {
-                        guard let path = value as? String, path.utf8.count <= 2048,
-                              path.isEmpty || path.hasPrefix("/"),
-                              let decoded = path.removingPercentEncoding,
-                              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-                            throw ServiceFailure("unsafeConfiguration", "DoH path must be an HTTP URL path of at most 2048 bytes without control characters.")
+                        try validateHTTPURLPath(value, label: "DoH path")
+                    }
+                    let mihomoHTTPPath = mihomoPaths != nil && key == "path"
+                    if mihomoHTTPPath {
+                        if mihomoPaths == .list {
+                            guard let paths = value as? [String] else {
+                                throw ServiceFailure("unsafeConfiguration", "Mihomo HTTP paths must be an array of URL path strings.")
+                            }
+                            for path in paths { try validateHTTPURLPath(path, label: "Mihomo HTTP path") }
+                        } else {
+                            try validateHTTPURLPath(value, label: "Mihomo HTTP path")
                         }
                     }
                     let providerPath = normalized == "path" && (parents.contains("proxy-providers") || parents.contains("rule-providers"))
@@ -142,7 +174,7 @@ public enum ConfigPolicy {
                         throw ServiceFailure("unsafeConfiguration", "TLS/SSH keys and certificates must be inline PEM, not filesystem references.")
                     }
                     if normalized == "type", value as? String == "file", parents.contains("proxy-providers") || parents.contains("rule-providers") { throw ServiceFailure("unsafeConfiguration", "External provider files cannot be read by the privileged core.") }
-                    if meaningful(value) && !pathExceptions.contains(normalized) && !httpPath && !dnsHTTPPath && !providerPath && !nonPathContainer && (forbidden.contains(normalized) || normalized.hasSuffix("path") || normalized.hasSuffix("file") || normalized.hasSuffix("filepath")) {
+                    if meaningful(value) && !pathExceptions.contains(normalized) && !httpPath && !dnsHTTPPath && !mihomoHTTPPath && !providerPath && !nonPathContainer && (forbidden.contains(normalized) || normalized.hasSuffix("path") || normalized.hasSuffix("file") || normalized.hasSuffix("filepath")) {
                         throw ServiceFailure("unsafeConfiguration", "File or executable option is not allowed in privileged configuration: \(key)")
                     }
                     if ["listen", "listenaddress", "bindaddress"].contains(normalized), let address = value as? String {
@@ -155,14 +187,26 @@ public enum ConfigPolicy {
                     if normalized == "listenport", let number = value as? Int, !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected listener port.") }
                     if normalized == "port", parents.contains("inbounds"), let number = value as? Int, !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected embedded listener port.") }
                     if ["socksport", "mixedport", "redirport", "tproxyport"].contains(normalized), let number = value as? Int, number != 0 && !ports.contains(number) { throw ServiceFailure("unsafeConfiguration", "Unexpected proxy port.") }
-                    try walk(value, parents: parents + [key], depth: depth + 1)
+                    // Only actual top-level proxy transport objects get this
+                    // scope. A nested array/dictionary with the same names must
+                    // not exempt filesystem paths elsewhere in the request.
+                    let childPaths = isTopLevelMihomoProxy
+                        ? mihomoHTTPPathScope(proxy: dictionary, option: key)
+                        : (mihomoPaths == .xhttp && key == "download-settings" ? .scalar : nil)
+                    if childPaths != nil, !(value is [String: Any]) {
+                        throw ServiceFailure("unsafeConfiguration", "Mihomo HTTP transport options must be an object.")
+                    }
+                    try walk(value, parents: parents + [key], depth: depth + 1, mihomoPaths: childPaths)
                 }
             } else if let array = node as? [Any] {
                 // Arrays do not add parent names. Depth and direct-item scope
                 // prevent nested arrays or a dictionary named servers from
                 // turning a filesystem path into a permitted DoH URL path.
                 let dnsServers = core == "keqrnel" && parents == ["dns", "servers"] && depth == 2
-                for item in array { try walk(item, parents: parents, depth: depth + 1, isTopLevelDNSServer: dnsServers) }
+                let mihomoProxies = core == "mihomo" && parents == ["proxies"] && depth == 1
+                for item in array {
+                    try walk(item, parents: parents, depth: depth + 1, isTopLevelDNSServer: dnsServers, isTopLevelMihomoProxy: mihomoProxies)
+                }
             } else if let value = node as? String {
                 let lower = value.lowercased()
                 let field = parents.last?.lowercased() ?? ""

@@ -20,8 +20,13 @@ if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--dns-diagno
     print("Passed \(runTUNDNSDiagnosticsChecks()) asynchronous TUN DNS diagnostic checks (no network operations).")
     exit(0)
 }
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--mihomo-transport-paths-only" {
+    print("Passed \(runMihomoTransportPathChecks()) Mihomo HTTP transport path checks (no network operations).")
+    exit(0)
+}
 
 var checks = 0
+checks += runMihomoTransportPathChecks()
 func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
     guard condition() else { fputs("FAIL: \(label)\n", stderr); exit(1) }
     checks += 1

@@ -26,6 +26,11 @@ REQUEST_NAMES = tuple(
     "default", "doh-direct", "doh-proxy", "bare-ip",
 ))
 REQUEST_NAMES += ("xray-tun-china-default", "mihomo-tun-china-default")
+REQUEST_NAMES += tuple(
+    f"mihomo-{mode}-transport-{network}"
+    for network in ("xhttp", "ws", "http", "h2")
+    for mode in ("proxy", "tun")
+)
 
 
 class MacOSSessionContractTests(unittest.TestCase):
