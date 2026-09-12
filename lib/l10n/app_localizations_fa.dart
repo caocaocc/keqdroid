@@ -9,6 +9,24 @@ class AppLocalizationsFa extends AppLocalizations {
   AppLocalizationsFa([String locale = 'fa']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'متصل است، اما درخواست‌های DNS ناموفق بود';
+
+  @override
+  String get macosTunDnsOk => 'درخواست‌های DNS موفق بود';
+
+  @override
+  String get macosTunDnsChecking => 'در حال بررسی DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'دامنه‌ها و IPهای سرزمین اصلی چین مستقیم متصل می‌شوند.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'چین مستقیم';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -477,7 +495,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXrayDnsCustom => 'سرورهای DNS دلخواه';
 
   @override
-  String get settingsXrayDnsCustomHint => 'هر آدرس در یک خط (DoH، DoT یا ساده)';
+  String get settingsXrayDnsCustomHint => 'هر خط یک آدرس. +local مستقیماً متصل می‌شود؛ سایر آدرس‌ها از قوانین پروکسی پیروی می‌کنند.';
 
   @override
   String get settingsXrayDnsServers => 'سرورهای DNS';
@@ -486,7 +504,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'DNS جدا برای دامنه‌های مستقیم';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'برای دامنه‌های فهرست مستقیم از سرور اول استفاده می‌کند';
+  String get settingsXrayDnsSplitDirectHint => 'با دو یا چند سرور: اولی برای دامنه‌های مستقیم و نام گره و بقیه برای سایر دامنه‌ها. Xray TUN دسکتاپ فقط از دو مورد اول استفاده می‌کند. نام‌های محلی از DNS سیستم استفاده می‌کنند؛ DNS تفکیک‌شده سازمانی خودکار شناسایی نمی‌شود.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'استراتژی پرس‌وجو';
@@ -552,7 +570,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'شناسایی فقط برای مسیریابی';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'پیش‌فرض: DoH کلادفلر و گوگل';
+  String get settingsXrayDnsDefaultNote => 'وقتی DNS سفارشی خاموش است: Cloudflare و Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'تنظیم دقیق';
@@ -1821,7 +1839,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsResetConfirmAction => 'بازنشانی';
 
   @override
-  String get settingsResetRoutingConfirm => 'این کار قوانین مسیریابی پیش‌فرض را برمی‌گرداند و فهرست‌های مستقیم، پروکسی و مسدود شما را پاک می‌کند. برگشت‌پذیر نیست.';
+  String get settingsResetRoutingConfirm => 'قوانین داخلی بازیابی و فهرست‌های مستقیم/پروکسی/مسدود حذف می‌شوند و سایر ترافیک از پروکسی عبور می‌کند. این کار قابل بازگشت نیست.';
 
   @override
   String get settingsXrayResetConfirm => 'این کار تنظیمات پیش‌فرض هستهٔ Xray، TUN و پورت‌های محلی را برمی‌گرداند. برگشت‌پذیر نیست.';

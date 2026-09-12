@@ -9,6 +9,24 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Подключено, но DNS-запросы не удались';
+
+  @override
+  String get macosTunDnsOk => 'DNS-запросы успешны';
+
+  @override
+  String get macosTunDnsChecking => 'Проверка DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Домены и IP материкового Китая идут напрямую.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'Китай напрямую';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -479,7 +497,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Свои DNS-серверы';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Один адрес на строку (DoH, DoT или обычный)';
+  String get settingsXrayDnsCustomHint => 'Один адрес на строку. +local — напрямую; остальные следуют правилам прокси.';
 
   @override
   String get settingsXrayDnsServers => 'DNS-серверы';
@@ -488,7 +506,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'Отдельный резолвер для direct-доменов';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'Первый сервер — для доменов из списка direct';
+  String get settingsXrayDnsSplitDirectHint => 'При двух и более серверах: первый для прямых доменов и адреса узла, остальные для других доменов. Xray TUN на ПК использует первые два. Локальные имена — через системный DNS; корпоративный split DNS автоматически не определяется.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'Стратегия запросов';
@@ -554,7 +572,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Sniffing route only';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'По умолчанию: DoH Cloudflare и Google';
+  String get settingsXrayDnsDefaultNote => 'Без своих DNS: Cloudflare и Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Тонкая настройка';
@@ -1823,7 +1841,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsResetConfirmAction => 'Сбросить';
 
   @override
-  String get settingsResetRoutingConfirm => 'Вернутся встроенные правила маршрутизации, ваши списки direct/proxy/block будут удалены. Действие нельзя отменить.';
+  String get settingsResetRoutingConfirm => 'Будут восстановлены встроенные правила, удалены ваши списки direct/proxy/block, а остальной трафик направлен через прокси. Это нельзя отменить.';
 
   @override
   String get settingsXrayResetConfirm => 'Настройки ядра Xray, TUN и локальные порты вернутся к значениям по умолчанию. Действие нельзя отменить.';

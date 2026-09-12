@@ -20,16 +20,21 @@ void main() {
       'trojan://test-password@node.example.com:443?sni=node.example.com';
   const awg =
       '[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAllowedIPs = 0.0.0.0/0\nEndpoint = node.example.com:51820';
-  const settings = AppSettings();
+  final settings = AppSettings.fromJson({});
   const context = MacOSNetworkContext(
     contextId: 'test-network',
     interfaceName: 'en0',
     dnsServers: ['192.168.1.1'],
   );
-  for (final core in VpnBackend.values) {
+  for (final scenario in [
+    (name: 'xray', core: VpnBackend.xray, source: link),
+    (name: 'mihomo', core: VpnBackend.mihomo, source: link),
+    (name: 'awg', core: VpnBackend.mihomo, source: awg),
+  ]) {
+    final core = scenario.core;
     for (final mode in ConnectionMode.values) {
       test(
-        '${core.name} ${mode.name} uses the real generator contract',
+        '${scenario.name} ${mode.name} uses the real generator contract',
         () async {
           Socks5Credentials().init('test-user', 'test-password');
           final request = TunnelSessionRequest(
@@ -39,7 +44,7 @@ void main() {
             httpPort: settings.httpPort,
             xrayConfig: core == VpnBackend.xray
                 ? ConfigGeneratorV2.generateConfig(
-                    link,
+                    scenario.source,
                     settings,
                     localInboundsNoAuth: mode == ConnectionMode.proxy,
                     physicalBootstrapDns:
@@ -49,10 +54,9 @@ void main() {
                         ),
                   )
                 : '',
-            awgConfig: core == VpnBackend.awg ? awg : null,
             mihomoConfig: core == VpnBackend.mihomo
                 ? MihomoConfigGen.generate(
-                    link,
+                    scenario.source,
                     settings,
                     socksPort: settings.localPort,
                     httpPort: settings.httpPort,
@@ -65,7 +69,7 @@ void main() {
                     localInboundsNoAuth: mode == ConnectionMode.proxy,
                   )
                 : null,
-            singboxConfig: mode == ConnectionMode.tun
+            singboxConfig: core == VpnBackend.xray && mode == ConnectionMode.tun
                 ? SingBoxTunConfigGen.generate(
                     localSocksPort: settings.localPort,
                     socksUsername: 'test-user',
@@ -74,22 +78,20 @@ void main() {
                     settings: settings,
                     windows: false,
                     macos: true,
-                    localSocksNoAuth: core == VpnBackend.awg,
                   )
                 : null,
           );
           final payload = MacOSSessionConfig.build(
             request: request,
-            sessionId: '${core.name}-${mode.name}',
+            sessionId: '${scenario.name}-${mode.name}',
             apiPort: 23000,
             apiSecret: 'test-secret-12345678',
-            wireproxyInfoPort: 23001,
             context: mode == ConnectionMode.tun ? context : null,
           );
           final configs = payload['configurations'] as Map;
           final normalized = _normalizedPayload(payload);
           final golden = File(
-            'test/fixtures/macos/${core.name}-${mode.name}.json',
+            'test/fixtures/macos/${scenario.name}-${mode.name}.json',
           );
           if (Platform.environment['UPDATE_MACOS_GOLDENS'] == '1') {
             await golden.parent.create(recursive: true);
@@ -100,13 +102,16 @@ void main() {
           expect(
             normalized,
             jsonDecode(await golden.readAsString()),
-            reason: 'macOS ${core.name}/${mode.name} configuration changed',
+            reason: 'macOS ${scenario.name}/${mode.name} configuration changed',
           );
-          expect(
-            configs.length,
-            core == VpnBackend.awg && mode == ConnectionMode.tun ? 2 : 1,
-          );
+          expect(configs.length, 1);
           expect(configs.values.join(), contains('node.example.com'));
+          expect(
+            payload['core'],
+            core == VpnBackend.xray ? 'keqrnel' : 'mihomo',
+          );
+          expect(configs.containsKey('wireproxy'), isFalse);
+          expect(payload.containsKey('wireproxyInfoPort'), isFalse);
           expect(payload['apiSecret'], 'test-secret-12345678');
           if (mode == ConnectionMode.tun) {
             expect(payload['contextId'], 'test-network');
@@ -124,7 +129,7 @@ void main() {
           if (export != null) {
             await Directory(export).create(recursive: true);
             await File(
-              '$export/${core.name}-${mode.name}.json',
+              '$export/${scenario.name}-${mode.name}.json',
             ).writeAsString(jsonEncode(payload));
           }
         },
@@ -139,7 +144,7 @@ Object? _normalizedPayload(Map<String, dynamic> payload) {
   const fixtureApp = '/Applications/KEQDIS.app/Contents';
   final canonicalPaths = [
     '$fixtureApp/MacOS/KEQDIS',
-    for (final name in ['keqrnel', 'mihomo', 'wireproxy']) ...[
+    for (final name in ['keqrnel', 'mihomo']) ...[
       '${MacOSCorePaths.installedRuntime}/bin/$name',
       '$fixtureApp/Resources/cores/$name',
     ],
@@ -166,9 +171,7 @@ Object? _normalizedPayload(Map<String, dynamic> payload) {
     ...payload,
     'configurations': {
       for (final entry in (payload['configurations'] as Map).entries)
-        entry.key: entry.key == 'wireproxy'
-            ? entry.value
-            : jsonDecode(entry.value as String),
+        entry.key: jsonDecode(entry.value as String),
     },
   });
 }

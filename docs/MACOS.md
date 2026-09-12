@@ -19,16 +19,16 @@
 | `tool/macos`、`tool/patches/macos` | 固定来源的 Darwin 核心、DNS 补丁、安装生命周期 |
 | `tool/package_macos.py` | 检查、逐层签名、PKG、DMG 和 SHA-256 |
 
-GUI 始终使用普通账户运行。网络服务统一监督长期会话，Proxy 核心在执行前降为调用账户 UID/GID；TUN 主核心使用 root，AWG 的上游 wireproxy 仍降权。临时测速核心由 GUI 从应用包运行。此处选择统一的 helper 监督与恢复协议，避免两个长期进程管理器争抢会话。
+GUI 始终使用普通账户运行。网络服务统一监督长期会话，Proxy 核心在执行前降为调用账户 UID/GID；TUN 核心使用 root。AWG 直接使用 Mihomo，遵循相同的 Proxy/TUN 权限边界，不再启动独立上游进程。临时测速核心由 GUI 从应用包运行。此处选择统一的 helper 监督与恢复协议，避免两个长期进程管理器争抢会话。
 
 安装位置固定如下，用户配置保存在用户 Application Support 中：
 
 ```text
 /Applications/KEQDIS.app
-  Contents/Resources/cores/{keqrnel,mihomo,wireproxy}
+  Contents/Resources/cores/{keqrnel,mihomo}
   Contents/Resources/geo/{geoip.dat,geosite.dat}
 /Library/Application Support/io.github.caocaocc.keqdroid/
-  bin/{keqdis-network-service,keqrnel,mihomo,wireproxy}
+  bin/{keqdis-network-service,keqrnel,mihomo}
   geo/{geoip.dat,geosite.dat}
   client-requirement.txt
   core-manifest.json
@@ -71,15 +71,21 @@ root TUN 核心固定收到 `KEQDIS_PRIVILEGED_RUNTIME=1`。Darwin 核心补丁�
 
 ## TUN、DNS 与系统代理
 
-keqrnel、Mihomo、AWG 均有 Proxy/TUN 请求路径；AWG TUN 使用 wireproxy → keqrnel。Darwin 配置省略固定接口名，由核心分配 utun，helper 确认实际接口和路由。未达到就绪条件时不报告已连接。
+运行时只包含 keqrnel 和 Mihomo 两个核心；AWG 配置在 Proxy/TUN 下均转换为 Mihomo 配置。Darwin 配置省略固定接口名，由核心分配 utun。连接前仍严格校验核心进程、本地端口、实际 utun、IPv4 路由、所需 IPv6 防护及系统配置写入结果；任一失败都恢复网络并报告错误。
 
 系统代理通过 SystemConfiguration 按网络服务 ID 操作，使用当前分配的 SOCKS/HTTP 端口；保存 HTTP、HTTPS、SOCKS、PAC、自动发现和绕过字段。Proxy 模式不改 DNS。修改系统设置前持久化 journal；恢复只处理仍等于本会话写入值的字段，保留连接期间用户/其他程序所做的修改。
 
-TUN DNS 使用核心虚拟端点：keqrnel/AWG 为 `172.19.0.2`，Mihomo 从运行配置推导（默认 `198.18.0.2`）。Swift 不在 `127.0.0.1:53` 新建 DNS 服务。先测试 UDP/TCP DNS，再修改系统 DNS，并复测系统解析路径。恢复 DNS/代理后才停止核心。
+TUN DNS 使用核心虚拟端点：keqrnel 为 `172.19.0.2`，Mihomo（包括 AWG）从运行配置推导，默认 `198.18.0.2`。Swift 不在 `127.0.0.1:53` 新建 DNS 服务。本地隧道就绪后才提交系统 DNS；断开时先恢复 DNS/代理，再停止核心。
 
-虚拟 DNS 探测每条查询最多等待 8 秒，UDP 和 TCP 共享 15 秒总期限，避免把代理 DNS 的冷启动延迟误判为不可用。查询期间保留同一个 socket，定期读取有限数量的核心日志并检查核心与接口；UDP 失败也会检查 TCP，错误中分别保留两者结果。TCP 连接、帧头和响应分片共用同一单调时钟期限，不因收到部分数据而重新计时。这只检查 DNS 协议响应，提交设置后仍须通过下面的系统解析检查。
+提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由比较后恢复逻辑保留其修改。报告已连接前还会复查进程、本地端口、接口和有效设置。这些本地与系统配置检查仍是必需条件，不降为警告。
 
-提交设置后，helper 最多等待 5 秒核验全部受管服务已提交的字段和协议启用状态，以及主服务的有效全局代理/DNS。第三方修改会使连接失败，并由原有比较后恢复逻辑保留其修改。仅 TUN 使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；查询启用 `ReturnIntermediates` 以接收负回答，合法 CNAME 中间记录继续等待 A。两次查询共享总计 5 秒期限，等待期间每 100 毫秒在会话线程读取有限核心日志、核验核心和接口，避免输出管道堵塞；失败或超时不进入已连接状态。错误区分随机查询与正答案兜底阶段，核心退出和接口丢失保留其原始错误。若用户规则屏蔽了整个 `example.com`，此项就绪检查可能失败，诊断会明确指出探测域，用户 DNS 规则不会被更改。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
+仅 TUN 在进入已连接状态后执行一次后台 DNS 诊断：虚拟 UDP/TCP 查询并行运行，共享从诊断开始起计的 15 秒期限；系统解析检查同时运行，最多 5 秒。结果分别保存为成功或警告；某项失败不跳过其他项，不阻止连接或自动断开，也不会改用其他 DNS。已连接仅表示本地隧道与系统设置通过检查，不能据此断言远端 DNS、节点或所有业务流量可用。
+
+虚拟端点诊断查询 `localhost.` 的 A 记录，检查经实际 TUN 入口返回的 DNS 协议响应；这个结果也受所选核心、用户 DNS 策略和上游连接影响，不是独立的本地接口健康证明。查询保留同一个 socket，TCP 连接、帧头和响应分片共用单调时钟期限，不因收到部分数据而延长期限。UDP 与 TCP 分别保留诊断结果。
+
+系统诊断使用公开 `DNSServiceQueryRecord`，按当前系统 DNS 策略查询随机 `keqdis-<UUID>.example.com.` 的 A 记录。该 API 在 macOS 12 及较新版本中无法仅凭 `NoSuchRecord` 区分正常 NXDOMAIN 与部分 SERVFAIL，因此负响应必须再由 `example.com.` 的有效 A 正答案确认；查询启用 `ReturnIntermediates` 以接收负回答，合法 CNAME 中间记录继续等待 A。两次查询共享上述 5 秒期限，错误区分随机查询与正答案兜底阶段。若用户规则屏蔽了探测域，诊断可能警告，但用户规则与连接保持不变。系统允许的正常缓存仍适用于正答案兜底查询；本检查不承诺绕过系统缓存或验证所有域名策略。
+
+DNS 工作在独立后台队列运行，每 100 毫秒检查取消和期限，不占用会话状态队列或阻塞断开。停止或重连会取消旧诊断并丢弃其迟到结果。核心退出、接口/路由丢失和网络变化继续由原有监控处理并恢复网络；只有外部 DNS 响应检查改为警告。
 
 启动前保存物理 DNS 和出口，注入固定环境契约：
 
@@ -88,11 +94,11 @@ KEQDIS_BOOTSTRAP_DNS=["192.168.1.1"]
 KEQDIS_BOOTSTRAP_INTERFACE=en0
 ```
 
-macOS TUN 在未启用自定义 DNS 时，自动生成的链接和代理链使用这份物理快照解析各节点的实际服务器域名。该策略只应用于节点的精确 bootstrap 域名，普通业务 DNS 仍按现有规则运行；明确开启的自定义 DNS、完整作者配置、Proxy 和其他平台保持原策略。这样可以避免物理网络无法直连默认公共 DoH 时，节点启动先消耗一次失败等待。合理的 DNS 就绪期限仍保留，作为慢响应的容错上限。
+macOS TUN 在未启用自定义 DNS 时，自动生成的链接和代理链使用这份物理快照解析各节点的实际服务器域名。该策略只应用于节点的精确 bootstrap 域名，普通业务 DNS 仍按现有规则运行；明确开启的自定义 DNS、完整作者配置、Proxy 和其他平台保持原策略。这样可以避免物理网络无法直连默认公共 DoH 时，节点启动先消耗一次失败等待。连接后的 DNS 诊断仍有有限期限，结果与本地隧道状态分别报告。
 
 Darwin 补丁覆盖 keqrnel local DNS、Xray 隐式/新建 resolver 和 Mihomo system resolver。有效快照绑定物理出口；错误或不完整快照拒绝启动；失败不静默回退公共 DNS。用户明确配置的 DoH/DoT/代理 DNS 保留。内嵌 Xray 的默认 TCP/UDP 系统拨号器使用同一物理接口创建实际出站 socket，在应用其他 socket 选项后绑定并读回核验；接口消失、被替换或绑定失败时拒绝拨号，不依赖 TUN 内进程识别才绕过自身流量。精确 loopback 目的地保留给本机上游，豁免的 UDP socket 拒绝向非 loopback 改发数据。链式代理仍先完成既有 `dialerProxy` 重定向；`xicmp` 等自建 socket 的特殊传输不在此补丁覆盖范围。网络切换后重建整个快照与会话。补丁来源、范围和单独测试方法见 [`tool/patches/macos/README.md`](../tool/patches/macos/README.md)。
 
-开启 IPv6 防泄漏要求时，必须证明捕获/阻断成立；否则拒绝连接。目前 Mihomo 的该组合会明确拒绝，keqrnel/AWG 必须同时通过配置与实际 IPv6 路由校验。保留 mDNS/系统本地域行为，不承诺接管另一 VPN 的 scoped DNS；发现冲突时停止并报告。
+开启 IPv6 防泄漏要求且物理网络具有 IPv6 时，必须证明捕获/阻断成立；否则拒绝连接。目前 Mihomo（包括 AWG）的该组合会明确拒绝，keqrnel 必须同时通过配置与实际 IPv6 路由校验。保留 mDNS/系统本地域行为，不承诺接管另一 VPN 的 scoped DNS；发现冲突时停止并报告。
 
 当前物理网络上下文需要可识别的 IPv4 默认出口。纯 IPv6-only 网络会明确拒绝，尚未作为支持场景；双栈网络仍按上述 IPv6 策略验收。Mihomo 使用包内 DAT Geo 模式，不自动下载 MMDB/ASN 数据；依赖未随包提供数据库的规则需先转换或移除。
 
@@ -118,7 +124,8 @@ Darwin 补丁覆盖 keqrnel local DNS、Xray 隐式/新建 resolver 和 Mihomo s
 | --- | --- |
 | keqrnel | `38155c34606f77299a62902da11372ff1c1921d7` |
 | Mihomo | `v1.19.30`，保留原有仓库补丁 |
-| wireproxy-awg | `v1.0.18` |
+
+AWG 使用 Mihomo 的协议实现，不再构建或安装 wireproxy。sing-box 仍为 keqrnel 原有依赖 `v1.13.19`；本次上游应用合并没有升级核心工具链或这些固定来源。保留补丁的原始行为、用途和测试依据见 [Darwin 补丁审计](../tool/patches/macos/README.md#retention-audit-against-pinned-sources)。
 
 安装完整 Xcode 并选择其 Developer 目录后，在项目根目录运行：
 
@@ -148,6 +155,8 @@ keqdroid-<version>-macos-x64.dmg.sha256
 keqdroid-<version>-macos-x64-verification.json
 ```
 
+每个架构的 CI 安装介质产物还单独包含 `SHA256SUMS`，只列本架构的 DMG，并保留同内容的 `.dmg.sha256`；不等待另一架构，也不把历史产物纳入校验清单。
+
 DMG 包含 `Install KEQDIS.pkg`、`Uninstall KEQDIS.pkg` 和安装说明。所有嵌套 Mach-O、框架、应用由内到外签名，然后生成客户端指纹和签名后核心摘要，最后制作 PKG/DMG。`provenance.json` 保留原始核心构建来源、补丁、Go 模块和签名前摘要；签名后摘要单独记录。
 
 ## 更新、卸载与中断恢复
@@ -174,8 +183,8 @@ CI 只上传 `unvalidated` 开发产物，不自动发布 GitHub Release。新�
 | 阶段 | 需要确认 |
 | --- | --- |
 | M0 | macOS 12 两架构实际启动；真实浏览器下载的 ad-hoc 应用/PKG可允许安装；XPC授权有效，伪造客户端被拒绝 |
-| M1 | 三类核心 Proxy、订阅、测速、连接统计可用；系统代理实际生效；退出/崩溃后无死代理 |
-| M2 | 三类核心 TUN、TCP/UDP/DNS、链式与手工配置；现有 utun、端口占用、IPv6及缺少上游；路由/DNS验证和异常恢复 |
+| M1 | 两个核心 Proxy（含 Mihomo AWG）、订阅、测速、连接统计可用；系统代理实际生效；退出/崩溃后无死代理 |
+| M2 | 两个核心 TUN（含 Mihomo AWG）、实际 TCP/UDP/DNS、链式与手工配置；现有 utun、端口占用、IPv6及缺少上游；DNS 诊断警告、路由/系统配置严格校验和异常恢复 |
 | M3 | Safari/Chromium/Electron/命令行分流；热键冲突；窗口/Dock/菜单栏；登录标记和系统禁用后台项；冷/热/重复深链接 |
 | M4 | 双架构 DMG、升级授权/取消、安装失败回滚、卸载；现有 PAC/DNS/搜索域与用户中途修改；完整回归通过 |
 
@@ -183,6 +192,6 @@ CI 只上传 `unvalidated` 开发产物，不自动发布 GitHub Release。新�
 
 2026-09-10 已实际完成 Flutter 分析及全部 1235 项测试，核心双架构编译、Darwin DNS/路由补丁回归、Swift 服务双架构编译、桌面与恢复策略检查。完整 Xcode 下的 XCTest 和应用构建通过 GitHub CI 执行；本机 CLT 检查与 CI XCTest 分开记录。
 
-CI 演练已确认：仅修改安装脚本的提交中，两个架构共十个组件均恢复成功，所有编译步骤跳过；真实下载组件修改一字节后被校验拒绝。打包检查同时发现了 Flutter 原生资产默认最低 macOS 13 的问题，因此编译成功和符合 macOS 12 部署目标不是同一验收项，必须保留最终 Mach-O 检查。
+此前三核心架构的 CI 演练已确认：仅修改安装脚本的提交中，当时两个架构共十个组件均恢复成功，所有编译步骤跳过；真实下载组件修改一字节后被校验拒绝。当前两核心架构每个架构有两个核心、helper 和 app 四个组件，沿用相同的指纹与校验流程。打包检查同时发现了 Flutter 原生资产默认最低 macOS 13 的问题，因此编译成功和符合 macOS 12 部署目标不是同一验收项，必须保留最终 Mach-O 检查。
 
 本机为 macOS 15.6、Apple Silicon。2026-09-11 使用者授权将 TUN 连接、网络设置与验收改为自动执行；每次测试保存网络基线、设置限时退出保护，并核对断开后的恢复结果。系统管理员凭据仍由使用者在系统界面输入。网络原始快照保存在本机私有目录，不能提交订阅凭据或本机网络详情。Intel 运行、macOS 12 两架构、AWG 节点及尚未执行的完整发布矩阵继续标为待验证。

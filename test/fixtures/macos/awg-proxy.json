@@ -3,14 +3,108 @@
   "apiSecret": "test-secret-12345678",
   "blockIpv6Leak": false,
   "configurations": {
-    "wireproxy": "[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAllowedIPs = 0.0.0.0/0\nEndpoint = node.example.com:51820\n\n[Socks5]\nBindAddress = 127.0.0.1:2080\n\n[http]\nBindAddress = 127.0.0.1:2081\n"
+    "mihomo": {
+      "allow-lan": false,
+      "bind-address": "127.0.0.1",
+      "dns": {
+        "default-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "enable": true,
+        "enhanced-mode": "normal",
+        "ipv6": false,
+        "nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "proxy-server-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "respect-rules": true
+      },
+      "external-controller": "127.0.0.1:23000",
+      "find-process-mode": "off",
+      "geo-auto-update": false,
+      "geodata-mode": true,
+      "ipv6": false,
+      "log-level": "warning",
+      "mode": "rule",
+      "port": 2081,
+      "proxies": [
+        {
+          "ip": "10.0.0.2/32",
+          "mtu": 1280,
+          "name": "proxy",
+          "peers": [
+            {
+              "allowed-ips": [
+                "0.0.0.0/0"
+              ],
+              "port": 51820,
+              "public-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "server": "node.example.com"
+            }
+          ],
+          "port": 51820,
+          "private-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "server": "node.example.com",
+          "type": "wireguard",
+          "udp": true
+        }
+      ],
+      "rules": [
+        "DOMAIN,node.example.com,DIRECT",
+        "DOMAIN-KEYWORD,ru,DIRECT",
+        "DOMAIN-SUFFIX,yandex.ru,DIRECT",
+        "DOMAIN-SUFFIX,vk.com,DIRECT",
+        "IP-CIDR,0.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+        "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+        "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,192.0.0.0/24,DIRECT,no-resolve",
+        "IP-CIDR,198.51.100.0/24,DIRECT,no-resolve",
+        "IP-CIDR,203.0.113.0/24,DIRECT,no-resolve",
+        "MATCH,proxy"
+      ],
+      "secret": "test-secret-12345678",
+      "sniffer": {
+        "enable": true,
+        "override-destination": true,
+        "parse-pure-ip": true,
+        "sniff": {
+          "HTTP": {
+            "ports": [
+              "80",
+              "8080-8880"
+            ]
+          },
+          "QUIC": {
+            "ports": [
+              "443",
+              "8443"
+            ]
+          },
+          "TLS": {
+            "ports": [
+              "443",
+              "8443"
+            ]
+          }
+        }
+      },
+      "socks-port": 2080
+    }
   },
   "connectionMode": "proxy",
-  "core": "awg",
+  "core": "mihomo",
   "httpPort": 2081,
   "protocolVersion": 1,
   "sessionId": "awg-proxy",
   "socksPort": 2080,
-  "systemProxy": true,
-  "wireproxyInfoPort": 23001
+  "systemProxy": true
 }

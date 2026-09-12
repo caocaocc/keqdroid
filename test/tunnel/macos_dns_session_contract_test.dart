@@ -19,7 +19,7 @@ import 'package:keqdroid/utils/socks5_credentials.dart';
 void main() {
   const link =
       'trojan://test-password@node.example.com:443?sni=node.example.com';
-  const defaults = AppSettings();
+  final defaults = AppSettings.fromJson({});
   const context = MacOSNetworkContext(
     contextId: 'test-network',
     interfaceName: 'en0',
@@ -91,7 +91,6 @@ void main() {
           sessionId: 'xray-tun-dns-${scenario.name}',
           apiPort: 23000,
           apiSecret: 'test-secret-12345678',
-          wireproxyInfoPort: 23001,
           context: context,
         );
         final config =

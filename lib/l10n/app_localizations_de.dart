@@ -9,6 +9,24 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Verbunden, aber DNS-Abfragen fehlgeschlagen';
+
+  @override
+  String get macosTunDnsOk => 'DNS-Abfragen erfolgreich';
+
+  @override
+  String get macosTunDnsChecking => 'DNS wird geprüft…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Domains und IPs aus Festlandchina umgehen den Proxy.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'China direkt';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -477,7 +495,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Eigene DNS-Server';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile (DoH, DoT oder einfach)';
+  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile. +local verbindet direkt; andere Adressen folgen den Proxy-Regeln.';
 
   @override
   String get settingsXrayDnsServers => 'DNS-Server';
@@ -486,7 +504,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'Getrennter Resolver für Direct-Domains';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'Verwendet den ersten Server für Domains aus der Direct-Liste';
+  String get settingsXrayDnsSplitDirectHint => 'Ab zwei Servern: der erste für direkte Domains und die Knotenauflösung, die übrigen für andere Domains. Xray TUN auf Desktop nutzt nur die ersten zwei. Lokale Namen nutzen System-DNS; Unternehmens-Split-DNS wird nicht automatisch erkannt.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'Abfragestrategie';
@@ -552,7 +570,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Sniffing nur für Routing';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'Standard: Cloudflare und Google DoH';
+  String get settingsXrayDnsDefaultNote => 'Ohne eigene DNS: Cloudflare und Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Feineinstellung';
@@ -1821,7 +1839,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsResetConfirmAction => 'Zurücksetzen';
 
   @override
-  String get settingsResetRoutingConfirm => 'Die integrierten Routing-Regeln werden wiederhergestellt und deine Direct-/Proxy-/Block-Listen verworfen. Das kann nicht rückgängig gemacht werden.';
+  String get settingsResetRoutingConfirm => 'Die integrierten Regeln werden wiederhergestellt, deine Direkt-/Proxy-/Sperrlisten gelöscht und anderer Verkehr über den Proxy geleitet. Dies lässt sich nicht rückgängig machen.';
 
   @override
   String get settingsXrayResetConfirm => 'Die Standardeinstellungen für Xray-Core, TUN und die lokalen Ports werden wiederhergestellt. Das kann nicht rückgängig gemacht werden.';

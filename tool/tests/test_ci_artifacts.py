@@ -72,6 +72,10 @@ class Fixture(unittest.TestCase):
 
 
 class FingerprintTests(Fixture):
+    def test_retired_wireproxy_cannot_restore_a_new_checkpoint(self):
+        with self.assertRaises(ValueError):
+            ci.fingerprint('wireproxy', 'arm64', self.root)
+
     def test_commit_is_provenance_not_part_of_input_key(self):
         first = self.pack()
         self.commit = "b" * 40

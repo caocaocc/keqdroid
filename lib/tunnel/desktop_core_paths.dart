@@ -25,13 +25,6 @@ class DesktopCorePaths {
     return Future.value(null);
   }
 
-  static Future<String?> wireproxyExecutable() {
-    if (Platform.isWindows) return WindowsCorePaths.wireproxyExecutable();
-    if (Platform.isLinux) return LinuxCorePaths.wireproxyExecutable();
-    if (Platform.isMacOS) return MacOSCorePaths.wireproxyExecutable();
-    return Future.value(null);
-  }
-
   static Future<String?> geoAssetDir() {
     if (Platform.isWindows) return WindowsCorePaths.geoAssetDir();
     if (Platform.isLinux) return LinuxCorePaths.geoAssetDir();

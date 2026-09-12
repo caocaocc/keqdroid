@@ -20,6 +20,8 @@ public struct SessionRecoveryJournal {
         }
         var identities: [ProcessIdentity] = []
         var seen: Set<Int> = []
+        // Legacy wireproxy children still need identity-checked recovery during
+        // an upgrade. They are never accepted by new session/runtime requests.
         for record in records {
             guard let pid = record["pid"] as? Int, pid > 1, pid <= Int(Int32.max), seen.insert(pid).inserted,
                   let start = record["startTime"] as? UInt64, start > 0,

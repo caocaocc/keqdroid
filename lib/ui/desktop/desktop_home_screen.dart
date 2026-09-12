@@ -30,6 +30,7 @@ import '../../tunnel/linux_tunnel_backend.dart';
 import '../../shared/ui/app_theme.dart';
 import '../../shared/ui/expressive_button_group.dart';
 import '../../shared/ui/update_dialog.dart';
+import '../../shared/ui/desktop_dns_notice.dart';
 import '../../utils/clipboard_import.dart';
 import 'desktop_connection_mode.dart';
 import 'sidebar_group_nav.dart';
@@ -533,13 +534,20 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
           ),
           VerticalDivider(width: 1, color: AppTheme.divider(context)),
           Expanded(
-            child: IndexedStack(
-              index: _index,
-              sizing: StackFit.expand,
-              children: const [
-                _DesktopTabHost(child: ServersTab()),
-                _DesktopTabHost(child: SubscriptionsTab()),
-                _DesktopTabHost(child: SettingsTab()),
+            child: Column(
+              children: [
+                if (Platform.isMacOS) const DesktopDnsNotice(),
+                Expanded(
+                  child: IndexedStack(
+                    index: _index,
+                    sizing: StackFit.expand,
+                    children: const [
+                      _DesktopTabHost(child: ServersTab()),
+                      _DesktopTabHost(child: SubscriptionsTab()),
+                      _DesktopTabHost(child: SettingsTab()),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),

@@ -38,7 +38,7 @@
       "port": 2081,
       "proxies": [
         {
-          "client-fingerprint": "chrome",
+          "client-fingerprint": "firefox",
           "name": "proxy",
           "network": "tcp",
           "password": "test-password",
@@ -55,8 +55,6 @@
         "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel,DIRECT",
         "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo,DIRECT",
         "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/mihomo,DIRECT",
-        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/wireproxy,DIRECT",
-        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/wireproxy,DIRECT",
         "PROCESS-PATH,/Applications/KEQDIS.app/Contents/MacOS/KEQDIS,DIRECT",
         "PROCESS-NAME,tailscaled,DIRECT",
         "PROCESS-NAME,wireguard,DIRECT",

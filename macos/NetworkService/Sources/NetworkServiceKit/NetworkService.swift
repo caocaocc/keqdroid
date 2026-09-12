@@ -27,6 +27,7 @@ public final class NetworkService {
     private var lastMonitor = Date()
     private var recoveryPending = false
     private var recoverySessionID: String?
+    private lazy var dnsDiagnostics = TUNDNSDiagnostics(stateQueue: queue)
 
     public init(root: URL = ServicePaths.root, clientRequirement: String) throws {
         self.root = root; state = root.appendingPathComponent("state", isDirectory: true)
@@ -147,7 +148,7 @@ public final class NetworkService {
     }
 
     private func start(_ request: SessionRequest, identity: ClientIdentity) throws -> [String: Any] {
-        for port in [request.socksPort, request.httpPort, request.apiPort] + (request.infoPort.map { [$0] } ?? []) {
+        for port in [request.socksPort, request.httpPort, request.apiPort] {
             guard keq_port_available(UInt16(port)) == 1 else { throw ServiceFailure("portUnavailable", "Local port \(port) is already in use.") }
         }
         let context: NetworkContext
@@ -168,26 +169,19 @@ public final class NetworkService {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o711])
             sessionDirectory = directory
             try persistSession()
-            let order = request.core == "awg" ? (request.mode == "tun" ? ["wireproxy", "keqrnel"] : ["wireproxy"]) : [request.core]
-            for name in order {
-                stage = "coreStartup"
-                // AWG's upstream may take seconds to start. Recheck before the
-                // actual TUN process can replace an existing broad route.
-                if request.mode == "tun" && name != "wireproxy" { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode) }
-                guard let config = request.configurations[name] else { throw ServiceFailure("invalidConfiguration", "Missing core configuration.") }
-                let process = try runtime.spawn(name: name, configuration: config, directory: directory, request: request, identity: identity, context: context)
-                processes.append(process)
-                try persistSession()
-                try process.releaseStartGate()
-                if name == "wireproxy" {
-                    stage = "upstreamReadiness"
-                    try waitUntilReady(timeout: 15) { keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1 }
-                }
-            }
+            let name = request.core
+            stage = "coreStartup"
+            // Recheck immediately before a core can install broad routes.
+            if request.mode == "tun" { try IPv4RouteSnapshot.capture().validateBeforeStarting(mode: request.mode) }
+            guard let config = request.configurations[name] else { throw ServiceFailure("invalidConfiguration", "Missing core configuration.") }
+            let process = try runtime.spawn(name: name, configuration: config, directory: directory, request: request, identity: identity, context: context)
+            processes.append(process)
+            try persistSession()
+            try process.releaseStartGate()
             stage = "localEndpoints"
             try waitUntilReady(timeout: 20) {
                 let portsReady = keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 && keq_socket_ready("127.0.0.1", UInt16(request.httpPort), 100) == 1
-                let apiReady = request.core == "awg" && request.mode == "proxy" ? true : keq_socket_ready("127.0.0.1", UInt16(request.apiPort), 100) == 1
+                let apiReady = keq_socket_ready("127.0.0.1", UInt16(request.apiPort), 100) == 1
                 return portsReady && apiReady
             }
             if request.mode == "tun" {
@@ -210,30 +204,21 @@ public final class NetworkService {
                         throw ServiceFailure("ipv6ProtectionUnavailable", "IPv6 traffic is not fully routed into the managed tunnel. Connection refused to prevent an IPv6 leak.")
                     }
                 }
-                guard let dns = request.dnsAddress else { throw ServiceFailure("invalidDNS", "TUN DNS address is missing.") }
-                stage = "virtualDNS"
-                try VirtualDNSReadiness.wait(probe: { tcp, timeout in
-                    try VirtualDNSReadiness.probe(address: dns, tcp: tcp, timeoutMilliseconds: timeout,
-                                                  validate: self.checkStartupProcessesAndInterface)
-                }, validate: checkStartupProcessesAndInterface)
                 guard let interface, IPv4RouteSnapshot.capture().usesTunnel(interface) else {
                     throw ServiceFailure("ipv4RoutesUnavailable", "IPv4 traffic is not fully routed into the managed tunnel.")
                 }
             }
-            // Never publish system proxy/DNS until processes, ports, utun, and
-            // both DNS transports are working.
+            // Only local ownership/readiness gates network settings. External
+            // DNS answers are diagnosed after connection, without tearing down
+            // a healthy local tunnel when an upstream resolver is unreachable.
             let proxyPorts: (socks: Int, http: Int)? = request.systemProxy && request.mode == "proxy" ? (request.socksPort, request.httpPort) : nil
             let dnsAddress = request.mode == "tun" ? request.dnsAddress : nil
             stage = "applyNetworkSettings"
             try settings.apply(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
             stage = "networkSettingsReadiness"
             try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress)
-            if request.mode == "tun" {
-                stage = "systemDNS"
-                try SystemDNSReadiness.verify(progress: checkStartupProcessesAndInterface)
-            }
-            // Catch a core exit or a user edit during the asynchronous configd /
-            // resolver checks before publishing a connected session.
+            // Catch a core exit or user edit during configd verification before
+            // publishing a connected session.
             stage = "finalReadiness"
             try waitUntilReady(timeout: 1) {
                 keq_socket_ready("127.0.0.1", UInt16(request.socksPort), 100) == 1 &&
@@ -242,6 +227,13 @@ public final class NetworkService {
             try settings.verifyApplied(context: context, proxyPorts: proxyPorts, dnsAddress: dnsAddress, timeout: 0)
             connectedAt = Date(); lastContact = Date(); lastMonitor = Date(); snapshot["status"] = "connected"
             try persistSession(); updateSnapshot()
+            if request.mode == "tun", let address = request.dnsAddress {
+                dnsDiagnostics.start(sessionID: request.id, address: address) { [weak self] result in
+                    guard let self, self.activeRequest?.id == result["sessionId"] as? String,
+                          self.connectedAt != nil, self.snapshot["status"] as? String == "connected" else { return }
+                    self.snapshot["dnsDiagnostics"] = result
+                }
+            }
             return snapshot
         } catch {
             let original = error as? ServiceFailure ?? ServiceFailure("startFailed", error.localizedDescription)
@@ -280,7 +272,7 @@ public final class NetworkService {
             if predicate() { return }
             Thread.sleep(forTimeInterval: 0.1)
         } while Date() < deadline
-        throw ServiceFailure("readinessTimeout", "Core, tunnel, or TCP/UDP DNS readiness timed out.")
+        throw ServiceFailure("readinessTimeout", "Core or local tunnel readiness timed out.")
     }
 
     private func checkStartupProcessesAndInterface() throws {
@@ -293,7 +285,7 @@ public final class NetworkService {
     }
 
     private func recordTunnelInterfaceIfAvailable() throws {
-        guard activeRequest?.mode == "tun", processes.contains(where: { $0.name != "wireproxy" }) else { return }
+        guard activeRequest?.mode == "tun", !processes.isEmpty else { return }
         let current = try TunnelInterfaceRecovery.capture()
         if let tunnelInterface {
             guard current[tunnelInterface.name] == tunnelInterface.index else {
@@ -347,6 +339,8 @@ public final class NetworkService {
     }
 
     private func stop() throws {
+        dnsDiagnostics.cancel()
+        snapshot.removeValue(forKey: "dnsDiagnostics")
         if activeRequest == nil && recoveryPending {
             try Self.recoverInstallation(root: root)
             recoveryPending = false
@@ -403,7 +397,7 @@ public final class NetworkService {
         for process in processes { process.collectOutput() }
         snapshot["pids"] = Dictionary(uniqueKeysWithValues: processes.filter(\.isAlive).map { ($0.name, Int($0.pid)) })
         if let request = activeRequest {
-            snapshot["apiPort"] = request.apiPort; snapshot["apiSecret"] = request.apiSecret; snapshot["wireproxyInfoPort"] = request.infoPort
+            snapshot["apiPort"] = request.apiPort; snapshot["apiSecret"] = request.apiSecret
             if request.mode == "tun" { snapshot["networkContext"] = activeContext?.dictionary }
         }
         if let started = connectedAt { snapshot["durationSeconds"] = Int(Date().timeIntervalSince(started)) }

@@ -9,6 +9,24 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Connected, but DNS queries failed';
+
+  @override
+  String get macosTunDnsOk => 'DNS queries succeeded';
+
+  @override
+  String get macosTunDnsChecking => 'Checking DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Mainland China domains and IPs bypass the proxy.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'China direct';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -477,7 +495,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Custom DNS servers';
 
   @override
-  String get settingsXrayDnsCustomHint => 'One address per line (DoH, DoT, or plain)';
+  String get settingsXrayDnsCustomHint => 'One address per line. +local connects directly; other addresses follow proxy routing.';
 
   @override
   String get settingsXrayDnsServers => 'DNS servers';
@@ -486,7 +504,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'Split resolver for direct domains';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'Uses first server for domains from direct list';
+  String get settingsXrayDnsSplitDirectHint => 'With two or more servers: first for direct domains and node lookup, the rest for other domains. Desktop Xray TUN uses only the first two. Local names use system DNS; enterprise split DNS is not detected automatically.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'Query strategy';
@@ -552,7 +570,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Sniffing route only';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'Default: Cloudflare and Google DoH';
+  String get settingsXrayDnsDefaultNote => 'When custom DNS is off: Cloudflare and Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Tuning';
@@ -1821,7 +1839,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsResetConfirmAction => 'Reset';
 
   @override
-  String get settingsResetRoutingConfirm => 'This restores the built-in routing rules and discards your direct/proxy/blocked lists. This can\'t be undone.';
+  String get settingsResetRoutingConfirm => 'This restores the built-in routing rules, discards your direct/proxy/blocked lists, and routes other traffic through the proxy. This can\'t be undone.';
 
   @override
   String get settingsXrayResetConfirm => 'This restores the default Xray core, TUN and local port settings. This can\'t be undone.';

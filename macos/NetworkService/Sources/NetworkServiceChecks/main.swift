@@ -16,6 +16,10 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--validate-r
         exit(0)
     } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
 }
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--dns-diagnostics-only" {
+    print("Passed \(runTUNDNSDiagnosticsChecks()) asynchronous TUN DNS diagnostic checks (no network operations).")
+    exit(0)
+}
 
 var checks = 0
 func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
@@ -43,10 +47,6 @@ for value in ["127.0.0.1", "::1", "172.19.0.2", "198.18.0.2", "fe80::1", "FF02::
 for value in ["192.168.1.1", "8.8.8.8", "2001:4860:4860::8888"] { expect(isPhysicalDNSAddress(value), "accept physical DNS \(value)") }
 
 let wireproxy = "[Interface]\nPrivateKey = example\nAddress = 10.0.0.1/32\n[Peer]\nPublicKey = example\nEndpoint = example.test:1234\n[Socks5]\nBindAddress = 127.0.0.1:2080\n[http]\nBindAddress = 127.0.0.1:2081"
-do { try ConfigPolicy.validateWireproxy(wireproxy, socksPort: 2080, httpPort: 2081); checks += 1 }
-catch { fputs("FAIL: valid wireproxy rejected \(error)\n", stderr); exit(1) }
-rejects("wireproxy PostUp hook") { try ConfigPolicy.validateWireproxy(wireproxy + "\nPostUp = /bin/sh", socksPort: 2080, httpPort: 2081) }
-rejects("wireproxy LAN listener") { try ConfigPolicy.validateWireproxy(wireproxy.replacingOccurrences(of: "127.0.0.1:2080", with: "0.0.0.0:2080"), socksPort: 2080, httpPort: 2081) }
 
 let secret = "0123456789abcdef"
 let valid: [String: Any] = ["experimental": ["clash_api": ["external_controller": "127.0.0.1:9090", "secret": secret]], "inbounds": [["type": "socks", "listen": "127.0.0.1", "listen_port": 2080]], "outbounds": [["type": "direct"]]]
@@ -113,6 +113,38 @@ rejects("file provider") { var bad = cached; bad["proxy-providers"] = ["subscrip
 let encoded = try JSONSerialization.data(withJSONObject: valid)
 let arguments: [String: Any] = ["protocolVersion": 1, "sessionId": UUID().uuidString, "connectionMode": "proxy", "core": "keqrnel", "configurations": ["keqrnel": String(decoding: encoded, as: UTF8.self)], "socksPort": 2080, "httpPort": 2081, "apiPort": 9090, "apiSecret": secret, "systemProxy": true]
 do { _ = try SessionRequest(arguments: arguments); checks += 1 } catch { fputs("FAIL: valid session \(error)\n", stderr); exit(1) }
+rejects("retired standalone AWG session") {
+    var legacy = arguments
+    legacy["core"] = "awg"; legacy["wireproxyInfoPort"] = 9091
+    legacy["configurations"] = ["wireproxy": wireproxy]
+    _ = try SessionRequest(arguments: legacy)
+}
+rejects("retired wireproxy core name") { var legacy = arguments; legacy["core"] = "wireproxy"; _ = try SessionRequest(arguments: legacy) }
+rejects("retired wireproxy configuration beside a supported core") {
+    var legacy = arguments
+    legacy["configurations"] = ["keqrnel": String(decoding: encoded, as: UTF8.self), "wireproxy": wireproxy]
+    _ = try SessionRequest(arguments: legacy)
+}
+do {
+    _ = try CoreRuntime(root: ServicePaths.root).executable(named: "wireproxy")
+    fputs("FAIL: retired core executable accepted\n", stderr); exit(1)
+} catch let error as ServiceFailure { expect(error.code == "unsupportedCore", "retired executable rejected before filesystem lookup") }
+let awgProxy: [String: Any] = ["name": "proxy", "type": "wireguard", "server": "192.0.2.1", "port": 51820,
+    "ip": "10.0.0.2/32", "private-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "udp": true,
+    "peers": [["server": "192.0.2.1", "port": 51820, "public-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "allowed-ips": ["0.0.0.0/0"]]],
+    "amnezia-wg-option": ["version": 3, "jc": 4, "jmin": 40, "jmax": 70, "header-protection-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]]
+for mode in ["proxy", "tun"] {
+    let config: [String: Any] = ["external-controller": "127.0.0.1:9090", "secret": secret,
+        "geodata-mode": true, "geo-auto-update": false, "proxies": [awgProxy], "tun": ["enable": mode == "tun"]]
+    var request = arguments
+    request["core"] = "mihomo"; request["connectionMode"] = mode
+    request["configurations"] = ["mihomo": String(decoding: try JSONSerialization.data(withJSONObject: config), as: UTF8.self)]
+    if mode == "tun" { request["contextId"] = "prepared-context"; request["dnsAddress"] = "198.18.0.2" }
+    do { let session = try SessionRequest(arguments: request); expect(session.core == "mihomo", "AWG uses normal Mihomo \(mode) session") }
+    catch { fputs("FAIL: Mihomo AWG configuration rejected \(error)\n", stderr); exit(1) }
+    var unsafe = config; unsafe["command"] = "/bin/sh"
+    rejects("AWG does not weaken the privileged command policy") { try validateMihomo(unsafe, mode: mode) }
+}
 rejects("arbitrary executable core") { var bad = arguments; bad["core"] = "/bin/sh"; _ = try SessionRequest(arguments: bad) }
 rejects("duplicate ports") { var bad = arguments; bad["httpPort"] = 2080; _ = try SessionRequest(arguments: bad) }
 rejects("protocol mismatch") { var bad = arguments; bad["protocolVersion"] = 2; _ = try SessionRequest(arguments: bad) }
@@ -191,6 +223,10 @@ rejects("journal arbitrary executable") { var bad = journal; var records = journ
 // a utun, stop another VPN, or issue a routing-table mutation in these checks.
 let tunnelIdentity = try TunnelInterfaceIdentity(name: "utun9", index: 42)
 let legacyJournal = try SessionRecoveryJournal(dictionary: journal, root: ServicePaths.root)
+var oldWireproxyJournal = journal
+oldWireproxyJournal["processes"] = [["name": "wireproxy", "pid": 1234, "startTime": UInt64(42), "executable": ServicePaths.root.appendingPathComponent("bin/wireproxy").path]]
+let recoveredWireproxy = try SessionRecoveryJournal(dictionary: oldWireproxyJournal, root: ServicePaths.root)
+expect(recoveredWireproxy.processes.first?.executable == ServicePaths.root.appendingPathComponent("bin/wireproxy").path, "legacy wireproxy journal remains readable for recovery")
 expect(legacyJournal.tunnelInterface == nil, "old journal has no tunnel identity")
 var tunnelJournal = journal
 tunnelJournal["tunnelInterface"] = tunnelIdentity.dictionary
@@ -574,4 +610,5 @@ for caller in [ClientIdentity(uid: 502, gid: 20, connectionID: 10), ClientIdenti
 }
 expect(SessionDiagnostics.snapshot(["requiresReconnect": "true"], owner: diagnosticOwner, caller: diagnosticOwner)["requiresReconnect"] == nil, "reconnect metadata must be a boolean")
 
+checks += runTUNDNSDiagnosticsChecks()
 print("Passed \(checks) native network service checks (no privileged operations).")

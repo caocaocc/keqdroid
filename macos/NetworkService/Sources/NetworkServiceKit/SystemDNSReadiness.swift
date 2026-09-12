@@ -7,7 +7,8 @@ public enum SystemDNSAnswer { case positive, negative }
 /// NoSuchRecord also represents some upstream failures, including SERVFAIL, on
 /// macOS 12 and newer. A negative random probe therefore requires a positive A
 /// answer for example.com. Both queries share five seconds. Blocking example.com
-/// in user DNS rules can fail readiness; those rules are never rewritten here.
+/// in user DNS rules can produce a diagnostic warning; those rules are never
+/// rewritten here and the query result does not control a running TUN session.
 public enum SystemDNSReadiness {
     public static func verify(timeout: TimeInterval = 5,
                               now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -92,8 +93,8 @@ public enum SystemDNSReadiness {
         // in-flight callbacks have returned, including on deadline expiry.
         defer { replies.sync { DNSServiceRefDeallocate(reference) }; withExtendedLifetime(reply) {} }
         while true {
-            // Startup owns core logs on this thread; a single long wait can fill
-            // the core's output pipe and prevent its DNS reply from completing.
+            // Yield regularly to the caller's cancellation/health checks while
+            // mDNSResponder delivers the reply on its own callback queue.
             try progress?()
             guard DispatchTime.now() < deadline else { throw failure("System DNS resolution timed out.") }
             let nextCheck = min(deadline, DispatchTime.now() + .milliseconds(100))

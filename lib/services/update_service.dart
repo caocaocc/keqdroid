@@ -670,34 +670,52 @@ class UpdateService {
     try {
       final response = await dio.get<String>(url);
       if (response.statusCode != 200) return null;
-      return _parseSha256(response.data ?? '', assetName);
+      return _parseSha256(
+        response.data ?? '',
+        assetName,
+        allowBareHash: Uri.tryParse(url)?.pathSegments.lastOrNull ==
+            '$assetName.sha256',
+      );
     } catch (_) {
       return null;
     }
   }
 
   /// Test hook for [_parseSha256] (kept public like the other version helpers).
-  static String? extractSha256(String manifest, String assetName) =>
-      _parseSha256(manifest, assetName);
+  static String? extractSha256(
+    String manifest,
+    String assetName, {
+    bool allowBareHash = true,
+  }) => _parseSha256(manifest, assetName, allowBareHash: allowBareHash);
 
   /// Extracts the 64-hex-char SHA-256 for [assetName]. Handles a bare hash, a
   /// `sha256sum`-style `<hash>  <file>` line, and multi-asset manifests.
-  static String? _parseSha256(String text, String assetName) {
-    final hexPattern = RegExp(r'\b[a-fA-F0-9]{64}\b');
-    final lowerAsset = assetName.toLowerCase();
-
-    if (lowerAsset.isNotEmpty) {
-      for (final line in const LineSplitter().convert(text)) {
-        if (line.toLowerCase().contains(lowerAsset)) {
-          final m = hexPattern.firstMatch(line);
-          if (m != null) return m.group(0)!.toLowerCase();
-        }
-      }
+  static String? _parseSha256(
+    String text,
+    String assetName, {
+    bool allowBareHash = true,
+  }) {
+    final lines = const LineSplitter().convert(text)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    if (allowBareHash && lines.length == 1 &&
+        RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(lines.single)) {
+      return lines.single.toLowerCase();
     }
-
-    // Dedicated sidecar usually contains exactly one hash and no filename.
-    final m = hexPattern.firstMatch(text);
-    return m?.group(0)?.toLowerCase();
+    if (assetName.isEmpty) return null;
+    final entry = RegExp(r'^([a-fA-F0-9]{64})[ \t]+\*?(.+)$');
+    String? selected;
+    for (final line in lines) {
+      final match = entry.firstMatch(line);
+      if (match == null) return null;
+      // A release-wide manifest must identify this exact asset once. A hash
+      // for another architecture or a similarly named sidecar is not a fallback.
+      if (match.group(2) != assetName) continue;
+      if (selected != null) return null;
+      selected = match.group(1)!.toLowerCase();
+    }
+    return selected;
   }
 
   /// Только https и без shell-метасимволов — защита от инъекции в `cmd /c start`,

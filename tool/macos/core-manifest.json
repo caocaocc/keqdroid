@@ -55,19 +55,6 @@
         "macos/mihomo-privileged-api.patch"
       ]
     },
-    "wireproxy": {
-      "module": "github.com/artem-russkikh/wireproxy-awg",
-      "version": "v1.0.18",
-      "commit": "84f4795ea76f9c3168a61e478d0fe0e5c3238308",
-      "url": "https://proxy.golang.org/github.com/artem-russkikh/wireproxy-awg/@v/v1.0.18.zip",
-      "sha256": "2a52b5ae8bb82642bd913484bedf501c47f1380ef70c5bbbce3471ea851d9659",
-      "prefix": "github.com/artem-russkikh/wireproxy-awg@v1.0.18",
-      "format": "zip",
-      "target": "./cmd/wireproxy",
-      "tags": [],
-      "ldflags": "-X main.version=v1.0.18",
-      "patches": []
-    },
     "xray": {
       "module": "github.com/xtls/xray-core",
       "version": "v1.260327.1-0.20260728075948-5ca6f4b7d4dc",

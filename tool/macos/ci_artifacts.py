@@ -28,7 +28,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPONENTS = ("keqrnel", "mihomo", "wireproxy", "helper", "app")
+COMPONENTS = ("keqrnel", "mihomo", "helper", "app")
 ARCHITECTURES = ("arm64", "x64")
 SCHEMA_VERSION = 1
 WORKFLOW = ".github/workflows/macos.yml"
@@ -102,7 +102,7 @@ def component_inputs(component, arch, root=None):
     check_component(component, arch)
     root = Path(root or ROOT)
     shared = input_files(root, ["tool/macos/ci_artifacts.py"])
-    if component in ("keqrnel", "mihomo", "wireproxy"):
+    if component in ("keqrnel", "mihomo"):
         # The core builder owns the source graph, patches, overlays and Go flags.
         # Its fingerprint must not change when a different core changes.
         try:

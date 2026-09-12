@@ -25,7 +25,7 @@ void main() {
     socksUsername: 'user',
     socksPassword: 'password',
     serverIpToExclude: '203.0.113.8',
-    settings: const AppSettings(),
+    settings: AppSettings.fromJson({}),
     windows: false,
     macos: macos,
     routingMode: AppRoutingMode.onlySelected,
@@ -89,7 +89,6 @@ void main() {
         context: context,
         apiPort: 23000,
         apiSecret: 'session-secret-123456',
-        wireproxyInfoPort: 23001,
       );
       expect(payload['contextId'], 'network-1');
       expect(payload['dnsAddress'], '172.19.0.2');
@@ -125,7 +124,6 @@ void main() {
       context: context,
       apiPort: 23000,
       apiSecret: 'session-secret-123456',
-      wireproxyInfoPort: 23001,
     );
     expect(payload['dnsAddress'], '198.19.1.2');
     final config =
@@ -162,7 +160,6 @@ void main() {
         sessionId: 'proxy-1',
         apiPort: 23000,
         apiSecret: 'session-secret-123456',
-        wireproxyInfoPort: 23001,
       );
       expect(payload.containsKey('dnsAddress'), isFalse);
       expect(payload.containsKey('contextId'), isFalse);
@@ -189,7 +186,6 @@ void main() {
           sessionId: 'ipv6-check',
           apiPort: 23000,
           apiSecret: 'session-secret-123456',
-          wireproxyInfoPort: 23001,
           context: ipv6Context,
         );
     expect(() => build(VpnBackend.mihomo, tun()), throwsFormatException);
@@ -202,7 +198,9 @@ void main() {
       windows: false,
       macos: true,
       hostHasIpv6: true,
-      settings: const AppSettings(tun: TunSettings(blockIpv6Leak: true)),
+      settings: AppSettings.fromJson({}).copyWith(
+        tun: const TunSettings(blockIpv6Leak: true),
+      ),
     );
     final valid = build(VpnBackend.xray, dualStackTun);
     expect(valid['blockIpv6Leak'], isTrue);
@@ -226,7 +224,6 @@ void main() {
           sessionId: 'raw-provider',
           apiPort: 23000,
           apiSecret: 'session-secret-123456',
-          wireproxyInfoPort: 23001,
         );
     final valid = build({
       'type': 'http',
@@ -269,7 +266,6 @@ void main() {
             sessionId: 'raw-geo',
             apiPort: 23000,
             apiSecret: 'session-secret-123456',
-            wireproxyInfoPort: 23001,
           );
       final payload = build({
         'geo-auto-update': true,
@@ -331,7 +327,6 @@ void main() {
         context: context,
         apiPort: 23000,
         apiSecret: 'session-secret-123456',
-        wireproxyInfoPort: 23001,
       ),
       throwsA(
         isA<FormatException>().having(
@@ -365,7 +360,6 @@ void main() {
         sessionId: 'port-check',
         apiPort: 23000,
         apiSecret: 'session-secret-123456',
-        wireproxyInfoPort: 23001,
       ),
       throwsFormatException,
     );

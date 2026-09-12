@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/tunnel/connection_mode.dart';
+import 'package:keqdroid/tunnel/desktop_dns_diagnostics.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 import 'package:keqdroid/tunnel/macos_tunnel_backend.dart';
@@ -19,6 +20,7 @@ void main() {
   late Map<String, dynamic> service;
   Map<String, dynamic> snapshot = {'status': 'disconnected'};
   setUp(() {
+    desktopDnsDiagnostics.value = null;
     calls = [];
     service = {
       'installed': true,
@@ -174,7 +176,7 @@ void main() {
             socksUsername: 'test-user',
             socksPassword: 'test-password',
             serverIpToExclude: '192.0.2.1',
-            settings: const AppSettings(),
+            settings: AppSettings.fromJson({}),
             windows: false,
             macos: true,
           ),
@@ -328,6 +330,120 @@ void main() {
       expect(MacOSNetworkContext.active, isNull);
     },
   );
+
+  test('DNS warnings preserve the tunnel and ignore stale session results', () async {
+    snapshot = {
+      'status': 'connected',
+      'sessionId': 'dns-session',
+      'connectionMode': 'tun',
+      'networkContext': {
+        'contextId': 'original',
+        'interfaceName': 'en0',
+        'dnsServers': ['192.168.1.1'],
+      },
+      'dnsDiagnostics': {
+        'sessionId': 'dns-session',
+        'status': 'warning',
+        'message': 'TUN DNS TCP query timed out.',
+      },
+    };
+    await backend.getCurrentState();
+    expect(backend.currentState.status, VpnStatus.connected);
+    expect(backend.currentState.errorMessage, isNull);
+    expect(desktopDnsDiagnostics.value?.status, 'warning');
+    expect(desktopDnsDiagnostics.value?.message, contains('TCP'));
+    expect(calls.any((call) => call.method == 'stopSession'), isFalse);
+    snapshot['dnsDiagnostics'] = {
+      'sessionId': 'previous-session', 'status': 'ok', 'message': 'old result',
+    };
+    await backend.getCurrentState();
+    expect(desktopDnsDiagnostics.value?.status, 'warning');
+    snapshot['dnsDiagnostics'] = {
+      'sessionId': 'dns-session', 'status': 'ok', 'message': 'DNS is ready',
+    };
+    await backend.getCurrentState();
+    expect(desktopDnsDiagnostics.value?.status, 'ok');
+    await backend.stopSession();
+    expect(desktopDnsDiagnostics.value, isNull);
+  });
+
+  Future<void> restoreDnsSession(String status) async {
+    snapshot = {
+      'status': 'connected',
+      'sessionId': 'dns-cleanup-session',
+      'connectionMode': 'tun',
+      'networkContext': {
+        'contextId': 'original',
+        'interfaceName': 'en0',
+        'dnsServers': ['192.168.1.1'],
+      },
+      'dnsDiagnostics': {
+        'sessionId': 'dns-cleanup-session',
+        'status': status,
+        'message': 'TUN DNS diagnostic from the active session.',
+      },
+    };
+    await backend.getCurrentState();
+    expect(backend.currentState.status, VpnStatus.connected);
+    expect(desktopDnsDiagnostics.value?.status, status);
+  }
+
+  test('DNS checking clears while stop waits for the helper', () async {
+    await restoreDnsSession('checking');
+    final entered = Completer<void>();
+    final response = Completer<Map<String, dynamic>>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'stopSession');
+          entered.complete();
+          return response.future;
+        });
+    final stopping = backend.stopSession();
+    await entered.future;
+    try {
+      expect(backend.currentState.status, VpnStatus.disconnecting);
+      expect(desktopDnsDiagnostics.value, isNull);
+    } finally {
+      response.complete({'status': 'disconnected'});
+      await stopping;
+    }
+  });
+
+  test('DNS warning stays cleared when stopping the helper fails', () async {
+    await restoreDnsSession('warning');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'stopSession');
+          throw PlatformException(code: 'recoveryFailed', message: 'restore failed');
+        });
+    await expectLater(backend.stopSession(), throwsA(isA<PlatformException>()));
+    expect(backend.currentState.status, VpnStatus.error);
+    expect(desktopDnsDiagnostics.value, isNull);
+  });
+
+  test('DNS success clears when querying the helper fails', () async {
+    await restoreDnsSession('ok');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'getSession');
+          throw PlatformException(code: 'unavailable', message: 'helper unavailable');
+        });
+    expect((await backend.getCurrentState()).status, VpnStatus.error);
+    expect(desktopDnsDiagnostics.value, isNull);
+  });
+
+  test('Proxy sessions ignore DNS diagnostic fields', () async {
+    snapshot = {
+      'status': 'connected', 'sessionId': 'proxy-session',
+      'connectionMode': 'proxy',
+      'dnsDiagnostics': {
+        'sessionId': 'proxy-session', 'status': 'warning', 'message': 'ignored',
+      },
+    };
+    await backend.getCurrentState();
+    expect(backend.currentState.status, VpnStatus.connected);
+    expect(desktopDnsDiagnostics.value, isNull);
+  });
 
   test(
     'app enumeration and icons stay on the ordinary desktop channel',

@@ -159,6 +159,7 @@
                     "domainStrategy": "UseIPv4"
                   },
                   "tlsSettings": {
+                    "fingerprint": "firefox",
                     "serverName": "node.example.com"
                   }
                 },
@@ -271,9 +272,7 @@
               "/Library/Application Support/io.github.caocaocc.keqdroid/bin/keqrnel",
               "/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel",
               "/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo",
-              "/Applications/KEQDIS.app/Contents/Resources/cores/mihomo",
-              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/wireproxy",
-              "/Applications/KEQDIS.app/Contents/Resources/cores/wireproxy"
+              "/Applications/KEQDIS.app/Contents/Resources/cores/mihomo"
             ]
           },
           {
@@ -312,8 +311,7 @@
               "keqrnel",
               "mihomo",
               "xray",
-              "sing-box",
-              "wireproxy"
+              "sing-box"
             ]
           },
           {

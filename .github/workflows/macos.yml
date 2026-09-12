@@ -31,9 +31,6 @@ jobs:
   mihomo-arm64:
     uses: ./.github/workflows/macos-component.yml
     with: {component: mihomo, arch: arm64, runner: macos-15}
-  wireproxy-arm64:
-    uses: ./.github/workflows/macos-component.yml
-    with: {component: wireproxy, arch: arm64, runner: macos-15}
   helper-arm64:
     uses: ./.github/workflows/macos-component.yml
     with: {component: helper, arch: arm64, runner: macos-15}
@@ -47,9 +44,6 @@ jobs:
   mihomo-x64:
     uses: ./.github/workflows/macos-component.yml
     with: {component: mihomo, arch: x64, runner: macos-15-intel}
-  wireproxy-x64:
-    uses: ./.github/workflows/macos-component.yml
-    with: {component: wireproxy, arch: x64, runner: macos-15-intel}
   helper-x64:
     uses: ./.github/workflows/macos-component.yml
     with: {component: helper, arch: x64, runner: macos-15-intel}
@@ -58,7 +52,7 @@ jobs:
     with: {component: app, arch: x64, runner: macos-15-intel}
 
   package-arm64:
-    needs: [checks, keqrnel-arm64, mihomo-arm64, wireproxy-arm64, helper-arm64, app-arm64]
+    needs: [checks, keqrnel-arm64, mihomo-arm64, helper-arm64, app-arm64]
     uses: ./.github/workflows/macos-package.yml
     with:
       arch: arm64
@@ -66,13 +60,12 @@ jobs:
       fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-arm64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-arm64.outputs.artifact-name }}
-      wireproxy_artifact: ${{ needs.wireproxy-arm64.outputs.artifact-name }}
       helper_artifact: ${{ needs.helper-arm64.outputs.artifact-name }}
       app_artifact: ${{ needs.app-arm64.outputs.artifact-name }}
       session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}
 
   package-x64:
-    needs: [checks, keqrnel-x64, mihomo-x64, wireproxy-x64, helper-x64, app-x64]
+    needs: [checks, keqrnel-x64, mihomo-x64, helper-x64, app-x64]
     uses: ./.github/workflows/macos-package.yml
     with:
       arch: x64
@@ -80,7 +73,6 @@ jobs:
       fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
       keqrnel_artifact: ${{ needs.keqrnel-x64.outputs.artifact-name }}
       mihomo_artifact: ${{ needs.mihomo-x64.outputs.artifact-name }}
-      wireproxy_artifact: ${{ needs.wireproxy-x64.outputs.artifact-name }}
       helper_artifact: ${{ needs.helper-x64.outputs.artifact-name }}
       app_artifact: ${{ needs.app-x64.outputs.artifact-name }}
       session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}

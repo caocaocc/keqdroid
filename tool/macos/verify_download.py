@@ -29,7 +29,7 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parents[2]
 STAGE = Path("Library/Application Support/io.github.caocaocc.keqdroid.incoming")
-CORES = ("keqrnel", "mihomo", "wireproxy")
+CORES = ("keqrnel", "mihomo")
 MAGIC = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
 COMMIT = re.compile(r"^[a-f0-9]{40}$")
 SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -54,20 +54,36 @@ def read_json(path):
     return value
 
 
+def checksum_for_file(text, filename):
+    records = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"([0-9a-fA-F]{64}) [ *]([^\r\n\x00]+)", line)
+        if not match:
+            raise ValueError("Invalid SHA-256 record")
+        digest, name = match.groups()
+        # Never select an architecture by substring or use the first record
+        # when the requested DMG is missing from a shared release manifest.
+        if name in (".", "..") or "/" in name or "\\" in name:
+            raise ValueError("SHA-256 record must name a release file without a path")
+        if name in records:
+            raise ValueError("Duplicate SHA-256 filename")
+        records[name] = digest.lower()
+    if filename not in records:
+        raise ValueError("SHA-256 record does not identify the downloaded DMG")
+    return records[filename]
+
+
 def check_download(dmg, checksum, report_path, arch, commit):
     dmg, checksum = Path(dmg), Path(checksum)
     if arch not in ("arm64", "x64") or not COMMIT.fullmatch(commit):
         raise ValueError("Expected an explicit architecture and full 40-character target commit")
     if not dmg.is_file() or dmg.is_symlink() or dmg.suffix != ".dmg":
         raise ValueError("Expected a downloaded regular .dmg file")
-    lines = checksum.read_text().strip().splitlines()
-    if len(lines) != 1:
-        raise ValueError("Expected exactly one DMG SHA-256 record")
-    match = re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", lines[0])
-    if not match or match.group(2) != dmg.name:
-        raise ValueError("SHA-256 record does not identify the downloaded DMG")
+    expected_digest = checksum_for_file(checksum.read_text(), dmg.name)
     actual = file_hash(dmg)
-    if actual != match.group(1):
+    if actual != expected_digest:
         raise ValueError("Downloaded DMG SHA-256 mismatch")
     report = read_json(report_path)
     if report.get("architecture") != arch or report.get("sourceCommit") != commit:
@@ -98,6 +114,10 @@ def check_download(dmg, checksum, report_path, arch, commit):
     required.update(f"KEQDIS.app/Contents/Resources/cores/{core}" for core in CORES)
     if not required.issubset(entries):
         raise ValueError("Verification report omits required application or network components")
+    for prefix, names in (("runtime/bin/", {*CORES, "keqdis-network-service"}),
+                          ("KEQDIS.app/Contents/Resources/cores/", set(CORES))):
+        if any(name.startswith(prefix) and name[len(prefix):] not in names for name in entries):
+            raise ValueError("Unexpected packaged core in executable inventory")
     return report, {"sourceCommit": commit, "architecture": arch, "version": version,
                     "dmgSHA256": actual, "downloadVerified": True,
                     "diskImageVerified": False, "payloadVerified": False}

@@ -9,7 +9,6 @@ public struct SessionRequest {
     public let httpPort: Int
     public let apiPort: Int
     public let apiSecret: String
-    public let infoPort: Int?
     public let systemProxy: Bool
     public let blockIpv6Leak: Bool
     public let contextID: String?
@@ -20,15 +19,14 @@ public struct SessionRequest {
         guard let identifier = arguments["sessionId"] as? String, identifier.range(of: "^[A-Za-z0-9-]{1,128}$", options: .regularExpression) != nil else { throw ServiceFailure("invalidRequest", "sessionId must be an opaque alphanumeric identifier.") }
         id = identifier
         guard let mode = arguments["connectionMode"] as? String, ["proxy", "tun"].contains(mode),
-              let core = arguments["core"] as? String, ["keqrnel", "mihomo", "awg"].contains(core) else { throw ServiceFailure("unsupportedCore", "Unsupported network mode or core.") }
+              let core = arguments["core"] as? String, ["keqrnel", "mihomo"].contains(core) else { throw ServiceFailure("unsupportedCore", "Unsupported network mode or core.") }
         self.mode = mode; self.core = core
         func port(_ key: String) throws -> Int {
             guard let value = arguments[key] as? Int, (1024...65535).contains(value) else { throw ServiceFailure("invalidPort", "\(key) must be an unprivileged TCP port.") }
             return value
         }
         socksPort = try port("socksPort"); httpPort = try port("httpPort"); apiPort = try port("apiPort")
-        infoPort = core == "awg" ? try port("wireproxyInfoPort") : nil
-        let ports = [socksPort, httpPort, apiPort] + (infoPort.map { [$0] } ?? [])
+        let ports = [socksPort, httpPort, apiPort]
         guard Set(ports).count == ports.count else { throw ServiceFailure("invalidPort", "Local ports must be distinct.") }
         guard let secret = arguments["apiSecret"] as? String, secret.count >= 16, secret.count <= 256 else { throw ServiceFailure("invalidRequest", "The local API requires a per-session secret.") }
         apiSecret = secret
@@ -44,15 +42,12 @@ public struct SessionRequest {
             if core != "mihomo", dnsAddress != "172.19.0.2" { throw ServiceFailure("invalidDNS", "Unexpected virtual tunnel DNS address.") }
         }
         guard let configs = arguments["configurations"] as? [String: String], !configs.isEmpty else { throw ServiceFailure("invalidConfiguration", "Missing core configuration.") }
-        let expected: Set<String> = core == "awg" ? (mode == "tun" ? ["wireproxy", "keqrnel"] : ["wireproxy"]) : [core]
+        let expected: Set<String> = [core]
         guard Set(configs.keys) == expected else { throw ServiceFailure("invalidConfiguration", "Unexpected core configuration set.") }
         for (name, text) in configs {
             guard !text.isEmpty, text.utf8.count <= 2 * 1024 * 1024 else { throw ServiceFailure("invalidConfiguration", "Core configuration is empty or too large.") }
-            if name == "wireproxy" { try ConfigPolicy.validateWireproxy(text, socksPort: socksPort, httpPort: httpPort) }
-            else {
-                guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw ServiceFailure("invalidConfiguration", "Core configuration must be a JSON object.") }
-                try ConfigPolicy.validateJSON(object, core: name, mode: mode, ports: Set(ports), apiPort: apiPort, secret: secret)
-            }
+            guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw ServiceFailure("invalidConfiguration", "Core configuration must be a JSON object.") }
+            try ConfigPolicy.validateJSON(object, core: name, mode: mode, ports: Set(ports), apiPort: apiPort, secret: secret)
         }
         configurations = configs
     }
@@ -216,25 +211,4 @@ public enum ConfigPolicy {
         }
     }
 
-    public static func validateWireproxy(_ text: String, socksPort: Int, httpPort: Int) throws {
-        let sections: Set<String> = ["interface", "peer", "socks5", "http"]
-        let allowed: Set<String> = ["privatekey", "address", "dns", "mtu", "table", "publickey", "presharedkey", "allowedips", "endpoint", "persistentkeepalive", "listenport", "jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5", "s3", "s4", "bindaddress", "username", "password"]
-        var section = "", seenBindings: Set<String> = []
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") || line.hasPrefix(";") { continue }
-            if line.hasPrefix("[") && line.hasSuffix("]") {
-                section = String(line.dropFirst().dropLast()).lowercased()
-                guard sections.contains(section) else { throw ServiceFailure("unsafeConfiguration", "Unsupported wireproxy section.") }
-                continue
-            }
-            let pair = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard !section.isEmpty, pair.count == 2, allowed.contains(pair[0].lowercased()) else { throw ServiceFailure("unsafeConfiguration", "Unsupported wireproxy option or executable hook.") }
-            if pair[0].lowercased() == "bindaddress" {
-                let expected = section == "socks5" ? "127.0.0.1:\(socksPort)" : "127.0.0.1:\(httpPort)"
-                guard ["socks5", "http"].contains(section), pair[1] == expected, seenBindings.insert(section).inserted else { throw ServiceFailure("unsafeConfiguration", "wireproxy must bind each proxy exactly once to its allocated loopback port.") }
-            }
-        }
-        guard seenBindings.contains("socks5") else { throw ServiceFailure("invalidConfiguration", "wireproxy SOCKS listener is missing.") }
-    }
 }

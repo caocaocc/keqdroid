@@ -34,7 +34,7 @@
       "port": 2081,
       "proxies": [
         {
-          "client-fingerprint": "chrome",
+          "client-fingerprint": "firefox",
           "name": "proxy",
           "network": "tcp",
           "password": "test-password",

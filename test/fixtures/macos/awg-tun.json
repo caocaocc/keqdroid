@@ -3,162 +3,133 @@
   "apiSecret": "test-secret-12345678",
   "blockIpv6Leak": false,
   "configurations": {
-    "keqrnel": {
+    "mihomo": {
+      "allow-lan": false,
+      "authentication": [
+        "test-user:test-password"
+      ],
+      "bind-address": "127.0.0.1",
       "dns": {
-        "final": "proxy-dns",
-        "rules": [
-          {
-            "domain_suffix": [
-              "ru",
-              "yandex.ru",
-              "vk.com"
-            ],
-            "server": "local-dns"
-          }
+        "default-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
         ],
-        "servers": [
-          {
-            "tag": "local-dns",
-            "type": "local"
-          },
-          {
-            "detour": "proxy",
-            "server": "1.1.1.1",
-            "tag": "proxy-dns",
-            "type": "https"
-          }
+        "enable": true,
+        "enhanced-mode": "normal",
+        "ipv6": false,
+        "nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
         ],
-        "strategy": "ipv4_only"
+        "proxy-server-nameserver": [
+          "https://1.1.1.1/dns-query",
+          "https://8.8.8.8/dns-query"
+        ],
+        "respect-rules": true
       },
-      "experimental": {
-        "clash_api": {
-          "external_controller": "127.0.0.1:23000",
-          "secret": "test-secret-12345678"
-        }
-      },
-      "inbounds": [
+      "external-controller": "127.0.0.1:23000",
+      "find-process-mode": "strict",
+      "geo-auto-update": false,
+      "geodata-mode": true,
+      "interface-name": "en0",
+      "ipv6": false,
+      "log-level": "warning",
+      "mode": "rule",
+      "port": 2081,
+      "proxies": [
         {
-          "address": [
-            "172.19.0.1/30"
+          "ip": "10.0.0.2/32",
+          "mtu": 1280,
+          "name": "proxy",
+          "peers": [
+            {
+              "allowed-ips": [
+                "0.0.0.0/0"
+              ],
+              "port": 51820,
+              "public-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "server": "node.example.com"
+            }
           ],
-          "auto_route": true,
-          "mtu": 9000,
-          "stack": "gvisor",
-          "tag": "tun-in",
-          "type": "tun"
+          "port": 51820,
+          "private-key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "server": "node.example.com",
+          "type": "wireguard",
+          "udp": true
         }
       ],
-      "log": {
-        "level": "info",
-        "timestamp": true
-      },
-      "outbounds": [
-        {
-          "server": "127.0.0.1",
-          "server_port": 2080,
-          "tag": "proxy",
-          "type": "socks",
-          "version": "5"
-        },
-        {
-          "tag": "direct",
-          "type": "direct"
-        },
-        {
-          "tag": "block",
-          "type": "block"
-        }
+      "rules": [
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/MacOS/KEQDIS,DIRECT",
+        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/keqrnel,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel,DIRECT",
+        "PROCESS-PATH,/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/Resources/cores/mihomo,DIRECT",
+        "PROCESS-PATH,/Applications/KEQDIS.app/Contents/MacOS/KEQDIS,DIRECT",
+        "PROCESS-NAME,tailscaled,DIRECT",
+        "PROCESS-NAME,wireguard,DIRECT",
+        "PROCESS-NAME,openvpn,DIRECT",
+        "DOMAIN,node.example.com,DIRECT",
+        "IP-CIDR,198.18.0.0/30,DIRECT,no-resolve",
+        "DOMAIN-KEYWORD,ru,DIRECT",
+        "DOMAIN-SUFFIX,yandex.ru,DIRECT",
+        "DOMAIN-SUFFIX,vk.com,DIRECT",
+        "IP-CIDR,0.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+        "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+        "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,192.0.0.0/24,DIRECT,no-resolve",
+        "IP-CIDR,198.51.100.0/24,DIRECT,no-resolve",
+        "IP-CIDR,203.0.113.0/24,DIRECT,no-resolve",
+        "MATCH,proxy"
       ],
-      "route": {
-        "default_domain_resolver": "proxy-dns",
-        "default_interface": "en0",
-        "final": "proxy",
-        "find_process": true,
-        "rules": [
-          {
-            "outbound": "direct",
-            "process_path": [
-              "/Applications/KEQDIS.app/Contents/MacOS/KEQDIS",
-              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/keqrnel",
-              "/Applications/KEQDIS.app/Contents/Resources/cores/keqrnel",
-              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/mihomo",
-              "/Applications/KEQDIS.app/Contents/Resources/cores/mihomo",
-              "/Library/Application Support/io.github.caocaocc.keqdroid/bin/wireproxy",
-              "/Applications/KEQDIS.app/Contents/Resources/cores/wireproxy"
+      "secret": "test-secret-12345678",
+      "sniffer": {
+        "enable": true,
+        "override-destination": true,
+        "parse-pure-ip": true,
+        "sniff": {
+          "HTTP": {
+            "ports": [
+              "80",
+              "8080-8880"
             ]
           },
-          {
-            "action": "sniff",
-            "inbound": [
-              "tun-in"
+          "QUIC": {
+            "ports": [
+              "443",
+              "8443"
             ]
           },
-          {
-            "action": "hijack-dns",
-            "protocol": "dns"
-          },
-          {
-            "action": "hijack-dns",
-            "port": 53
-          },
-          {
-            "outbound": "direct",
-            "protocol": "icmp"
-          },
-          {
-            "ip_cidr": [
-              "172.19.0.0/30"
-            ],
-            "outbound": "direct"
-          },
-          {
-            "outbound": "direct",
-            "process_name": [
-              "keqrnel",
-              "mihomo",
-              "xray",
-              "sing-box",
-              "wireproxy"
+          "TLS": {
+            "ports": [
+              "443",
+              "8443"
             ]
-          },
-          {
-            "outbound": "direct",
-            "process_name": [
-              "tailscaled",
-              "wireguard",
-              "openvpn"
-            ]
-          },
-          {
-            "domain_suffix": [
-              "ru",
-              "yandex.ru",
-              "vk.com"
-            ],
-            "outbound": "direct"
-          },
-          {
-            "ip_cidr": [
-              "10.0.0.0/8",
-              "172.16.0.0/12",
-              "192.168.0.0/16",
-              "127.0.0.0/8"
-            ],
-            "outbound": "direct"
           }
-        ]
+        }
+      },
+      "socks-port": 2080,
+      "tun": {
+        "auto-detect-interface": true,
+        "auto-route": true,
+        "dns-hijack": [
+          "any:53"
+        ],
+        "enable": true,
+        "stack": "gvisor"
       }
-    },
-    "wireproxy": "[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAllowedIPs = 0.0.0.0/0\nEndpoint = node.example.com:51820\n\n[Socks5]\nBindAddress = 127.0.0.1:2080\n\n[http]\nBindAddress = 127.0.0.1:2081\n"
+    }
   },
   "connectionMode": "tun",
   "contextId": "test-network",
-  "core": "awg",
-  "dnsAddress": "172.19.0.2",
+  "core": "mihomo",
+  "dnsAddress": "198.18.0.2",
   "httpPort": 2081,
   "protocolVersion": 1,
   "sessionId": "awg-tun",
   "socksPort": 2080,
-  "systemProxy": false,
-  "wireproxyInfoPort": 23001
+  "systemProxy": false
 }

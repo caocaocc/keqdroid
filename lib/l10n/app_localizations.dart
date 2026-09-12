@@ -101,6 +101,42 @@ abstract class AppLocalizations {
     Locale('zh')
   ];
 
+  /// No description provided for @macosTunDnsWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected, but DNS queries failed'**
+  String get macosTunDnsWarning;
+
+  /// No description provided for @macosTunDnsOk.
+  ///
+  /// In en, this message translates to:
+  /// **'DNS queries succeeded'**
+  String get macosTunDnsOk;
+
+  /// No description provided for @macosTunDnsChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking DNS…'**
+  String get macosTunDnsChecking;
+
+  /// No description provided for @macosTunDnsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'TUN DNS'**
+  String get macosTunDnsTitle;
+
+  /// No description provided for @settingsRoutingPresetChinaDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Mainland China domains and IPs bypass the proxy.'**
+  String get settingsRoutingPresetChinaDesc;
+
+  /// No description provided for @settingsRoutingPresetChinaTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'China direct'**
+  String get settingsRoutingPresetChinaTitle;
+
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
@@ -974,7 +1010,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsCustomHint.
   ///
   /// In en, this message translates to:
-  /// **'One address per line (DoH, DoT, or plain)'**
+  /// **'One address per line. +local connects directly; other addresses follow proxy routing.'**
   String get settingsXrayDnsCustomHint;
 
   /// No description provided for @settingsXrayDnsServers.
@@ -992,7 +1028,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsSplitDirectHint.
   ///
   /// In en, this message translates to:
-  /// **'Uses first server for domains from direct list'**
+  /// **'With two or more servers: first for direct domains and node lookup, the rest for other domains. Desktop Xray TUN uses only the first two. Local names use system DNS; enterprise split DNS is not detected automatically.'**
   String get settingsXrayDnsSplitDirectHint;
 
   /// No description provided for @settingsXrayDnsQueryStrategy.
@@ -1124,7 +1160,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsDefaultNote.
   ///
   /// In en, this message translates to:
-  /// **'Default: Cloudflare and Google DoH'**
+  /// **'When custom DNS is off: Cloudflare and Google DoH'**
   String get settingsXrayDnsDefaultNote;
 
   /// No description provided for @settingsXrayXmuxParamsTitle.
@@ -3566,7 +3602,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsResetRoutingConfirm.
   ///
   /// In en, this message translates to:
-  /// **'This restores the built-in routing rules and discards your direct/proxy/blocked lists. This can\'t be undone.'**
+  /// **'This restores the built-in routing rules, discards your direct/proxy/blocked lists, and routes other traffic through the proxy. This can\'t be undone.'**
   String get settingsResetRoutingConfirm;
 
   /// No description provided for @settingsXrayResetConfirm.

@@ -16,7 +16,7 @@ from macos.build_cores import macho_info, validate_core_set
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT = Path('Library/Application Support/io.github.caocaocc.keqdroid.incoming')
-CORES = ('keqrnel', 'mihomo', 'wireproxy')
+CORES = ('keqrnel', 'mihomo')
 MAGIC = {b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'}
 
 
@@ -31,6 +31,30 @@ def sha(path):
         for block in iter(lambda: source.read(1024 * 1024), b''):
             digest.update(block)
         return digest.hexdigest()
+
+
+def write_checksums(dmg):
+    # Each architecture publishes independently. Do not include stale outputs
+    # from another build or wait for the other architecture's installation media.
+    record = f'{sha(dmg)}  {dmg.name}\n'
+    dmg.with_suffix('.dmg.sha256').write_text(record)
+    (dmg.parent / 'SHA256SUMS').write_text(record)
+
+
+def replace_bundle_cores(app, cores):
+    destination = app / 'Contents/Resources/cores'
+    if destination.is_symlink() or destination.exists() and not destination.is_dir():
+        raise ValueError('Bundled cores must use a regular directory')
+    destination.mkdir(parents=True, exist_ok=True)
+    # A prebuilt app can contain previously bundled binaries, including retired
+    # wireproxy versions. Replace the copied staging directory before re-signing.
+    for path in destination.iterdir():
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    for core in CORES:
+        shutil.copy2(cores / core, destination / core)
 
 
 def macho_files(directory):
@@ -186,11 +210,9 @@ def main():
         (runtime / 'bin').mkdir(parents=True)
         run('/usr/bin/ditto', args.app, app)
         bundle_cores = app / 'Contents/Resources/cores'
-        bundle_cores.mkdir(parents=True, exist_ok=True)
+        replace_bundle_cores(app, cores)
         bundle_geo = app / 'Contents/Resources/geo'
         bundle_geo.mkdir(parents=True, exist_ok=True)
-        for core in CORES:
-            shutil.copy2(cores / core, bundle_cores / core)
         for geo in ('geoip.dat', 'geosite.dat'):
             shutil.copy2(ROOT / 'assets/bin/linux' / geo, bundle_geo / geo)
         # Other platforms' executables are asset-bundled by Flutter but cannot run here.
@@ -265,7 +287,7 @@ def main():
         run('/usr/bin/hdiutil', 'create', '-ov', '-format', 'UDZO', '-fs', 'HFS+', '-volname', f'KEQDIS {version}',
             '-srcfolder', media, dmg)
         run('/usr/bin/hdiutil', 'verify', dmg)
-        dmg.with_suffix('.dmg.sha256').write_text(f'{sha(dmg)}  {dmg.name}\n')
+        write_checksums(dmg)
         print(f'Created {dmg}. Runtime installation and macOS 12 acceptance are still required.')
 
 

@@ -101,6 +101,7 @@
                     "domainStrategy": "UseIPv4"
                   },
                   "tlsSettings": {
+                    "fingerprint": "firefox",
                     "serverName": "node.example.com"
                   }
                 },

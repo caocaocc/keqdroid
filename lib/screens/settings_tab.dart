@@ -1,3 +1,4 @@
+import 'package:keqdroid/shared/ui/desktop_dns_notice.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

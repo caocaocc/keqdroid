@@ -50,6 +50,39 @@ class DownloadChecks(unittest.TestCase):
         self.assertFalse(result["payloadVerified"])
         self.assertFalse(result["diskImageVerified"])
 
+    def test_shared_sha256sums_selects_only_the_exact_dmg(self):
+        line = self.sha.read_text()
+        self.sha = self.root / 'SHA256SUMS'
+        self.sha.write_text('a' * 64 + '  keqdroid-0.18.0-macos-x64.dmg\n' + line)
+        _, result = self.check()
+        self.assertTrue(result['downloadVerified'])
+        self.sha.write_text(line.upper().replace(self.dmg.name.upper(), self.dmg.name).replace('  ', ' *'))
+        self.check()
+
+    def test_shared_checksums_reject_missing_duplicate_or_ambiguous_targets(self):
+        line = self.sha.read_text()
+        self.sha = self.root / 'SHA256SUMS'
+        cases = [
+            line.replace('arm64', 'x64'),
+            line.replace(self.dmg.name, self.dmg.name + '.backup'),
+            line.replace(self.dmg.name, '../' + self.dmg.name),
+            line + line,
+            line + 'a' * 64 + '  ' + self.dmg.name + '\n',
+            line + 'malformed checksum\n',
+        ]
+        for text in cases:
+            with self.subTest(manifest=text):
+                self.sha.write_text(text)
+                with self.assertRaises(ValueError):
+                    self.check()
+
+    def test_retired_core_is_not_accepted_in_a_new_package_inventory(self):
+        self.report['files']['runtime/bin/wireproxy'] = dict(
+            self.report['files']['runtime/bin/keqrnel'])
+        self.save_report()
+        with self.assertRaisesRegex(ValueError, 'Unexpected packaged core'):
+            self.check()
+
     def test_bad_hash_and_wrong_checksum_filename_rejected(self):
         self.dmg.write_bytes(b"altered image")
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):

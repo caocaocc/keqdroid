@@ -20,6 +20,50 @@ spec.loader.exec_module(package)
 
 
 class PackagingTests(unittest.TestCase):
+    def test_replaces_prebuilt_app_cores_without_retired_binaries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            app = work / 'KEQDIS.app'
+            destination = app / 'Contents/Resources/cores'
+            destination.mkdir(parents=True)
+            (destination / 'wireproxy').write_bytes(b'retired core')
+            (destination / 'keqrnel').write_bytes(b'old core')
+            (destination / 'leftover').mkdir()
+            (destination / 'leftover/unused').write_bytes(b'old resource')
+            source = work / 'verified'
+            source.mkdir()
+            for name in ('keqrnel', 'mihomo'):
+                (source / name).write_bytes(name.encode())
+            package.replace_bundle_cores(app, source)
+            self.assertEqual({p.name for p in destination.iterdir()}, {'keqrnel', 'mihomo'})
+            for name in ('keqrnel', 'mihomo'):
+                self.assertEqual((destination / name).read_bytes(), name.encode())
+
+    def test_bundle_core_replacement_rejects_symlink_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            app = work / 'KEQDIS.app'
+            (app / 'Contents/Resources').mkdir(parents=True)
+            outside = work / 'outside'
+            outside.mkdir()
+            keep = outside / 'keep'
+            keep.write_bytes(b'unchanged')
+            (app / 'Contents/Resources/cores').symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, 'regular directory'):
+                package.replace_bundle_cores(app, work)
+            self.assertEqual(keep.read_bytes(), b'unchanged')
+
+    def test_checksums_cover_this_architecture_without_waiting_for_the_other(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            (work / 'keqdroid-0.18.0-macos-x64.dmg').write_bytes(b'unrelated stale output')
+            dmg = work / 'keqdroid-0.18.0-macos-arm64.dmg'
+            dmg.write_bytes(b'current image')
+            package.write_checksums(dmg)
+            expected = f'{package.sha(dmg)}  {dmg.name}\n'
+            self.assertEqual((work / 'SHA256SUMS').read_text(), expected)
+            self.assertEqual(dmg.with_suffix('.dmg.sha256').read_text(), expected)
+
     def test_complete_prebuilt_inputs_never_invoke_a_compiler(self):
         commands = []
         with tempfile.TemporaryDirectory() as temporary:
@@ -113,7 +157,7 @@ class PackagingTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin', 'requires macOS codesign, no execution or installation')
     def test_seals_real_nested_macho_bundle(self):
         arch = 'arm64' if platform.machine() == 'arm64' else 'x64'
-        core = TOOL.parent / 'build/macos-cores' / arch / 'wireproxy'
+        core = TOOL.parent / 'build/macos-cores' / arch / 'mihomo'
         if not core.exists():
             self.skipTest('build the pinned cores first')
         with tempfile.TemporaryDirectory() as temporary:

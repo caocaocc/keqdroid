@@ -80,7 +80,7 @@ public final class CoreRuntime {
     private let root: URL
     public init(root: URL) { self.root = root }
     public func executable(named name: String) throws -> URL {
-        guard ["keqrnel", "mihomo", "wireproxy"].contains(name) else { throw ServiceFailure("unsupportedCore", "Unsupported core executable.") }
+        guard ["keqrnel", "mihomo"].contains(name) else { throw ServiceFailure("unsupportedCore", "Unsupported core executable.") }
         let directory = root.appendingPathComponent("bin", isDirectory: true)
         let path = directory.appendingPathComponent(name)
         try SecureFiles.requireRootOwned(root, directory: true)
@@ -109,11 +109,11 @@ public final class CoreRuntime {
                 try SecureFiles.write(Data(contentsOf: source, options: .mappedIfSafe), to: coreDirectory.appendingPathComponent(filename), mode: 0o644)
             }
         }
-        let configurationURL = coreDirectory.appendingPathComponent(name == "wireproxy" ? "config.conf" : "config.json")
+        let configurationURL = coreDirectory.appendingPathComponent("config.json")
         try SecureFiles.write(Data(configuration.utf8), to: configurationURL)
-        // Proxy processes (including the WireGuard bridge beneath TUN) run as
-        // the authenticated user. Only the actual utun process needs root.
-        let privileged = request.mode == "tun" && name != "wireproxy"
+        // Proxy processes run as the authenticated user; only the utun process
+        // needs root. AWG profiles use the same Mihomo path as other proxies.
+        let privileged = request.mode == "tun"
         let uid: uid_t = privileged ? 0 : identity.uid
         let gid: gid_t = privileged ? 0 : identity.gid
         if !privileged {
@@ -130,7 +130,7 @@ public final class CoreRuntime {
         switch name {
         case "keqrnel": arguments = ["run", "-c", configurationURL.path]
         case "mihomo": arguments = ["-d", coreDirectory.path, "-f", configurationURL.path]
-        default: arguments = ["-i", "127.0.0.1:\(request.infoPort!)", "-c", configurationURL.path]
+        default: throw ServiceFailure("unsupportedCore", "Unsupported core executable.")
         }
         return try CoreProcess(name: name, executable: executable, arguments: arguments, environment: environment, directory: coreDirectory, uid: uid, gid: gid)
     }

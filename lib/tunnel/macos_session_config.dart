@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../utils/keqrnel_config.dart';
-import '../utils/wireproxy_config.dart';
 import 'connection_mode.dart';
 import 'macos_core_paths.dart';
 import 'macos_network_context.dart';
@@ -19,7 +18,6 @@ class MacOSSessionConfig {
     required String sessionId,
     required int apiPort,
     required String apiSecret,
-    required int wireproxyInfoPort,
     MacOSNetworkContext? context,
   }) {
     final tun = request.mode == ConnectionMode.tun;
@@ -56,25 +54,14 @@ class MacOSSessionConfig {
         );
       }
     }
-    for (final port in [
-      request.socksPort,
-      request.httpPort,
-      apiPort,
-      wireproxyInfoPort,
-    ]) {
+    for (final port in [request.socksPort, request.httpPort, apiPort]) {
       if (port < 1024 || port > 65535) {
         throw const FormatException(
           'Local core ports must be between 1024 and 65535.',
         );
       }
     }
-    if ({
-          request.socksPort,
-          request.httpPort,
-          apiPort,
-          wireproxyInfoPort,
-        }.length !=
-        4) {
+    if ({request.socksPort, request.httpPort, apiPort}.length != 3) {
       throw const FormatException('Local core ports must be distinct.');
     }
     if (!RegExp(r'^[A-Za-z0-9-]{1,128}$').hasMatch(sessionId) ||
@@ -168,18 +155,6 @@ class MacOSSessionConfig {
         );
         configs['keqrnel'] = jsonEncode(config);
         if (tun) dnsAddress = '172.19.0.2';
-      case VpnBackend.awg:
-        configs['wireproxy'] = WireproxyConfigGen.generate(
-          _required(request.awgConfig, 'AmneziaWG'),
-          socksPort: request.socksPort,
-          httpPort: request.httpPort,
-        );
-        if (tun) {
-          final config = _object(request.singboxConfig, 'TUN');
-          _configureKeqrnel(config, apiPort, apiSecret, context: context);
-          configs['keqrnel'] = jsonEncode(config);
-          dnsAddress = '172.19.0.2';
-        }
     }
     return {
       'protocolVersion': 1,
@@ -188,15 +163,12 @@ class MacOSSessionConfig {
       'core': switch (request.vpnBackend) {
         VpnBackend.xray => 'keqrnel',
         VpnBackend.mihomo => 'mihomo',
-        VpnBackend.awg => 'awg',
       },
       'configurations': configs,
       'socksPort': request.socksPort,
       'httpPort': request.httpPort,
       'apiPort': apiPort,
       'apiSecret': apiSecret,
-      if (request.vpnBackend == VpnBackend.awg)
-        'wireproxyInfoPort': wireproxyInfoPort,
       'systemProxy':
           request.mode == ConnectionMode.proxy && request.systemProxy,
       'blockIpv6Leak': request.blockIpv6Leak,

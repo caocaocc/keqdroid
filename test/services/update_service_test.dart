@@ -179,6 +179,31 @@ void main() {
     test('returns null when no 64-hex hash is present', () {
       expect(UpdateService.extractSha256('not a hash', 'x.apk'), isNull);
     });
+
+    test('a shared manifest cannot fall back to another asset or bare hash', () {
+      const asset = 'keqdroid-0.19.0-macos-arm64.dmg';
+      for (final name in [
+        'keqdroid-0.19.0-macos-x64.dmg',
+        '$asset.sha256',
+        'old-$asset',
+        './$asset',
+      ]) {
+        expect(UpdateService.extractSha256('$hash  $name', asset), isNull);
+      }
+      expect(
+        UpdateService.extractSha256(hash, asset, allowBareHash: false),
+        isNull,
+      );
+    });
+
+    test('duplicate manifest entries are rejected even with identical hashes', () {
+      const asset = 'keqdroid-0.19.0-macos-arm64.dmg';
+      expect(
+        UpdateService.extractSha256('$hash  $asset\n$hash  $asset', asset),
+        isNull,
+      );
+      expect(UpdateService.extractSha256('$hash *$asset', asset), hash);
+    });
   });
 
   group('one SHA256SUMS for the whole release', () {

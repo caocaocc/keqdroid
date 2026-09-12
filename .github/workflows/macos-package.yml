@@ -7,7 +7,6 @@ on:
       runner: {type: string, required: true}
       keqrnel_artifact: {type: string, required: true}
       mihomo_artifact: {type: string, required: true}
-      wireproxy_artifact: {type: string, required: true}
       helper_artifact: {type: string, required: true}
       app_artifact: {type: string, required: true}
       session_contract_artifact: {type: string, required: true}
@@ -42,10 +41,6 @@ jobs:
           path: build/ci-archives/mihomo
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.wireproxy_artifact }}
-          path: build/ci-archives/wireproxy
-      - uses: actions/download-artifact@v4
-        with:
           name: ${{ inputs.helper_artifact }}
           path: build/ci-archives/helper
       - uses: actions/download-artifact@v4
@@ -58,11 +53,11 @@ jobs:
           path: build/macos-session-contract
       - name: Verify and restore all precompiled inputs
         run: |
-          for component in keqrnel mihomo wireproxy helper app; do
+          for component in keqrnel mihomo helper app; do
             python3 tool/macos/ci_artifacts.py restore --component "$component" --arch "$ARCH" \
               --archive "build/ci-archives/$component/$component-$ARCH.tar" --destination "build/ci-components/$component"
           done 2>&1 | tee build/ci-logs/restore.log
-          for component in keqrnel mihomo wireproxy; do
+          for component in keqrnel mihomo; do
             cp "build/ci-components/$component/$component" "build/macos-cores/$ARCH/"
             cp "build/ci-components/$component/$component-provenance.json" "build/macos-cores/$ARCH/"
           done
@@ -94,6 +89,7 @@ jobs:
           path: |
             build/macos-release/*.dmg
             build/macos-release/*.sha256
+            build/macos-release/SHA256SUMS
             build/macos-release/*-verification.json
             build/macos-cores/${{ inputs.arch }}/provenance.json
           if-no-files-found: error

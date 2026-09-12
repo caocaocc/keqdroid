@@ -21,15 +21,14 @@ TOOLS = Path("/tmp/keqdroid-tools")
 OUTPUT = ROOT / "build/macos-cores"
 PATCHES = ROOT / "tool/patches"
 MANIFEST = ROOT / "tool/macos/core-manifest.json"
-CORES = ("keqrnel", "mihomo", "wireproxy")
+CORES = ("keqrnel", "mihomo")
 DEPENDENCIES = {"keqrnel": ("keqrnel", "xray", "singbox", "singtun"),
-                "mihomo": ("mihomo",), "wireproxy": ("wireproxy",)}
+                "mihomo": ("mihomo",)}
 OVERLAYS = {
     "keqrnel": (("bootstrapdns", "internal/keqdisdns"),),
     "mihomo": (("bootstrapdns", "internal/keqdisdns"),
                ("privilegedapi", "internal/keqdisapi"), ("mihomo", "dns"),
                ("mihomo_api", "hub/route")),
-    "wireproxy": (("bootstrapdns", "internal/keqdisdns"),),
     "xray": (("xray", "features/dns/localdns"),),
     "singbox": (("privilegedapi", "internal/keqdisapi"),
                 ("singbox_api", "experimental/clashapi")),
@@ -257,9 +256,6 @@ def prepare_sources(manifest, go, env, cores=CORES):
             for item in (PATCHES / "macos" / overlay).glob("*.go"):
                 shutil.copy2(item, target / item.name)
         sources[name] = source
-    if "wireproxy" in sources:
-        (sources["wireproxy"] / "cmd/wireproxy/bootstrap_init_darwin.go").write_text(
-            '//go:build darwin\n\npackage main\n\nimport _ "github.com/artem-russkikh/wireproxy-awg/internal/keqdisdns"\n')
     # A relative replacement keeps the user's checkout path out of Go build info.
     if "keqrnel" in sources:
         run([go, "mod", "edit", "-replace", "github.com/xtls/xray-core=../xray"],
@@ -355,7 +351,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare-only", action="store_true")
     mode.add_argument("--assemble-only", action="store_true",
-                      help="Validate all three checkpoints and write provenance.json without building")
+                      help="Validate both core checkpoints and write provenance.json without building")
     args = parser.parse_args()
     if args.output_dir and args.arch == "all":
         parser.error("--output-dir requires --arch arm64 or --arch x64")

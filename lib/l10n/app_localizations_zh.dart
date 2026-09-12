@@ -9,6 +9,24 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => '已连接，但 DNS 查询失败';
+
+  @override
+  String get macosTunDnsOk => 'DNS 查询正常';
+
+  @override
+  String get macosTunDnsChecking => '正在检查 DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => '中国大陆域名和 IP 直连。';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => '中国直连';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -477,7 +495,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXrayDnsCustom => '自定义 DNS 服务器';
 
   @override
-  String get settingsXrayDnsCustomHint => '每行一个地址（DoH、DoT 或普通）';
+  String get settingsXrayDnsCustomHint => '每行一个地址。+local 直接访问 DNS，其余地址按代理规则连接。';
 
   @override
   String get settingsXrayDnsServers => 'DNS 服务器';
@@ -486,7 +504,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => '为直连域名使用独立解析器';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => '对直连列表中的域名使用第一个服务器';
+  String get settingsXrayDnsSplitDirectHint => '两个及以上服务器：首个用于直连域名和节点解析，其余用于其他域名。桌面 Xray TUN 只使用前两个。本地域名使用系统 DNS，不自动识别企业分离 DNS。';
 
   @override
   String get settingsXrayDnsQueryStrategy => '查询策略';
@@ -552,7 +570,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => '仅用于路由的嗅探';
 
   @override
-  String get settingsXrayDnsDefaultNote => '默认：Cloudflare 和 Google DoH';
+  String get settingsXrayDnsDefaultNote => '关闭自定义 DNS 时：Cloudflare 和 Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => '微调';
@@ -1821,7 +1839,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsResetConfirmAction => '重置';
 
   @override
-  String get settingsResetRoutingConfirm => '将恢复内置路由规则并清除你的直连/代理/屏蔽列表。此操作无法撤销。';
+  String get settingsResetRoutingConfirm => '将恢复内置路由规则、清除你的直连/代理/屏蔽列表，并将其余流量设为代理。此操作无法撤销。';
 
   @override
   String get settingsXrayResetConfirm => '将恢复 Xray 内核、TUN 和本地端口的默认设置。此操作无法撤销。';

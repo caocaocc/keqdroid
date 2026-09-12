@@ -8,7 +8,7 @@ class MacOSCorePaths {
   MacOSCorePaths._();
 
   static const binariesHint =
-      'Install the complete macOS package. Its application bundle must contain keqrnel, mihomo and wireproxy.';
+      'Install the complete macOS package. Its application bundle must contain keqrnel and mihomo.';
   static const installedRuntime =
       '/Library/Application Support/io.github.caocaocc.keqdroid';
 
@@ -16,7 +16,7 @@ class MacOSCorePaths {
   /// the TUN. Full paths avoid exempting an unrelated process with the same name.
   static List<String> get bypassExecutablePaths => [
     Platform.resolvedExecutable,
-    for (final name in ['keqrnel', 'mihomo', 'wireproxy']) ...[
+    for (final name in ['keqrnel', 'mihomo']) ...[
       p.join(installedRuntime, 'bin', name),
       p.join(coresDirectory(), name),
     ],
@@ -35,7 +35,7 @@ class MacOSCorePaths {
     String name, {
     String? executablePath,
   }) async {
-    if (!const {'keqrnel', 'mihomo', 'wireproxy'}.contains(name)) {
+    if (!const {'keqrnel', 'mihomo'}.contains(name)) {
       throw ArgumentError.value(name, 'name', 'Unknown bundled core');
     }
     final path = p.join(coresDirectory(executablePath: executablePath), name);
@@ -44,7 +44,6 @@ class MacOSCorePaths {
 
   static Future<String?> keqrnelExecutable() => executable('keqrnel');
   static Future<String?> mihomoExecutable() => executable('mihomo');
-  static Future<String?> wireproxyExecutable() => executable('wireproxy');
 
   static Future<Directory> sessionDir() async {
     final dir = await Directory.systemTemp.createTemp('keqdroid_macos_');

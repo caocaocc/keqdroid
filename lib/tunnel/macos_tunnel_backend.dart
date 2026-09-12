@@ -9,6 +9,7 @@ import '../services/ephemeral_xray_ping.dart';
 import '../utils/mihomo_api_session.dart';
 import 'connection_mode.dart';
 import 'desktop_traffic_stats.dart';
+import 'desktop_dns_diagnostics.dart';
 import 'macos_network_context.dart';
 import 'macos_session_config.dart';
 import 'socks_credential_generator.dart';
@@ -46,7 +47,6 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   VpnState _state = VpnState.disconnected;
   int? _apiPort;
   String _apiSecret = '';
-  int? _wireproxyInfoPort;
   DateTime? _lastStats;
 
   MacOSTunnelBackend({
@@ -129,13 +129,20 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     _disposed = true;
     _pollTimer?.cancel();
     stopStatsLoop();
-    if (identical(activeInstance, this)) activeInstance = null;
+    if (identical(activeInstance, this)) {
+      activeInstance = null;
+      desktopDnsDiagnostics.value = null;
+    }
     unawaited(_states.close());
   }
 
   @override
   void emit(VpnState state) {
     if (_disposed) return;
+    if (state.status != VpnStatus.connected &&
+        desktopDnsDiagnostics.value?.sessionId == _sessionId) {
+      desktopDnsDiagnostics.value = null;
+    }
     final changed = !_state.telemetryEquals(state);
     _state = state;
     if (changed) _states.add(state);
@@ -205,7 +212,6 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       final ports = <int>{request.socksPort, request.httpPort};
       final apiPort = await _freePort(ports);
       ports.add(apiPort);
-      final metricsPort = await _freePort(ports);
       final secret = SocksCredentialGenerator.randomToken(32);
       final sessionId = SocksCredentialGenerator.randomToken(32);
       final payload = MacOSSessionConfig.build(
@@ -214,20 +220,12 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
         context: context,
         apiPort: apiPort,
         apiSecret: secret,
-        wireproxyInfoPort: metricsPort,
       );
       if (generation != _operationGeneration) return;
       _context = context;
       _sessionId = sessionId;
-      _apiPort =
-          request.vpnBackend == VpnBackend.awg &&
-              request.mode == ConnectionMode.proxy
-          ? null
-          : apiPort;
+      _apiPort = apiPort;
       _apiSecret = secret;
-      _wireproxyInfoPort = request.vpnBackend == VpnBackend.awg
-          ? metricsPort
-          : null;
       _networkChangeSession = null;
       _networkChangePending = false;
       _pids = const {};
@@ -316,10 +314,12 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
 
   void _clearSession() {
     lastSessionLogs = exportSessionLogs(maxLines: 2000);
+    if (desktopDnsDiagnostics.value?.sessionId == _sessionId) {
+      desktopDnsDiagnostics.value = null;
+    }
     _sessionId = null;
     _apiPort = null;
     _apiSecret = '';
-    _wireproxyInfoPort = null;
     _pids = const {};
     _context = null;
     MacOSNetworkContext.active = null;
@@ -410,8 +410,6 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     }
     _apiPort = (snapshot['apiPort'] as num?)?.toInt() ?? _apiPort;
     _apiSecret = snapshot['apiSecret'] as String? ?? _apiSecret;
-    _wireproxyInfoPort =
-        (snapshot['wireproxyInfoPort'] as num?)?.toInt() ?? _wireproxyInfoPort;
     if (snapshot['pids'] is Map) {
       _pids = {
         for (final entry in (snapshot['pids'] as Map).entries)
@@ -426,6 +424,20 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       _networkChangePending = true;
     }
     final mapped = VpnState.fromMap(snapshot);
+    final mode = mapped.activeMode ?? _state.activeMode;
+    if (mapped.status == VpnStatus.connected && mode == ConnectionMode.tun) {
+      final raw = snapshot['dnsDiagnostics'];
+      final diagnostic = DesktopDnsDiagnostics.fromSnapshot(raw, incomingId!);
+      if (raw == null || diagnostic != null) {
+        if (diagnostic != desktopDnsDiagnostics.value &&
+            diagnostic?.status == 'warning') {
+          AppLogger.instance.warn('TUN DNS: ${diagnostic!.message}');
+        }
+        desktopDnsDiagnostics.value = diagnostic;
+      }
+    } else if (desktopDnsDiagnostics.value?.sessionId == _sessionId) {
+      desktopDnsDiagnostics.value = null;
+    }
     if (mapped.status == VpnStatus.connected) {
       if (snapshot['networkContext'] is Map) {
         _context = MacOSNetworkContext.fromMap(
@@ -483,10 +495,6 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       final counters = await queryClashTraffic(_apiPort!, secret: _apiSecret);
       down = counters?.down;
       up = counters?.up;
-    } else if (_wireproxyInfoPort != null) {
-      final counters = await queryWireproxyMetrics(_wireproxyInfoPort!);
-      down = counters?.rx;
-      up = counters?.tx;
     }
     if (id != _sessionId ||
         down == null ||

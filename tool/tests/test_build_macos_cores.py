@@ -57,6 +57,12 @@ class CoreCheckpointTests(unittest.TestCase):
         with patch.object(sys, "argv", ["build_cores.py", "--arch", "arm64", "--output-dir", str(self.output), *args]):
             builder.main()
 
+    def test_retired_wireproxy_cannot_be_built_or_selected(self):
+        with self.assertRaises(ValueError):
+            builder.core_inputs('wireproxy', 'arm64')
+        self.assertEqual(set(builder.CORES), {'keqrnel', 'mihomo'})
+        self.assertNotIn('wireproxy', json.loads(self.manifest.read_text())['sources'])
+
     def test_mihomo_patch_does_not_invalidate_other_cores(self):
         before = self.fingerprints()
         self.change_patch("macos/mihomo-bootstrap-dns.patch")
@@ -126,9 +132,9 @@ class CoreCheckpointTests(unittest.TestCase):
         self.change_patch("macos/README.md")
         self.assert_changed(before, ())
         manifest = json.loads(self.manifest.read_text())
-        manifest["sources"]["wireproxy"]["version"] = "fixture-version"
+        manifest["sources"]["unused-test-source"] = {"version": "fixture-version"}
         self.manifest.write_text(json.dumps(manifest))
-        self.assert_changed(before, ("wireproxy",))
+        self.assert_changed(before, ())
 
     def test_toolchain_architecture_and_flags_invalidate_inputs(self):
         for core in builder.CORES:
@@ -152,21 +158,22 @@ class CoreCheckpointTests(unittest.TestCase):
             return Path(name)
 
         def extract(archive, prefix, source):
-            (source / "cmd/wireproxy").mkdir(parents=True)
+            source.mkdir(parents=True)
 
         with patch.object(builder, "download", download), patch.object(builder, "extract", extract), \
                 patch.object(builder, "run") as commands:
-            sources = builder.prepare_sources(manifest, Path("go"), {}, ("wireproxy",))
-        self.assertEqual(set(sources), {"wireproxy"})
-        self.assertEqual(downloads, ["wireproxy.zip"])
-        commands.assert_not_called()
-        self.assertTrue((sources["wireproxy"] / "internal/keqdisdns/resolver.go").exists())
-        self.assertTrue((sources["wireproxy"] / "cmd/wireproxy/bootstrap_init_darwin.go").exists())
+            sources = builder.prepare_sources(manifest, Path("go"), {}, ("mihomo",))
+        self.assertEqual(set(sources), {"mihomo"})
+        self.assertEqual(downloads, ["mihomo.zip"])
+        self.assertTrue(all(call.args[1] == sources["mihomo"] for call in commands.call_args_list))
+        self.assertTrue((sources["mihomo"] / "internal/keqdisdns/resolver.go").exists())
 
     def test_targeted_tests_do_not_require_other_source_directories(self):
         with patch.object(builder, "run") as run:
-            builder.test_sources(("wireproxy",), Path("go"), {}, {"wireproxy": self.directory})
-        self.assertEqual([call.args[-1] for call in run.call_args_list], ["test-bootstrapdns"])
+            builder.test_sources(("mihomo",), Path("go"), {}, {"mihomo": self.directory})
+        self.assertEqual([call.args[-1] for call in run.call_args_list],
+                         ["test-bootstrapdns", "test-privileged-api-policy",
+                          "test-mihomo-bootstrap", "test-mihomo-privileged-api"])
 
     def test_successful_checkpoint_survives_next_core_preparation_failure_and_resume(self):
         prepared = []
@@ -204,8 +211,8 @@ class CoreCheckpointTests(unittest.TestCase):
                 patch.object(builder, "test_sources"), patch.object(builder, "run", compile), \
                 patch.object(builder, "prepare_sources", prepare_remaining):
             self.invoke()
-        self.assertEqual(prepared, ["mihomo", "wireproxy"])
-        self.assertEqual(compiled, ["keqrnel", "mihomo", "wireproxy"])
+        self.assertEqual(prepared, ["mihomo"])
+        self.assertEqual(compiled, ["keqrnel", "mihomo"])
         self.assertEqual(set(json.loads((self.output / "provenance.json").read_text())["binaries"]), set(builder.CORES))
 
     def test_assemble_only_never_downloads_builds_or_requires_macos(self):
@@ -236,40 +243,40 @@ class CoreCheckpointTests(unittest.TestCase):
             builder.validate_core_set(self.output, "arm64")
 
     def test_modified_record_cannot_authorize_a_modified_binary(self):
-        self.build_fake("wireproxy")
-        path = self.output / "wireproxy-provenance.json"
+        self.build_fake("mihomo")
+        path = self.output / "mihomo-provenance.json"
         record = json.loads(path.read_text())
-        record["inputs"]["sources"]["wireproxy"]["version"] = "untrusted"
+        record["inputs"]["sources"]["mihomo"]["version"] = "untrusted"
         record["inputsSHA256"] = builder.json_digest(record["inputs"])
         path.write_text(json.dumps(record))
         with self.assertRaisesRegex(ValueError, "inputs"):
-            builder.validate_component(self.output, "wireproxy", "arm64")
+            builder.validate_component(self.output, "mihomo", "arm64")
 
     def test_failed_binary_validation_does_not_replace_a_successful_checkpoint(self):
-        self.build_fake("wireproxy")
-        original = (self.output / "wireproxy").read_bytes()
-        original_record = (self.output / "wireproxy-provenance.json").read_bytes()
+        self.build_fake("mihomo")
+        original = (self.output / "mihomo").read_bytes()
+        original_record = (self.output / "mihomo-provenance.json").read_bytes()
 
         def compile(command, source, env, label):
             Path(command[command.index("-o") + 1]).write_bytes(b"truncated")
 
         with patch.object(builder, "run", compile), self.assertRaisesRegex(ValueError, "Truncated"):
-            builder.build_component("wireproxy", "arm64", self.output, self.directory, Path("go"), {})
-        self.assertEqual((self.output / "wireproxy").read_bytes(), original)
-        self.assertEqual((self.output / "wireproxy-provenance.json").read_bytes(), original_record)
+            builder.build_component("mihomo", "arm64", self.output, self.directory, Path("go"), {})
+        self.assertEqual((self.output / "mihomo").read_bytes(), original)
+        self.assertEqual((self.output / "mihomo-provenance.json").read_bytes(), original_record)
 
     def test_symlink_component_and_nonexecutable_binary_are_rejected(self):
-        self.build_fake("wireproxy")
-        binary = self.output / "wireproxy"
+        self.build_fake("mihomo")
+        binary = self.output / "mihomo"
         binary.chmod(0o644)
         with self.assertRaisesRegex(ValueError, "executable"):
-            builder.validate_component(self.output, "wireproxy", "arm64")
+            builder.validate_component(self.output, "mihomo", "arm64")
         actual = self.directory / "outside"
         binary.replace(actual)
         actual.chmod(0o755)
         binary.symlink_to(actual)
         with self.assertRaisesRegex(ValueError, "Invalid component"):
-            builder.validate_component(self.output, "wireproxy", "arm64")
+            builder.validate_component(self.output, "mihomo", "arm64")
 
 
 if __name__ == "__main__":
