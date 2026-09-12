@@ -24,11 +24,44 @@ final class NetworkServiceTests: XCTestCase {
         for value in ["127.0.0.1", "::1", "172.19.0.2", "198.18.0.2", "fe80::1", "224.0.0.1", "not-a-host"] { XCTAssertFalse(isPhysicalDNSAddress(value), value) }
         for value in ["192.168.1.1", "8.8.8.8", "2001:4860:4860::8888"] { XCTAssertTrue(isPhysicalDNSAddress(value), value) }
     }
-    func testWireproxyRejectsRootHooksAndRemoteListeners() throws {
-        let valid = "[Interface]\nPrivateKey = example\nAddress = 10.0.0.1/32\n[Peer]\nPublicKey = example\nEndpoint = example.test:1234\n[Socks5]\nBindAddress = 127.0.0.1:2080\n[http]\nBindAddress = 127.0.0.1:2081"
-        XCTAssertNoThrow(try ConfigPolicy.validateWireproxy(valid, socksPort: 2080, httpPort: 2081))
-        XCTAssertThrowsError(try ConfigPolicy.validateWireproxy(valid + "\nPostUp = /bin/sh", socksPort: 2080, httpPort: 2081))
-        XCTAssertThrowsError(try ConfigPolicy.validateWireproxy(valid.replacingOccurrences(of: "127.0.0.1:2080", with: "0.0.0.0:2080"), socksPort: 2080, httpPort: 2081))
+    func testSupportedCoresRejectScriptsAndRemoteListeners() {
+        let secret = "0123456789abcdef"
+        for core in ["keqrnel", "mihomo"] {
+            for mode in ["proxy", "tun"] {
+                let local: [String: Any] = ["type": "socks", "listen": "127.0.0.1", "listen_port": 2080]
+                let inbounds: [[String: Any]] = mode == "tun"
+                    ? [local, ["type": "tun", "auto_route": true, "address": ["172.19.0.1/30"]]]
+                    : [local]
+                let valid: [String: Any] = core == "keqrnel"
+                    ? ["inbounds": inbounds, "experimental": ["clash_api": ["external_controller": "127.0.0.1:9090", "secret": secret]]]
+                    : ["socks-port": 2080, "bind-address": "127.0.0.1", "external-controller": "127.0.0.1:9090", "secret": secret,
+                       "geodata-mode": true, "geo-auto-update": false, "tun": ["enable": mode == "tun"]]
+                func validate(_ object: [String: Any]) throws {
+                    try ConfigPolicy.validateJSON(object, core: core, mode: mode, ports: [2080, 2081, 9090], apiPort: 9090, secret: secret)
+                }
+                XCTAssertNoThrow(try validate(valid), "\(core) \(mode)")
+                for key in ["script", "command"] {
+                    var unsafe = valid
+                    unsafe[key] = "/bin/sh"
+                    XCTAssertThrowsError(try validate(unsafe), "\(core) \(mode) \(key)") {
+                        XCTAssertEqual(($0 as? ServiceFailure)?.code, "unsafeConfiguration")
+                    }
+                }
+                for address in ["0.0.0.0", "192.0.2.1"] {
+                    var unsafe = valid
+                    if core == "keqrnel" {
+                        var remoteInbounds = inbounds
+                        remoteInbounds[0]["listen"] = address
+                        unsafe["inbounds"] = remoteInbounds
+                    } else {
+                        unsafe["bind-address"] = address
+                    }
+                    XCTAssertThrowsError(try validate(unsafe), "\(core) \(mode) \(address)") {
+                        XCTAssertEqual(($0 as? ServiceFailure)?.code, "unsafeConfiguration")
+                    }
+                }
+            }
+        }
     }
     func testRejectsArbitraryRootOutputPathBeforeStartingCore() {
         let payload: [String: Any] = ["log": ["output": "/etc/sudoers"]]
