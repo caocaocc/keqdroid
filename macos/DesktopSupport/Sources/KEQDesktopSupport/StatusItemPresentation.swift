@@ -67,8 +67,10 @@ public enum StatusItemRenderer {
     public static let iconSize: CGFloat = 18
     public static let speedImageWidth: CGFloat = 87
     public static let speedItemLength: CGFloat = 95
-    public static let rateTextWidth: CGFloat = 56
+    public static let rateNumberWidth: CGFloat = 30
+    public static let rateUnitWidth: CGFloat = 24
     public static let rateFont = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .medium)
+    public static let rateUnitFont = NSFont.monospacedSystemFont(ofSize: 8.5, weight: .medium)
 
     public static func size(showSpeed: Bool) -> NSSize {
         NSSize(width: showSpeed ? speedImageWidth : iconSize, height: iconSize)
@@ -131,17 +133,31 @@ public enum StatusItemRenderer {
         }
     }
 
+    public static func rateColumns(_ value: String) -> (number: String, unit: String, numberX: CGFloat, unitX: CGFloat) {
+        let split = value.lastIndex(of: " ")
+        let number = split.map { String(value[..<$0]) } ?? value
+        let unit = split.map { String(value[value.index(after: $0)...]) } ?? ""
+        let width = (number as NSString).size(withAttributes: [.font: rateFont]).width
+        return (number, unit, 31 + rateNumberWidth - width, 63)
+    }
+
     private static func drawRate(_ value: String, arrow: String, y: CGFloat, color: NSColor) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byClipping
         let attributes: [NSAttributedString.Key: Any] = [
             .font: rateFont, .foregroundColor: color, .paragraphStyle: paragraph,
         ]
-        // The same coordinates and font apply to every sample; digits cannot move the item.
+        let columns = rateColumns(value)
         (arrow as NSString).draw(at: NSPoint(x: 22, y: y - 0.4), withAttributes: attributes)
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: NSRect(x: 31, y: y, width: rateTextWidth, height: 9)).addClip()
-        (value as NSString).draw(at: NSPoint(x: 31, y: y - 0.4), withAttributes: attributes)
+        NSBezierPath(rect: NSRect(x: 31, y: y, width: rateNumberWidth, height: 9)).addClip()
+        (columns.number as NSString).draw(at: NSPoint(x: columns.numberX, y: y - 0.4), withAttributes: attributes)
+        NSGraphicsContext.restoreGraphicsState()
+        var unitAttributes = attributes
+        unitAttributes[.font] = rateUnitFont
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: columns.unitX, y: y, width: rateUnitWidth, height: 9)).addClip()
+        (columns.unit as NSString).draw(at: NSPoint(x: columns.unitX, y: y - 0.4), withAttributes: unitAttributes)
         NSGraphicsContext.restoreGraphicsState()
     }
 }

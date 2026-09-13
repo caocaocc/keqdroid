@@ -78,10 +78,19 @@ check(statePixels[.connected] != statePixels[.connecting], "transient dots diffe
 check(statePixels[.connecting] == statePixels[.disconnecting], "both transient states use static dots")
 check(statePixels[.connecting] != statePixels[.error], "error marker differs from transient dots")
 let rateAttributes: [NSAttributedString.Key: Any] = [.font: StatusItemRenderer.rateFont]
+let unitAttributes: [NSAttributedString.Key: Any] = [.font: StatusItemRenderer.rateUnitFont]
 for text in ["— KB/s", "0 KB/s", "1023 KB/s", "9999 MB/s", ">9999 MB/s"] {
-    check((text as NSString).size(withAttributes: rateAttributes).width <= StatusItemRenderer.rateTextWidth,
-        "maximum formatted rate fits: \(text)")
+    let columns = StatusItemRenderer.rateColumns(text)
+    let numberWidth = (columns.number as NSString).size(withAttributes: rateAttributes).width
+    let unitWidth = (columns.unit as NSString).size(withAttributes: unitAttributes).width
+    check(numberWidth <= StatusItemRenderer.rateNumberWidth && unitWidth <= StatusItemRenderer.rateUnitWidth,
+        "maximum formatted rate fits its columns: \(text)")
+    check(abs(columns.numberX + numberWidth - 61) < 0.001, "rate numeric values are right-aligned")
+    check(columns.unitX == 63, "rate unit begins at a fixed position")
+    check("\(columns.number) \(columns.unit)" == text, "rate split preserves value and unit")
 }
+check(("K" as NSString).size(withAttributes: unitAttributes).width ==
+    ("M" as NSString).size(withAttributes: unitAttributes).width, "KB and MB suffixes align")
 let malformed: [(String, Any)] = [("status", "running"), ("showSpeed", 1),
     ("statusText", ""), ("statusText", String(repeating: "x", count: 161)),
     ("uploadText", "1\nMB/s"), ("downloadText", String(repeating: "9", count: 13)),
