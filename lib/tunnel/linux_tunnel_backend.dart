@@ -1,3 +1,4 @@
+import 'url_test_diagnostics.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -1219,7 +1220,7 @@ chown root:root '$_polkitRulePath' 2>/dev/null || true
   @override
   Future<
     List<
-      ({String id, bool success, int? latencyMs, String error, int? httpStatus})
+      ({String id, bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})
     >
   >
   xrayUrlTestBatch({
@@ -1249,6 +1250,7 @@ chown root:root '$_polkitRulePath' 2>/dev/null || true
             latencyMs: r.latencyMs,
             error: r.error,
             httpStatus: r.httpStatus,
+            diagnostics: r.diagnostics,
           ),
         )
         .toList();

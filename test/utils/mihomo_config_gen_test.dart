@@ -18,9 +18,15 @@ List<String> _rules(Map<String, dynamic> config) =>
 Map<String, dynamic> _download(String link, String extra) =>
     (_proxy(MihomoConfigGen.build(
       '$link&extra=${Uri.encodeQueryComponent(extra)}',
-      const AppSettings(),
+      _legacySettings,
       socksPort: 2080,
     ))['xhttp-opts'] as Map)['download-settings'] as Map<String, dynamic>;
+
+// Keep legacy baseline fixtures explicit; China defaults have their own tests.
+const _legacySettings = AppSettings(
+  directRules: 'ru, yandex.ru, vk.com',
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
+);
 
 void main() {
   setUp(() => Socks5Credentials().init('u', 'p'));
@@ -35,7 +41,7 @@ void main() {
     test('слушает только петлю и требует те же креды, что ждёт приложение', () {
       final c = MihomoConfigGen.build(
         'vless://uuid@example.com:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       );
       expect(c['socks-port'], 2080);
@@ -47,7 +53,7 @@ void main() {
     test('noauth-режим не пишет authentication вовсе', () {
       final c = MihomoConfigGen.build(
         'vless://uuid@example.com:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
         localInboundsNoAuth: true,
       );
@@ -58,7 +64,7 @@ void main() {
     test('geo берётся из вшитых баз, без автообновления', () {
       final c = MihomoConfigGen.build(
         'vless://uuid@example.com:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       );
       expect(c['geodata-mode'], isTrue);
@@ -84,7 +90,7 @@ void main() {
         'vless://uuid@vps1.example.org:8443?type=tcp&security=tls'
         '&sni=spotify.com&vcn=vps1.example.org'
         '&pcs=c88234050d72a3e9430ec7738636806deaf85c3708fee0fd9202ebd917e2c843',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['servername'], 'spotify.com');
@@ -104,7 +110,7 @@ void main() {
         '&sni=spotify.com&vcn=vps1.example.org'
         '&pcs=c88234050d72a3e9430ec7738636806deaf85c3708fee0fd9202ebd917e2c843'
         '%2Ca2372d06431e9716365eeed47ec020351497d182fcc038e457e58168a03cac07',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['name-cert-verify'], 'vps1.example.org');
@@ -116,7 +122,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=reality&sni=decoy.example'
         '&pbk=publickey&sid=aabb&vcn=nl.example&pcs=deadbeef',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p.containsKey('name-cert-verify'), isFalse);
@@ -127,7 +133,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=reality&sni=decoy.example'
         '&pbk=publickey&sid=aabb&fp=chrome&flow=xtls-rprx-vision',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['type'], 'vless');
@@ -149,7 +155,7 @@ void main() {
     test('vless без fp получает firefox', () {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@e.example:443?type=tcp&security=tls&sni=e.example',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['client-fingerprint'], 'firefox');
@@ -168,14 +174,14 @@ void main() {
       })));
       final v = _proxy(MihomoConfigGen.build(
         'vmess://$vmess',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(v['client-fingerprint'], 'firefox');
 
       final t = _proxy(MihomoConfigGen.build(
         'trojan://password@t.example:443?sni=t.example&type=tcp',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(t['client-fingerprint'], 'firefox');
@@ -190,7 +196,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@e.example:443?type=tcp&security=tls&sni=e.example'
         '&encryption=$encryption',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['encryption'], encryption);
@@ -200,7 +206,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@e.example:443?type=tcp&security=tls&sni=e.example'
         '&encryption=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p.containsKey('encryption'), isFalse);
@@ -210,7 +216,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@w.example:443?type=ws&security=tls&sni=w.example'
         '&path=%2Fpath&host=w.example',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'ws');
@@ -223,7 +229,7 @@ void main() {
     test('vless + grpc', () {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@g.example:443?type=grpc&security=tls&serviceName=svc',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'grpc');
@@ -245,7 +251,7 @@ void main() {
       })));
       final p = _proxy(MihomoConfigGen.build(
         'vmess://$payload',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['type'], 'vmess');
@@ -261,7 +267,7 @@ void main() {
     test('trojan', () {
       final p = _proxy(MihomoConfigGen.build(
         'trojan://secret@t.example:8443?sni=t.example',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['type'], 'trojan');
@@ -273,7 +279,7 @@ void main() {
       final userInfo = base64.encode(utf8.encode('aes-256-gcm:pass'));
       final p = _proxy(MihomoConfigGen.build(
         'ss://$userInfo@s.example:8388#node',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['type'], 'ss');
@@ -287,7 +293,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'hysteria2://token@hy.example:443?sni=hy.example&obfs=salamander'
         '&obfs-password=xyz&up=50&down=200',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['type'], 'hysteria2');
@@ -302,7 +308,7 @@ void main() {
     test('insecure=1 не превращается в skip-cert-verify', () {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@e.example:443?type=tcp&security=tls&insecure=1',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p.containsKey('skip-cert-verify'), isFalse);
@@ -312,7 +318,7 @@ void main() {
       expect(
         () => MihomoConfigGen.build(
           'wireguard://secret@w.example:51820',
-          const AppSettings(),
+          _legacySettings,
           socksPort: 2080,
         ),
         throwsA(isA<ArgumentError>().having(
@@ -333,7 +339,7 @@ void main() {
         'vless://uuid@x.example:443?type=xhttp&security=reality'
         '&pbk=key&sid=ab&sni=cdn.example&mode=auto&path=%2Fpath'
         '&x_padding_bytes=92-1412',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'xhttp');
@@ -347,7 +353,7 @@ void main() {
     test('splithttp — то же самое под старым именем', () {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=splithttp&security=tls&sni=x.example',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'xhttp');
@@ -360,7 +366,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       final opts = p['xhttp-opts'] as Map;
@@ -385,7 +391,7 @@ void main() {
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&path=%2Fupload%2F&mode=packet-up'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['xhttp-opts'], {
@@ -410,7 +416,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['session-key'], 'sid');
@@ -428,7 +434,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['x-padding-obfs-mode'], isTrue);
@@ -444,7 +450,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['x-padding-placement'], 'header');
@@ -459,7 +465,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&x_padding_bytes=100-1000',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['x-padding-bytes'], '100-1000');
@@ -474,7 +480,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['reuse-settings'], {
@@ -489,7 +495,7 @@ void main() {
       final opts = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=${Uri.encodeQueryComponent(extra)}',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ))['xhttp-opts'] as Map;
       expect(opts['headers'], {'X-Token': 'abc'});
@@ -597,7 +603,7 @@ void main() {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=xhttp&security=tls&sni=x.example'
         '&extra=%7Bnot-json',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'xhttp');
@@ -607,7 +613,7 @@ void main() {
     test('raw — это tcp под новым именем', () {
       final p = _proxy(MihomoConfigGen.build(
         'vless://uuid@x.example:443?type=raw&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       ));
       expect(p['network'], 'tcp');
@@ -617,7 +623,7 @@ void main() {
       expect(
         () => MihomoConfigGen.build(
           'vless://uuid@x.example:443?type=kcp&security=none',
-          const AppSettings(),
+          _legacySettings,
           socksPort: 2080,
         ),
         throwsA(isA<ArgumentError>().having(
@@ -739,7 +745,7 @@ void main() {
     test('включён и нюхает чистые IP — иначе домены не матчатся вовсе', () {
       final s = MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       )['sniffer'] as Map<String, dynamic>;
 
@@ -783,7 +789,7 @@ void main() {
     test('ядро резолвит само, подмена адресов по умолчанию выключена', () {
       final dns = MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       )['dns'] as Map<String, dynamic>;
 
@@ -854,7 +860,7 @@ void main() {
       );
       expect(dns['respect-rules'], isTrue);
       expect(
-        (dns['nameserver'] as List).first,
+        ((dns['nameserver-policy'] as Map)['geosite:cn'] as List).first,
         'https://9.9.9.9/dns-query#DIRECT',
       );
     });
@@ -868,6 +874,7 @@ void main() {
           MihomoConfigGen.buildDns(AppSettings(
             xrayCore: XrayCoreSettings(
               dnsUseCustom: true,
+              dnsSplitDirectDomains: false,
               dnsServers: servers,
             ),
           ))['default-nameserver'] as List<String>;
@@ -887,7 +894,7 @@ void main() {
         expect(bootstrapFor('https://9.9.9.9/dns-query').single, startsWith('https://'));
         // Умолчание — те же два адреса, что и были, но теперь тоже DoH.
         expect(
-          MihomoConfigGen.buildDns(const AppSettings())['default-nameserver'],
+          MihomoConfigGen.buildDns(_legacySettings)['default-nameserver'],
           ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query'],
         );
       });
@@ -956,7 +963,7 @@ void main() {
         () {
       final withApi = MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
         apiPort: 9971,
         apiSecret: 's3cr3t',
@@ -967,7 +974,7 @@ void main() {
       // Пинг и спидтест поднимают ядро без API — управлять там нечем.
       final withoutApi = MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       );
       expect(withoutApi.containsKey('external-controller'), isFalse);
@@ -985,7 +992,7 @@ void main() {
     test('выключенная раздача не оставляет ни листенеров, ни их правил', () {
       final c = MihomoConfigGen.build(
         'vless://uuid@nl.example:443?type=tcp&security=none',
-        const AppSettings(),
+        _legacySettings,
         socksPort: 2080,
       );
       expect(c.containsKey('listeners'), isFalse);

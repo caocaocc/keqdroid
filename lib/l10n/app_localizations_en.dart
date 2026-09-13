@@ -9,6 +9,24 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Connected, but DNS queries failed';
+
+  @override
+  String get macosTunDnsOk => 'DNS queries succeeded';
+
+  @override
+  String get macosTunDnsChecking => 'Checking DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Mainland China domains and IPs bypass the proxy.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'China direct';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -459,7 +477,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Custom DNS servers';
 
   @override
-  String get settingsXrayDnsCustomHint => 'One address per line (DoH, DoT, or plain)';
+  String get settingsXrayDnsCustomHint => 'One address per line. +local connects directly; other addresses follow proxy routing.';
 
   @override
   String get settingsXrayDnsServers => 'DNS servers';
@@ -468,7 +486,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'Split resolver for direct domains';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'Uses first server for domains from direct list';
+  String get settingsXrayDnsSplitDirectHint => 'With two or more servers: first for direct domains and node lookup, the rest for other domains. Desktop Xray TUN uses only the first two. Local names use system DNS; enterprise split DNS is not detected automatically.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'Query strategy';
@@ -534,7 +552,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Sniffed domain for routing only';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'Default: Cloudflare and Google DoH';
+  String get settingsXrayDnsDefaultNote => 'When custom DNS is off: Cloudflare and Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Tuning';
@@ -1272,6 +1290,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get desktopModeShort => 'Mode';
 
   @override
+  String get macosLaunchAtLogin => 'Launch at login';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Connect automatically at login';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'Connect to the last selected server using the mode from the sidebar when launched at login. TUN requires prior authorization and will not connect automatically without it. Proxy requires no administrator authorization.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Enable \"Launch at login\" first';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override
@@ -1836,7 +1866,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsResetConfirmAction => 'Reset';
 
   @override
-  String get settingsResetRoutingConfirm => 'This restores the built-in routing rules and discards your direct/proxy/blocked lists. This can\'t be undone.';
+  String get settingsResetRoutingConfirm => 'This restores the built-in routing rules, discards your direct/proxy/blocked lists, and routes other traffic through the proxy. This can\'t be undone.';
 
   @override
   String get settingsXrayResetConfirm => 'This restores the default Xray core, TUN and local port settings. This can\'t be undone.';
@@ -2486,4 +2516,60 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Could not read this image.';
+
+  @override
+  String get macosSplitProcessHint => 'Rules match executable paths, including helpers inside the selected app. Shared system services may not be attributable to an app.';
+
+  @override
+  String get macosAppNeedsMatching => 'App not found in this list. Locate it again if it moved or was removed.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Network service';
+
+  @override
+  String get macosNetworkServiceHint => 'Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Install or update KEQDIS using the complete PKG installer to enable the network service.';
+
+  @override
+  String get macosAuthorizeAccount => 'Authorize TUN for this account';
+
+  @override
+  String get macosWaitingNetwork => 'Waiting for network to recover';
+
+  @override
+  String get macosRestoringNetwork => 'Restoring previous network settings';
+
+  @override
+  String get macosRetryingNetwork => 'Reconnecting automatically';
+
+  @override
+  String get macosRecoveryPaused => 'Automatic recovery paused';
+
+  @override
+  String get macosRetryRecovery => 'Retry network restoration';
+
+  @override
+  String get pingTimingWarm => 'Warm connection';
+
+  @override
+  String get pingTimingCold => 'Full request';
+
+  @override
+  String get pingTimingFallback => 'First request';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return 'Stage $stage; elapsed $elapsed ms / $budget ms';
+  }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'Show real-time speed in the menu bar';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'Traffic handled by KEQDIS';
+
+  @override
+  String get macosMenuOpenServers => 'Open window to select a node';
 }

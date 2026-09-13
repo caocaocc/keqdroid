@@ -9,6 +9,24 @@ class AppLocalizationsFa extends AppLocalizations {
   AppLocalizationsFa([String locale = 'fa']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'متصل است، اما درخواست‌های DNS ناموفق بود';
+
+  @override
+  String get macosTunDnsOk => 'درخواست‌های DNS موفق بود';
+
+  @override
+  String get macosTunDnsChecking => 'در حال بررسی DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'دامنه‌ها و IPهای سرزمین اصلی چین مستقیم متصل می‌شوند.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'چین مستقیم';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -459,7 +477,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXrayDnsCustom => 'سرورهای DNS دلخواه';
 
   @override
-  String get settingsXrayDnsCustomHint => 'هر آدرس در یک خط (DoH، DoT یا ساده)';
+  String get settingsXrayDnsCustomHint => 'هر خط یک آدرس. +local مستقیماً متصل می‌شود؛ سایر آدرس‌ها از قوانین پروکسی پیروی می‌کنند.';
 
   @override
   String get settingsXrayDnsServers => 'سرورهای DNS';
@@ -468,7 +486,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'DNS جدا برای دامنه‌های مستقیم';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'برای دامنه‌های فهرست مستقیم از سرور اول استفاده می‌کند';
+  String get settingsXrayDnsSplitDirectHint => 'با دو یا چند سرور: اولی برای دامنه‌های مستقیم و نام گره و بقیه برای سایر دامنه‌ها. Xray TUN دسکتاپ فقط از دو مورد اول استفاده می‌کند. نام‌های محلی از DNS سیستم استفاده می‌کنند؛ DNS تفکیک‌شده سازمانی خودکار شناسایی نمی‌شود.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'استراتژی پرس‌وجو';
@@ -534,7 +552,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'شناسایی فقط برای مسیریابی';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'پیش‌فرض: DoH کلادفلر و گوگل';
+  String get settingsXrayDnsDefaultNote => 'وقتی DNS سفارشی خاموش است: Cloudflare و Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'تنظیم دقیق';
@@ -1272,6 +1290,18 @@ class AppLocalizationsFa extends AppLocalizations {
   String get desktopModeShort => 'حالت';
 
   @override
+  String get macosLaunchAtLogin => 'اجرا هنگام ورود به سیستم';
+
+  @override
+  String get macosAutoConnectOnLogin => 'اتصال خودکار هنگام ورود به سیستم';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'هنگام اجرای برنامه پس از ورود به سیستم، به آخرین سرور انتخاب‌شده با حالت پنل کناری متصل می‌شود. برای TUN باید از قبل مجوز داده شود؛ بدون مجوز، اتصال خودکار انجام نمی‌شود. Proxy به مجوز مدیر نیاز ندارد.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'ابتدا «اجرا هنگام ورود به سیستم» را فعال کنید';
+
+  @override
   String get settingsDesktopTitle => 'ویندوز';
 
   @override
@@ -1836,7 +1866,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsResetConfirmAction => 'بازنشانی';
 
   @override
-  String get settingsResetRoutingConfirm => 'این کار قوانین مسیریابی پیش‌فرض را برمی‌گرداند و فهرست‌های مستقیم، پروکسی و مسدود شما را پاک می‌کند. برگشت‌پذیر نیست.';
+  String get settingsResetRoutingConfirm => 'قوانین داخلی بازیابی و فهرست‌های مستقیم/پروکسی/مسدود حذف می‌شوند و سایر ترافیک از پروکسی عبور می‌کند. این کار قابل بازگشت نیست.';
 
   @override
   String get settingsXrayResetConfirm => 'این کار تنظیمات پیش‌فرض هستهٔ Xray، TUN و پورت‌های محلی را برمی‌گرداند. برگشت‌پذیر نیست.';
@@ -2486,4 +2516,60 @@ class AppLocalizationsFa extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'خواندن این تصویر ممکن نشد.';
+
+  @override
+  String get macosSplitProcessHint => 'قواعد مسیر فایل اجرایی برنامه و پردازش‌های کمکی آن را تطبیق می‌دهند. سرویس‌های مشترک سیستم همیشه به یک برنامه قابل انتساب نیستند.';
+
+  @override
+  String get macosAppNeedsMatching => 'برنامه در فهرست یافت نشد. اگر جابه‌جا یا حذف شده است، دوباره انتخاب کنید.';
+
+  @override
+  String get macosNetworkServiceTitle => 'سرویس شبکه';
+
+  @override
+  String get macosNetworkServiceHint => 'Proxy بدون مجوز مدیر متصل می‌شود و پراکسی سیستم را تغییر می‌دهد. TUN برای هر نسخهٔ نصب‌شده یک بار به مجوز نیاز دارد.';
+
+  @override
+  String get macosNetworkServiceMissing => 'برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.';
+
+  @override
+  String get macosAuthorizeAccount => 'اجازهٔ TUN به این حساب';
+
+  @override
+  String get macosWaitingNetwork => 'Waiting for network to recover';
+
+  @override
+  String get macosRestoringNetwork => 'Restoring previous network settings';
+
+  @override
+  String get macosRetryingNetwork => 'Reconnecting automatically';
+
+  @override
+  String get macosRecoveryPaused => 'Automatic recovery paused';
+
+  @override
+  String get macosRetryRecovery => 'Retry network restoration';
+
+  @override
+  String get pingTimingWarm => 'Warm connection';
+
+  @override
+  String get pingTimingCold => 'Full request';
+
+  @override
+  String get pingTimingFallback => 'First request';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return 'Stage $stage; elapsed $elapsed ms / $budget ms';
+  }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'نمایش سرعت لحظه‌ای در نوار منو';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'ترافیک پردازش‌شده توسط KEQDIS';
+
+  @override
+  String get macosMenuOpenServers => 'باز کردن پنجره برای انتخاب گره';
 }
