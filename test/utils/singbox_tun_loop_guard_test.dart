@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 /// Три способа получить «туннель поднялся, ошибок нет, трафика нет».
 ///
 /// Все три жили в одном конфиге и по отдельности незаметны: ядро стартует,
@@ -30,7 +33,7 @@ Map<String, dynamic> _build({
         socksUsername: 'u',
         socksPassword: 'p',
         serverIpToExclude: serverIpToExclude,
-        settings: const AppSettings(),
+        settings: _legacySettings,
         windows: windows,
         appProcessName: windows ? 'keqdroid.exe' : 'keqdroid',
       ),

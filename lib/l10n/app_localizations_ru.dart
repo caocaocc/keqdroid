@@ -9,6 +9,24 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Подключено, но DNS-запросы не удались';
+
+  @override
+  String get macosTunDnsOk => 'DNS-запросы успешны';
+
+  @override
+  String get macosTunDnsChecking => 'Проверка DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Домены и IP материкового Китая идут напрямую.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'Китай напрямую';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -461,7 +479,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Свои DNS-серверы';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Один адрес на строку (DoH, DoT или обычный)';
+  String get settingsXrayDnsCustomHint => 'Один адрес на строку. +local — напрямую; остальные следуют правилам прокси.';
 
   @override
   String get settingsXrayDnsServers => 'DNS-серверы';
@@ -470,7 +488,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => 'Отдельный резолвер для direct-доменов';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => 'Первый сервер — для доменов из списка direct';
+  String get settingsXrayDnsSplitDirectHint => 'При двух и более серверах: первый для прямых доменов и адреса узла, остальные для других доменов. Xray TUN на ПК использует первые два. Локальные имена — через системный DNS; корпоративный split DNS автоматически не определяется.';
 
   @override
   String get settingsXrayDnsQueryStrategy => 'Стратегия запросов';
@@ -536,7 +554,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Sniffing route only';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'По умолчанию: DoH Cloudflare и Google';
+  String get settingsXrayDnsDefaultNote => 'Без своих DNS: Cloudflare и Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Тонкая настройка';
@@ -1232,6 +1250,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get desktopModeShort => 'Режим';
 
   @override
+  String get macosLaunchAtLogin => 'Запускать при входе в систему';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Подключаться автоматически при входе';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'При запуске после входа в систему подключается к последнему выбранному серверу в режиме из боковой панели. Для TUN нужно заранее предоставить разрешение; без него автоматического подключения не будет. Для Proxy разрешение администратора не требуется.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Сначала включите «Запускать при входе в систему»';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override
@@ -1796,7 +1826,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsResetConfirmAction => 'Сбросить';
 
   @override
-  String get settingsResetRoutingConfirm => 'Вернутся встроенные правила маршрутизации, ваши списки direct/proxy/block будут удалены. Действие нельзя отменить.';
+  String get settingsResetRoutingConfirm => 'Будут восстановлены встроенные правила, удалены ваши списки direct/proxy/block, а остальной трафик направлен через прокси. Это нельзя отменить.';
 
   @override
   String get settingsXrayResetConfirm => 'Настройки ядра Xray, TUN и локальные порты вернутся к значениям по умолчанию. Действие нельзя отменить.';
@@ -2446,4 +2476,60 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Не удалось прочитать эту картинку.';
+
+  @override
+  String get macosSplitProcessHint => 'Правила учитывают пути процессов и помощников внутри приложения. Общие системные службы не всегда можно связать с приложением.';
+
+  @override
+  String get macosAppNeedsMatching => 'Приложение не найдено в списке. Выберите его заново, если оно перемещено или удалено.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Сетевая служба';
+
+  @override
+  String get macosNetworkServiceHint => 'Proxy подключается и переключает системный прокси без прав администратора. Для TUN нужно разрешение один раз для установленной версии.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Установите или обновите KEQDIS полным пакетом PKG, чтобы включить сетевую службу.';
+
+  @override
+  String get macosAuthorizeAccount => 'Разрешить TUN этому аккаунту';
+
+  @override
+  String get macosWaitingNetwork => 'Waiting for network to recover';
+
+  @override
+  String get macosRestoringNetwork => 'Restoring previous network settings';
+
+  @override
+  String get macosRetryingNetwork => 'Reconnecting automatically';
+
+  @override
+  String get macosRecoveryPaused => 'Automatic recovery paused';
+
+  @override
+  String get macosRetryRecovery => 'Retry network restoration';
+
+  @override
+  String get pingTimingWarm => 'Warm connection';
+
+  @override
+  String get pingTimingCold => 'Full request';
+
+  @override
+  String get pingTimingFallback => 'First request';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return 'Stage $stage; elapsed $elapsed ms / $budget ms';
+  }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'Показывать текущую скорость в строке меню';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'Трафик, обрабатываемый KEQDIS';
+
+  @override
+  String get macosMenuOpenServers => 'Открыть окно для выбора узла';
 }

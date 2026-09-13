@@ -39,7 +39,7 @@ const _settings = AppSettings(
   blockedRules: 'ads.example',
   finalOutbound: AppSettings.finalOutboundProxy,
   killSwitch: false,
-  xrayCore: XrayCoreSettings(),
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
 );
 
 /// Общая часть вызова: меняем в кейсах только то, что кейс проверяет.

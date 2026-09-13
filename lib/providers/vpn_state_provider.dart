@@ -675,15 +675,22 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         final ignored = SingBoxTunConfigGen.ignoredCustomDnsServers(settings);
         if (ignored.isNotEmpty) {
           AppLogger.instance.warn(
-            'Custom DNS: in TUN mode the core runs a single resolver, so only '
-            'the first usable address is in effect. Not used: '
+            'Custom DNS: TUN uses one address per DNS group. Not used: '
             '${ignored.join(', ')}.',
           );
         }
       }
 
+      final chinaDnsDomains = !mihomoPicked &&
+              !Platform.isAndroid &&
+              connectionMode == ConnectionMode.tun &&
+              SingBoxTunConfigGen.needsChinaDnsDomains(settings)
+          ? await GeoAssetService.chinaDnsDomains()
+          : const <GeoDomain>[];
+
       final session = TunnelSessionBuilder.build(
         settings: settings,
+        chinaDnsDomains: chinaDnsDomains,
         xrayConfig: xrayConfig,
         vpnBackend: vpnBackend,
         mihomoConfig: mihomoConfig,
