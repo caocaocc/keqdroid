@@ -2551,4 +2551,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String pingProbeDetails(String stage, int elapsed, int budget) {
     return 'Stage $stage; elapsed $elapsed ms / $budget ms';
   }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'Aktuelle Geschwindigkeit in der Menüleiste anzeigen';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'Von KEQDIS verarbeiteter Datenverkehr';
+
+  @override
+  String get macosMenuOpenServers => 'Fenster zur Knotenauswahl öffnen';
 }

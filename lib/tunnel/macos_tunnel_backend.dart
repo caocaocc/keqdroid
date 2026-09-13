@@ -34,6 +34,8 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   final MethodChannel _channel;
   final MethodChannel _desktopChannel;
   final bool _enablePolling;
+  final Duration Function() _statsNow;
+  final DateTime Function() _statsWallNow;
   final _states = StreamController<VpnState>.broadcast();
   final _observations = StreamController<MacOSServiceObservation>.broadcast();
   Map<String, dynamic> _serviceInfo = const {};
@@ -55,15 +57,27 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   VpnState _state = VpnState.disconnected;
   int? _apiPort;
   String _apiSecret = '';
-  DateTime? _lastStats;
+  Duration? _lastStats;
+  DateTime? _lastStatsWall;
+  bool _statsPolling = false;
+  int _statsGeneration = 0;
 
   MacOSTunnelBackend({
     MethodChannel channel = networkChannel,
     MethodChannel desktop = desktopChannel,
     bool enablePolling = true,
+    Duration Function()? statsNow,
+    DateTime Function()? statsWallNow,
   }) : _channel = channel,
        _desktopChannel = desktop,
-       _enablePolling = enablePolling;
+       _enablePolling = enablePolling,
+       _statsNow = statsNow ?? _statsClock(),
+       _statsWallNow = statsWallNow ?? DateTime.now;
+
+  static Duration Function() _statsClock() {
+    final clock = Stopwatch()..start();
+    return () => clock.elapsed;
+  }
 
   VpnState get currentState => _state;
   int? get clashApiPort => _apiPort;
@@ -157,6 +171,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
   @override
   void emit(VpnState state) {
     if (_disposed) return;
+    if (state.status != VpnStatus.connected) _resetTrafficBaseline();
     if (state.status != VpnStatus.connected) desktopLanState.value = null;
     if (state.status != VpnStatus.connected &&
         desktopDnsDiagnostics.value?.sessionId == _sessionId) {
@@ -280,9 +295,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       _networkChangeSession = null;
       _networkChangePending = false;
       _pids = const {};
-      totalUpload = 0;
-      totalDownload = 0;
-      _lastStats = null;
+      _resetTrafficBaseline(clearTotals: true);
       sessionStartedAt = DateTime.now();
       _pendingStartEpoch = service['helperEpoch'] as String?;
       final snapshot = await _call(
@@ -483,6 +496,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     _context = null;
     MacOSNetworkContext.active = null;
     sessionStartedAt = null;
+    _resetTrafficBaseline(clearTotals: true);
     resetStatsHttp();
     MihomoApiSession().clear();
   }
@@ -679,50 +693,94 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
     ConnectionMode mode, {
     bool force = false,
   }) async {
-    if ((!statsPollingEnabled && !force) ||
-        _state.status != VpnStatus.connected) {
+    if (_statsPolling ||
+        _disposed ||
+        _stopRequested ||
+        (!statsPollingEnabled && !force) ||
+        _state.status != VpnStatus.connected ||
+        _apiPort == null ||
+        _sessionId == null) {
       return;
     }
+    _statsPolling = true;
     final id = _sessionId;
-    int? down;
-    int? up;
-    if (_apiPort != null) {
-      final counters = await queryClashTraffic(_apiPort!, secret: _apiSecret);
-      down = counters?.down;
-      up = counters?.up;
+    final generation = _operationGeneration;
+    final statsGeneration = _statsGeneration;
+    try {
+      final counters = await queryClashTraffic(
+        _apiPort!,
+        secret: _apiSecret,
+      ).timeout(const Duration(seconds: 3));
+      if (_disposed ||
+          _stopRequested ||
+          generation != _operationGeneration ||
+          statsGeneration != _statsGeneration ||
+          id != _sessionId ||
+          counters == null ||
+          counters.down < 0 ||
+          counters.up < 0 ||
+          _state.status != VpnStatus.connected) {
+        return;
+      }
+      final now = _statsNow();
+      final wallNow = _statsWallNow();
+      final elapsed = _lastStats == null ? Duration.zero : now - _lastStats!;
+      final wallElapsed = _lastStatsWall == null
+          ? Duration.zero
+          : wallNow.difference(_lastStatsWall!);
+      // Stopwatch may pause during sleep; wall time only invalidates the baseline.
+      final baseline =
+          _lastStats == null ||
+          elapsed <= Duration.zero ||
+          elapsed > const Duration(seconds: 3) ||
+          wallElapsed < Duration.zero ||
+          wallElapsed > const Duration(seconds: 3) ||
+          resumeBaselinePending ||
+          counters.down < totalDownload ||
+          counters.up < totalUpload;
+      final downloadSpeed = baseline
+          ? null
+          : (counters.down - totalDownload) *
+                Duration.microsecondsPerSecond ~/
+                elapsed.inMicroseconds;
+      final uploadSpeed = baseline
+          ? null
+          : (counters.up - totalUpload) *
+                Duration.microsecondsPerSecond ~/
+                elapsed.inMicroseconds;
+      totalDownload = counters.down;
+      totalUpload = counters.up;
+      _lastStats = now;
+      _lastStatsWall = wallNow;
+      resumeBaselinePending = false;
+      emitConnectedTelemetry(
+        mode,
+        downloadSpeed: downloadSpeed,
+        uploadSpeed: uploadSpeed,
+      );
+    } on TimeoutException {
+      resetStatsHttp();
+    } finally {
+      _statsPolling = false;
     }
-    if (id != _sessionId ||
-        down == null ||
-        up == null ||
-        _state.status != VpnStatus.connected) {
-      return;
-    }
-    final now = DateTime.now();
-    final elapsed = _lastStats == null
-        ? 0
-        : now.difference(_lastStats!).inMilliseconds;
-    final downloadSpeed = elapsed <= 0 || resumeBaselinePending
-        ? 0
-        : ((down - totalDownload).clamp(0, down) * 1000 ~/ elapsed);
-    final uploadSpeed = elapsed <= 0 || resumeBaselinePending
-        ? 0
-        : ((up - totalUpload).clamp(0, up) * 1000 ~/ elapsed);
-    totalDownload = down;
-    totalUpload = up;
-    _lastStats = now;
+  }
+
+  void _resetTrafficBaseline({bool clearTotals = false}) {
+    ++_statsGeneration;
+    _lastStats = null;
+    _lastStatsWall = null;
     resumeBaselinePending = false;
-    emitConnectedTelemetry(
-      mode,
-      downloadSpeed: downloadSpeed,
-      uploadSpeed: uploadSpeed,
-    );
+    if (clearTotals) {
+      totalDownload = 0;
+      totalUpload = 0;
+    }
   }
 
   @override
   void setTrafficStatsPollingEnabled(bool enabled) {
     if (statsPollingEnabled == enabled) return;
     statsPollingEnabled = enabled;
-    resumeBaselinePending = enabled;
+    _resetTrafficBaseline();
     if (!enabled) resetStatsHttp();
   }
 

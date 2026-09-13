@@ -2549,4 +2549,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String pingProbeDetails(String stage, int elapsed, int budget) {
     return '阶段 $stage；总耗时 $elapsed ms / $budget ms';
   }
+
+  @override
+  String get appearanceShowMenuBarSpeed => '菜单栏显示实时速率';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'KEQDIS处理流量';
+
+  @override
+  String get macosMenuOpenServers => '打开窗口选择节点';
 }

@@ -1073,5 +1073,8 @@
   "pingTimingCold": "完整请求",
   "pingTimingFallback": "首次请求",
   "pingProbeDetails": "阶段 {stage}；总耗时 {elapsed} ms / {budget} ms",
-  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
+  "appearanceShowMenuBarSpeed": "菜单栏显示实时速率",
+  "appearanceShowMenuBarSpeedSubtitle": "KEQDIS处理流量",
+  "macosMenuOpenServers": "打开窗口选择节点"
 }

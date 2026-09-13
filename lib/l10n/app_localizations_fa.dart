@@ -2551,4 +2551,13 @@ class AppLocalizationsFa extends AppLocalizations {
   String pingProbeDetails(String stage, int elapsed, int budget) {
     return 'Stage $stage; elapsed $elapsed ms / $budget ms';
   }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'نمایش سرعت لحظه‌ای در نوار منو';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'ترافیک پردازش‌شده توسط KEQDIS';
+
+  @override
+  String get macosMenuOpenServers => 'باز کردن پنجره برای انتخاب گره';
 }

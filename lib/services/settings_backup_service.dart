@@ -113,6 +113,7 @@ class SettingsBackupService {
     'showTrafficSplit',
     'waveLatencyColor',
     'showSpeedInNotification',
+    'showMenuBarSpeed',
     'showUptimeInNotification',
     // язык
     'appLanguageCode',

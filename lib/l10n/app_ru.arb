@@ -1073,5 +1073,8 @@
   "pingTimingCold": "Full request",
   "pingTimingFallback": "First request",
   "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
-  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
+  "appearanceShowMenuBarSpeed": "Показывать текущую скорость в строке меню",
+  "appearanceShowMenuBarSpeedSubtitle": "Трафик, обрабатываемый KEQDIS",
+  "macosMenuOpenServers": "Открыть окно для выбора узла"
 }

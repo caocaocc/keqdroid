@@ -33,6 +33,14 @@ class MacOSDesktopService {
   static Future<void> toggleWindow() =>
       channel.invokeMethod<void>('toggleWindow');
 
+  static Future<void> showWindow() => channel.invokeMethod<void>('showWindow');
+
+  static Future<void> updateStatusItem(Map<String, Object> presentation) =>
+      channel.invokeMethod<void>('updateStatusItem', presentation);
+
+  static Future<void> updateStatusMenu(Map<String, Object> menu) =>
+      channel.invokeMethod<void>('updateStatusMenu', menu);
+
   static Future<void> completeQuit() =>
       channel.invokeMethod<void>('completeQuit');
 

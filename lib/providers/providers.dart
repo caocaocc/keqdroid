@@ -24,6 +24,7 @@ import '../services/app_icon_cache.dart';
 import '../services/card_image_service.dart';
 import '../services/geo_asset_service.dart';
 import '../services/macos_app_routing_store.dart';
+import '../services/macos_status_item.dart';
 import '../services/notification_service.dart';
 import '../services/ping_service.dart';
 import '../services/storage_service.dart';
@@ -149,13 +150,29 @@ final vpnEngineProvider = Provider<VpnEngine>((ref) {
   // Два входа: (1) Flutter-lifecycle (`hidden`/`paused` — реальное сворачивание/
   // фон), (2) нативный трей на Windows через desktopWindowVisibleProvider — трей
   // SW_HIDE движок отдаёт лишь как `inactive`, поэтому lifecycle его не ловит.
-  // Опрашиваем, только когда окно и на переднем плане, и реально видимо.
+  // macOS также опрашивает для видимой скорости в строке меню.
+  // Остальным достаточно окна на переднем плане и реально видимого.
   // `inactive` на десктопе = окно видимо, но без фокуса — опрос продолжается.
   // Статус-события (ошибка, disconnect от вотчдога) идут независимо от этого.
   var lifecycleForeground = true;
   var uiVisible = true;
-  void applyPolling() =>
-      engine.setTrafficStatsPollingEnabled(lifecycleForeground && uiVisible);
+  var menuBarSpeed = Platform.isMacOS &&
+      (ref.read(settingsNotifierProvider).value?.showMenuBarSpeed ?? true);
+  void applyPolling() => engine.setTrafficStatsPollingEnabled(
+    desktopTrafficPollingNeeded(
+      visible: uiVisible,
+      foreground: lifecycleForeground,
+      macOS: Platform.isMacOS,
+      showMenuBarSpeed: menuBarSpeed,
+    ),
+  );
+  if (Platform.isMacOS) {
+    ref.listen(settingsNotifierProvider.select((s) => s.value?.showMenuBarSpeed ?? true),
+        (_, next) {
+      menuBarSpeed = next;
+      applyPolling();
+    });
+  }
   final lifecycle = AppLifecycleListener(
     onStateChange: (state) {
       final hidden = state == AppLifecycleState.hidden ||

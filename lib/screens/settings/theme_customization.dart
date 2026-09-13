@@ -186,6 +186,15 @@ class _AppearanceGeneralTab extends StatelessWidget {
                 value: current.waveLatencyColor,
                 onChanged: (v) => onSave(current.copyWith(waveLatencyColor: v)),
               ),
+              if (Platform.isMacOS)
+                _AppearanceSwitchTile(
+                  icon: Icons.speed_rounded,
+                  title: l10n.appearanceShowMenuBarSpeed,
+                  subtitle: l10n.appearanceShowMenuBarSpeedSubtitle,
+                  value: current.showMenuBarSpeed,
+                  onChanged: (v) =>
+                      onSave(current.copyWith(showMenuBarSpeed: v)),
+                ),
             ],
           ),
           // AMOLED уехал на вкладку «Темы», к выбору светлой/тёмной: он и есть

@@ -784,5 +784,8 @@
   "pingTimingCold": "Full request",
   "pingTimingFallback": "First request",
   "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
-  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}}
+  "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
+  "appearanceShowMenuBarSpeed": "نمایش سرعت لحظه‌ای در نوار منو",
+  "appearanceShowMenuBarSpeedSubtitle": "ترافیک پردازش‌شده توسط KEQDIS",
+  "macosMenuOpenServers": "باز کردن پنجره برای انتخاب گره"
 }

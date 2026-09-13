@@ -27,6 +27,20 @@ class VpnNativeBridge {
   static void Function(bool visible)? _windowVisibilityHandler;
   static Future<void> Function()? _quitHandler;
   static bool _quitInFlight = false;
+  static Future<void> Function(String action, String? value)? _statusMenuHandler;
+  static void Function()? _wakeHandler;
+
+  static void registerWakeHandler(void Function()? handler) {
+    _wakeHandler = handler;
+    _syncMethodCallHandler();
+  }
+
+  static void registerStatusMenuHandler(
+    Future<void> Function(String action, String? value)? handler,
+  ) {
+    _statusMenuHandler = handler;
+    _syncMethodCallHandler();
+  }
 
   static void registerQuitHandler(Future<void> Function()? handler) {
     _quitHandler = handler;
@@ -194,6 +208,18 @@ class VpnNativeBridge {
       return;
     }
     channel.setMethodCallHandler((call) async {
+      if (call.method == 'onSystemWake' && Platform.isMacOS) {
+        _wakeHandler?.call();
+        return;
+      }
+      if (call.method == 'onStatusMenuAction' && Platform.isMacOS) {
+        final args = call.arguments;
+        if (args is Map && args['action'] is String &&
+            (args['value'] == null || args['value'] is String)) {
+          await _statusMenuHandler?.call(args['action'] as String, args['value'] as String?);
+        }
+        return;
+      }
       if (call.method == 'onQuitRequest' && Platform.isMacOS) {
         if (_quitInFlight) return;
         _quitInFlight = true;

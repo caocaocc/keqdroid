@@ -92,6 +92,7 @@ void main() {
         themePresetId: 'ocean',
         appLanguageCode: 'ru',
         showTrafficStats: false,
+        showMenuBarSpeed: false,
         // машинное — не должно доехать
         localPort: 3080,
         lanPassword: 'hunter2',
@@ -145,10 +146,37 @@ void main() {
       expect(saved!.themePresetId, 'ocean');
       expect(saved!.appLanguageCode, 'ru');
       expect(saved!.showTrafficStats, isFalse);
+      expect(saved!.showMenuBarSpeed, isFalse);
 
       expect(saved!.localPort, 9090);
       expect(saved!.lanPassword, 'local-secret');
       expect(saved!.minimizeToTray, isFalse);
+    });
+
+    test('old backups keep the current menu bar preference', () async {
+      final storage = _MockStorageService();
+      when(() => storage.getSettings()).thenAnswer(
+        (_) async => const AppSettings(showMenuBarSpeed: false),
+      );
+      AppSettings? saved;
+      when(() => storage.saveSettings(any())).thenAnswer((inv) async {
+        saved = inv.positionalArguments.single as AppSettings;
+      });
+
+      await SettingsBackupService.applyBackup(
+        storage,
+        backup: KeqdisBackup(
+          version: 1,
+          exportedAt: DateTime(2026),
+          data: {
+            'appSettings': {'showSpeedInNotification': false},
+          },
+        ),
+        sections: {BackupSection.appSettings},
+      );
+
+      expect(saved!.showMenuBarSpeed, isFalse);
+      expect(saved!.showSpeedInNotification, isFalse);
     });
   });
 

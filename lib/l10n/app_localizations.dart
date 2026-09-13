@@ -4954,6 +4954,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stage {stage}; elapsed {elapsed} ms / {budget} ms'**
   String pingProbeDetails(String stage, int elapsed, int budget);
+
+  /// No description provided for @appearanceShowMenuBarSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Show real-time speed in the menu bar'**
+  String get appearanceShowMenuBarSpeed;
+
+  /// No description provided for @appearanceShowMenuBarSpeedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Traffic handled by KEQDIS'**
+  String get appearanceShowMenuBarSpeedSubtitle;
+
+  /// No description provided for @macosMenuOpenServers.
+  ///
+  /// In en, this message translates to:
+  /// **'Open window to select a node'**
+  String get macosMenuOpenServers;
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
