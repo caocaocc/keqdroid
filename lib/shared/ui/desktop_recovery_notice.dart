@@ -7,6 +7,16 @@ import '../../tunnel/macos_recovery_controller.dart';
 import 'app_theme.dart';
 import 'expressive_elements.dart';
 
+String desktopRecoveryLabel(AppLocalizations l10n, MacOSRecoveryPhase phase) =>
+    switch (phase) {
+      MacOSRecoveryPhase.waitingNetwork => l10n.macosWaitingNetwork,
+      MacOSRecoveryPhase.recovering => l10n.macosRestoringNetwork,
+      MacOSRecoveryPhase.backoff => l10n.macosRetryingNetwork,
+      MacOSRecoveryPhase.retrying => l10n.vpnConnecting,
+      MacOSRecoveryPhase.paused => l10n.macosRecoveryPaused,
+      MacOSRecoveryPhase.idle => '',
+    };
+
 class DesktopRecoveryNotice extends ConsumerWidget {
   const DesktopRecoveryNotice({super.key, this.showDetails = false});
   final bool showDetails;
@@ -16,16 +26,12 @@ class DesktopRecoveryNotice extends ConsumerWidget {
       ValueListenableBuilder<DesktopRecoveryStatus?>(
         valueListenable: desktopRecoveryStatus,
         builder: (context, status, _) {
-          if (status == null) return const SizedBox.shrink();
+          if (status == null || status.phase == MacOSRecoveryPhase.idle) {
+            return const SizedBox.shrink();
+          }
           final l10n = AppLocalizations.of(context)!;
-          final label = switch (status.phase) {
-            MacOSRecoveryPhase.waitingNetwork => l10n.macosWaitingNetwork,
-            MacOSRecoveryPhase.recovering => l10n.macosRestoringNetwork,
-            MacOSRecoveryPhase.backoff => l10n.macosRetryingNetwork,
-            MacOSRecoveryPhase.retrying => l10n.macosRetryingNetwork,
-            MacOSRecoveryPhase.paused => l10n.macosRecoveryPaused,
-            MacOSRecoveryPhase.idle => '',
-          };
+          final label = desktopRecoveryLabel(l10n, status.phase);
+          final details = status.message ?? status.reason;
           return Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -34,8 +40,8 @@ class DesktopRecoveryNotice extends ConsumerWidget {
                 ExpressiveNotice(
                   color: AppTheme.orange(context),
                   icon: Icons.network_check,
-                  text: showDetails && status.message != null
-                      ? '$label\n${status.message}'
+                  text: showDetails && details != null
+                      ? '$label\n$details'
                       : label,
                 ),
                 if (status.phase == MacOSRecoveryPhase.paused &&

@@ -1096,7 +1096,7 @@
   "macosWaitingNetwork": "Waiting for network to recover",
   "macosRestoringNetwork": "Restoring previous network settings",
   "macosRetryingNetwork": "Reconnecting automatically",
-  "macosRecoveryPaused": "Automatic recovery paused; connect manually to retry",
+  "macosRecoveryPaused": "Automatic recovery paused",
   "macosRetryRecovery": "Retry network restoration",
   "pingTimingWarm": "Warm connection",
   "pingTimingCold": "Full request",

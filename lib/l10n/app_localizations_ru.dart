@@ -2538,7 +2538,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get macosRetryingNetwork => 'Reconnecting automatically';
 
   @override
-  String get macosRecoveryPaused => 'Automatic recovery paused; connect manually to retry';
+  String get macosRecoveryPaused => 'Automatic recovery paused';
 
   @override
   String get macosRetryRecovery => 'Retry network restoration';

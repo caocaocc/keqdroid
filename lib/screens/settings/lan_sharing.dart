@@ -243,10 +243,10 @@ class _LanSharingCardState extends ConsumerState<_LanSharingCard> {
               style: textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context)),
             ),
           ],
-          if (isConnected && (Platform.isMacOS || isLan))
+          if (isConnected && !Platform.isMacOS && isLan)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(Platform.isMacOS ? l10n.settingsCoreHint : l10n.settingsTurnOffToChange,
+              child: Text(l10n.settingsTurnOffToChange,
                   style: textTheme.bodySmall?.copyWith(color: AppTheme.orange(context))),
             ),
         ],

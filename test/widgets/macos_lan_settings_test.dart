@@ -72,10 +72,13 @@ void main() {
       expect(tester.widget<Switch>(toggle).value, isFalse);
       expect(find.text('192.168.1.8:11080'), findsOneWidget);
       expect(
-        find.text(
-          'Applies on the next connection — the running session is not restarted.',
+        find.descendant(
+          of: card,
+          matching: find.text(
+            'Applies on the next connection — the running session is not restarted.',
+          ),
         ),
-        findsWidgets,
+        findsNothing,
       );
       desktopLanState.value = const DesktopLanState(
         socksPort: 11081,

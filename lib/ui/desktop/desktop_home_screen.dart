@@ -34,8 +34,6 @@ import '../../tunnel/desktop_recovery_status.dart';
 import '../../shared/ui/app_theme.dart';
 import '../../shared/ui/expressive_button_group.dart';
 import '../../shared/ui/update_dialog.dart';
-import '../../shared/ui/desktop_dns_notice.dart';
-import '../../shared/ui/desktop_recovery_notice.dart';
 import '../../utils/clipboard_import.dart';
 import '../../utils/error_messages.dart';
 import 'desktop_connection_mode.dart';
@@ -677,21 +675,13 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
           ),
           VerticalDivider(width: 1, color: AppTheme.divider(context)),
           Expanded(
-            child: Column(
-              children: [
-                if (Platform.isMacOS) const DesktopDnsNotice(),
-                if (Platform.isMacOS) const DesktopRecoveryNotice(),
-                Expanded(
-                  child: IndexedStack(
-                    index: _index,
-                    sizing: StackFit.expand,
-                    children: const [
-                      _DesktopTabHost(child: ServersTab()),
-                      _DesktopTabHost(child: SubscriptionsTab()),
-                      _DesktopTabHost(child: SettingsTab()),
-                    ],
-                  ),
-                ),
+            child: IndexedStack(
+              index: _index,
+              sizing: StackFit.expand,
+              children: const [
+                _DesktopTabHost(child: ServersTab()),
+                _DesktopTabHost(child: SubscriptionsTab()),
+                _DesktopTabHost(child: SettingsTab()),
               ],
             ),
           ),

@@ -1067,7 +1067,7 @@
   "macosWaitingNetwork": "等待网络恢复",
   "macosRestoringNetwork": "正在恢复原网络设置",
   "macosRetryingNetwork": "正在自动重连",
-  "macosRecoveryPaused": "自动恢复已暂停，请手动连接重试",
+  "macosRecoveryPaused": "自动恢复已暂停",
   "macosRetryRecovery": "重试恢复网络",
   "pingTimingWarm": "复用连接",
   "pingTimingCold": "完整请求",

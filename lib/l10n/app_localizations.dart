@@ -4922,7 +4922,7 @@ abstract class AppLocalizations {
   /// No description provided for @macosRecoveryPaused.
   ///
   /// In en, this message translates to:
-  /// **'Automatic recovery paused; connect manually to retry'**
+  /// **'Automatic recovery paused'**
   String get macosRecoveryPaused;
 
   /// No description provided for @macosRetryRecovery.

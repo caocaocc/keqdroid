@@ -2531,7 +2531,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get macosRetryingNetwork => '正在自动重连';
 
   @override
-  String get macosRecoveryPaused => '自动恢复已暂停，请手动连接重试';
+  String get macosRecoveryPaused => '自动恢复已暂停';
 
   @override
   String get macosRetryRecovery => '重试恢复网络';

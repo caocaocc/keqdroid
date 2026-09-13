@@ -5,7 +5,7 @@ import '../../tunnel/desktop_dns_diagnostics.dart';
 import 'app_theme.dart';
 import 'expressive_elements.dart';
 
-/// The home screen shows failures; the existing diagnostics page shows all results.
+/// Detailed DNS results used by the diagnostics page and status dialog.
 class DesktopDnsNotice extends StatelessWidget {
   const DesktopDnsNotice({super.key, this.showDetails = false});
 
