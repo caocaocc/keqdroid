@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 
 /// Действия, на которые можно повесить хоткей (desktop). Все выключены,
 /// пока пользователь сам не назначит сочетание.
@@ -44,12 +46,12 @@ class HotkeyBinding {
 
   /// Сериализация в строку настроек: `ctrl+shift+keyT`.
   String toToken() => [
-        if (ctrl) 'ctrl',
-        if (alt) 'alt',
-        if (shift) 'shift',
-        if (meta) 'meta',
-        key,
-      ].join('+');
+    if (ctrl) 'ctrl',
+    if (alt) 'alt',
+    if (shift) 'shift',
+    if (meta) 'meta',
+    key,
+  ].join('+');
 
   static HotkeyBinding? fromToken(String? token) {
     if (token == null || token.isEmpty) return null;
@@ -76,13 +78,15 @@ class HotkeyBinding {
   }
 
   /// Человекочитаемая метка: `Ctrl + Shift + T`.
-  String get label => [
-        if (ctrl) 'Ctrl',
-        if (alt) 'Alt',
-        if (shift) 'Shift',
-        if (meta) 'Win',
-        HotkeyKeys.labelFor(key),
-      ].join(' + ');
+  String get label => labelForPlatform(defaultTargetPlatform);
+
+  String labelForPlatform(TargetPlatform platform) => [
+    if (ctrl) platform == TargetPlatform.macOS ? '⌃' : 'Ctrl',
+    if (alt) platform == TargetPlatform.macOS ? '⌥' : 'Alt',
+    if (shift) platform == TargetPlatform.macOS ? '⇧' : 'Shift',
+    if (meta) platform == TargetPlatform.macOS ? '⌘' : 'Win',
+    HotkeyKeys.labelFor(key),
+  ].join(' + ');
 
   /// Маска RegisterHotKey: MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8.
   int get windowsModifiers =>
