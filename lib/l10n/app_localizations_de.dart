@@ -9,6 +9,24 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => 'Verbunden, aber DNS-Abfragen fehlgeschlagen';
+
+  @override
+  String get macosTunDnsOk => 'DNS-Abfragen erfolgreich';
+
+  @override
+  String get macosTunDnsChecking => 'DNS wird geprüft…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => 'Domains und IPs aus Festlandchina umgehen den Proxy.';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => 'China direkt';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -459,7 +477,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Eigene DNS-Server';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile (DoH, DoT oder einfach)';
+  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile. +local verbindet direkt; andere Adressen folgen den Proxy-Regeln.';
 
   @override
   String get settingsXrayDnsServers => 'DNS-Server';
@@ -546,7 +564,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => 'Erkannte Domain nur fürs Routing';
 
   @override
-  String get settingsXrayDnsDefaultNote => 'Standard: Cloudflare und Google DoH';
+  String get settingsXrayDnsDefaultNote => 'Ohne eigene DNS: Cloudflare und Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => 'Feineinstellung';
@@ -1290,6 +1308,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get desktopModeShort => 'Modus';
 
   @override
+  String get macosLaunchAtLogin => 'Bei Anmeldung starten';
+
+  @override
+  String get macosAutoConnectOnLogin => 'Bei Anmeldung automatisch verbinden';
+
+  @override
+  String get macosAutoConnectOnLoginHint => 'Verbindet beim Start zur Anmeldung mit dem zuletzt gewählten Server im Modus der Seitenleiste. TUN muss vorher autorisiert werden und verbindet sich ohne diese Freigabe nicht automatisch. Proxy benötigt keine Administratorfreigabe.';
+
+  @override
+  String get macosAutoConnectRequiresLogin => 'Zuerst „Bei Anmeldung starten“ aktivieren';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override
@@ -1878,7 +1908,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsResetConfirmAction => 'Zurücksetzen';
 
   @override
-  String get settingsResetRoutingConfirm => 'Die integrierten Routing-Regeln werden wiederhergestellt und deine Direct-/Proxy-/Block-Listen verworfen. Das kann nicht rückgängig gemacht werden.';
+  String get settingsResetRoutingConfirm => 'Die integrierten Regeln werden wiederhergestellt, deine Direkt-/Proxy-/Sperrlisten gelöscht und anderer Verkehr über den Proxy geleitet. Dies lässt sich nicht rückgängig machen.';
 
   @override
   String get settingsXrayResetConfirm => 'Die Standardeinstellungen für Xray-Core, TUN und die lokalen Ports werden wiederhergestellt. Das kann nicht rückgängig gemacht werden.';
@@ -2540,4 +2570,60 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => 'Bild konnte nicht gelesen werden.';
+
+  @override
+  String get macosSplitProcessHint => 'Regeln verwenden Programmpfade einschließlich interner Hilfsprozesse. Gemeinsame Systemdienste lassen sich nicht immer einer App zuordnen.';
+
+  @override
+  String get macosAppNeedsMatching => 'App nicht in der Liste gefunden. Nach Verschieben oder Entfernen erneut auswählen.';
+
+  @override
+  String get macosNetworkServiceTitle => 'Netzwerkdienst';
+
+  @override
+  String get macosNetworkServiceHint => 'Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.';
+
+  @override
+  String get macosNetworkServiceMissing => 'Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.';
+
+  @override
+  String get macosAuthorizeAccount => 'TUN für dieses Konto autorisieren';
+
+  @override
+  String get macosWaitingNetwork => 'Waiting for network to recover';
+
+  @override
+  String get macosRestoringNetwork => 'Restoring previous network settings';
+
+  @override
+  String get macosRetryingNetwork => 'Reconnecting automatically';
+
+  @override
+  String get macosRecoveryPaused => 'Automatic recovery paused';
+
+  @override
+  String get macosRetryRecovery => 'Retry network restoration';
+
+  @override
+  String get pingTimingWarm => 'Warm connection';
+
+  @override
+  String get pingTimingCold => 'Full request';
+
+  @override
+  String get pingTimingFallback => 'First request';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return 'Stage $stage; elapsed $elapsed ms / $budget ms';
+  }
+
+  @override
+  String get appearanceShowMenuBarSpeed => 'Aktuelle Geschwindigkeit in der Menüleiste anzeigen';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'Von KEQDIS verarbeiteter Datenverkehr';
+
+  @override
+  String get macosMenuOpenServers => 'Fenster zur Knotenauswahl öffnen';
 }

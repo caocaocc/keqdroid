@@ -38,7 +38,7 @@ Future<void> main() async {
     // на десктопе Crashlytics нет, а исключение до runApp глушит runZonedGuarded
     // и приложение остаётся процессом без окна.
     await AppLogger.instance.enableFileLog();
-    await PrefsRecovery.prepare();
+    if (!Platform.isLinux) await PrefsRecovery.prepare();
 
     var crashlyticsReady = false;
     if (Platform.isAndroid) {
@@ -66,6 +66,8 @@ Future<void> main() async {
         if (!primary) {
           exit(0);
         }
+        // Второй запуск не должен чинить файл посреди записи первого процесса.
+        await PrefsRecovery.prepare();
         // Recover from an unclean previous exit: drop any stale system/Firefox
         // proxy so the desktop isn't stuck routing to a dead local proxy.
         await LinuxTunnelBackend.cleanupStaleState();

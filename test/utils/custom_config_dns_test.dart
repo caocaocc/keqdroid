@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
+import 'package:keqdroid/models/xray_core_settings.dart';
 import 'package:keqdroid/utils/config_gen.dart';
 import 'package:keqdroid/utils/custom_xray_config.dart';
 
@@ -110,6 +111,7 @@ const _fakeDns = '''
 
 /// Настройки из жалобы: списки роутинга вычищены, остальной трафик — в блок.
 const _clearedAndBlocked = AppSettings(
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
   directRules: '',
   proxyRules: '',
   blockedRules: '',

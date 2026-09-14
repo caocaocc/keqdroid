@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../models/server_item.dart';
 import '../../models/server_name_utils.dart';
 import '../../services/ping_service.dart';
+import '../../l10n/app_localizations.dart';
+import '../../tunnel/url_test_diagnostics.dart';
 import '../../utils/bidi.dart';
 import 'app_theme.dart';
 import 'expressive.dart';
@@ -33,6 +35,7 @@ class ServerRow extends StatelessWidget {
 
   /// Тип пинга для порогов цвета (у url и tcp шкалы разные).
   final PingType pingColorType;
+  final UrlTestDiagnostics? pingDiagnostics;
 
   /// Цвет текста. null — обычный [AppTheme.text]; на выбранном сегменте сюда
   /// приходит `onSecondaryContainer`.
@@ -62,6 +65,7 @@ class ServerRow extends StatelessWidget {
     this.pingMs,
     this.lastTestedAt,
     this.pingColorType = PingType.tcp,
+    this.pingDiagnostics,
     this.foreground,
     this.opaqueBadge = false,
     this.emphasizeTitle = false,
@@ -69,6 +73,41 @@ class ServerRow extends StatelessWidget {
     this.trailing,
     this.status,
   });
+
+  String _timingSuffix(BuildContext context) {
+    final diagnostic = pingDiagnostics;
+    if (diagnostic == null) return '';
+    final l10n = AppLocalizations.of(context)!;
+    final label = switch (diagnostic.timingKind) {
+      'warm' => l10n.pingTimingWarm,
+      'coldFallback' => l10n.pingTimingFallback,
+      _ => l10n.pingTimingCold,
+    };
+    return ' · $label';
+  }
+
+  String _diagnosticLabel(BuildContext context) {
+    final diagnostic = pingDiagnostics;
+    if (diagnostic == null) return '';
+    final l10n = AppLocalizations.of(context)!;
+    final timing = _timingSuffix(context).replaceFirst(' · ', '');
+    final detail =
+        '$timing; ${l10n.pingProbeDetails(diagnostic.stage, diagnostic.elapsedMs, diagnostic.budgetMs)}';
+    final phases = diagnostic.stageDurationsMs.entries
+        .map((entry) {
+          final startupBudget = entry.key == 'coreStartup'
+              ? diagnostic.coreStartupBudgetMs
+              : null;
+          return '${entry.key}: ${entry.value} ms'
+              '${startupBudget == null ? '' : ' / $startupBudget ms'}';
+        })
+        .join('; ');
+    return [
+      detail,
+      if (phases.isNotEmpty) phases,
+      if (diagnostic.warning != null) diagnostic.warning!,
+    ].join('\n');
+  }
 
   /// Шаг строки в списках серверов — вместе с зазором между сегментами, а не
   /// высота самого контейнера (та меньше ровно на зазор `ExpressiveListSegment.gap`).
@@ -122,8 +161,8 @@ class ServerRow extends StatelessWidget {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
     final textColor = foreground ?? AppTheme.text(context);
-    final mutedColor = foreground?.withValues(alpha: 0.7) ??
-        AppTheme.textLight(context);
+    final mutedColor =
+        foreground?.withValues(alpha: 0.7) ?? AppTheme.textLight(context);
 
     final isChain = server.protocol == 'chain';
     final protocolColor = serverProtocolColor(context, server.protocol);
@@ -167,22 +206,27 @@ class ServerRow extends StatelessWidget {
           )
         : null;
 
-    final ping = Text(
-      ltrIsolate(
-        pingMs != null
-            ? PingService.formatPingValue(pingMs!, pingColorType)
-            : (lastTestedAt != null ? 'N/A' : '- ms'),
+    final ping = Tooltip(
+      message: _diagnosticLabel(context),
+      child: Text(
+        ltrIsolate(
+          pingMs != null
+              ? '${PingService.formatPingValue(pingMs!, pingColorType)}${_timingSuffix(context)}'
+              : (lastTestedAt != null
+                    ? 'N/A${pingDiagnostics == null ? '' : ' · ${pingDiagnostics!.stage}'}'
+                    : '- ms'),
+        ),
+        // Пинг — числовой показатель, у M3 это роль label, а не body: плотнее и
+        // заметнее при том же кегле. Кегль берём supporting-строки списка
+        // (14sp), иначе рядом с 16sp именем вторая строка проваливается.
+        style: textTheme.labelLarge?.copyWith(
+          color: pingMs != null
+              ? pingQualityColor(context, pingMs!, pingColorType)
+              : mutedColor,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      // Пинг — числовой показатель, у M3 это роль label, а не body: плотнее и
-      // заметнее при том же кегле. Кегль берём supporting-строки списка
-      // (14sp), иначе рядом с 16sp именем вторая строка проваливается.
-      style: textTheme.labelLarge?.copyWith(
-        color: pingMs != null
-            ? pingQualityColor(context, pingMs!, pingColorType)
-            : mutedColor,
-      ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
     );
 
     if (layout == ServerRowLayout.card) {
@@ -303,9 +347,7 @@ class ServerRow extends StatelessWidget {
 
     return Padding(
       // Отступ leading-слота по спеке списка — 16dp от края контейнера.
-      padding: const EdgeInsets.symmetric(
-        horizontal: ExpressiveSpacing.large,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: ExpressiveSpacing.large),
       child: Row(
         children: [
           avatar,
@@ -362,8 +404,9 @@ class ChainRouteStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shown =
-        hops.length > visibleHops ? hops.sublist(0, visibleHops) : hops;
+    final shown = hops.length > visibleHops
+        ? hops.sublist(0, visibleHops)
+        : hops;
     final hidden = hops.length - shown.length;
 
     return Row(
@@ -371,17 +414,20 @@ class ChainRouteStrip extends StatelessWidget {
       children: [
         for (var i = 0; i < shown.length; i++) ...[
           if (i > 0)
-            Icon(Icons.chevron_right_rounded, size: dotSize * 0.8, color: arrowColor),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: dotSize * 0.8,
+              color: arrowColor,
+            ),
           _node(context, shown[i]),
         ],
         if (hidden > 0) ...[
           const SizedBox(width: 3),
           Text(
             '+$hidden',
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(color: arrowColor),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: arrowColor),
           ),
         ],
       ],

@@ -32,7 +32,7 @@ class RoutingPresets {
 
   // single source of truth for the routing baseline: AppSettings' constructor
   // defaults reference these, and the routing screen's reset writes them back.
-  static const String defaultDirectRules = 'ru, yandex.ru, vk.com';
+  static const String defaultDirectRules = 'geosite:cn, geoip:cn';
   static const String defaultProxyRules = '';
   static const String defaultBlockedRules = '';
 
@@ -185,6 +185,11 @@ class RoutingPresets {
   ];
 
   static const List<RoutingPreset> all = [
+    RoutingPreset(
+      id: 'china',
+      field: RoutingField.direct,
+      values: ['geosite:cn', 'geoip:cn'],
+    ),
     RoutingPreset(
       id: 'ru',
       field: RoutingField.direct,
