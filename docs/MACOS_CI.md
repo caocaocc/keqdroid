@@ -1,0 +1,96 @@
+# macOS CI 构建与恢复
+
+`macos.yml` 的 Development packages 工作流在 `dev` 构建各平台开发包。macOS ARM 和 Intel 分别使用 `macos-15`、`macos-15-intel`，保持固定的 Flutter 3.44.4、Xcode 16.4、Ruby 3.3.12、CocoaPods 1.16.2 和 Go 1.26.8。Android/Linux 使用 `ubuntu-24.04`，Windows 使用 `windows-2022`；构建成功和真机验收分别记录。
+
+Flutter 3.44.4 使用一处受校验的工具补丁：固定版本的 `packages/flutter_tools/lib/src/isolated/native_assets/macos/native_assets.dart` 把原生资产目标写死为 macOS 13，未读取工程的 macOS 12 设置（相关上游问题：[flutter/flutter#145104](https://github.com/flutter/flutter/issues/145104)）。`build_app.sh` 只将该常量改为 12；先核验 SDK 提交和原文件 SHA-256，缓存中已修改的文件也必须匹配已知补丁 SHA-256。随后保留 Flutter 工具自身的依赖锁，重新生成工具快照，并校验来源和快照哈希。Flutter、Dart、插件版本及项目 `pubspec.lock` 保持不变。
+
+这项修改会使 `objective_c` 等原生资产实际重新按 macOS 12 编译。固定的 objective_c 9.5.0 原生源文件已用两个架构、macOS 12 编译参数及严格 API 可用性警告检查通过，产物最低版本均为 12；Apple Silicon 产物在本机 macOS 15.6 的加载检查通过。这些证据不能替代 macOS 12 真机验收，也不能通过修改 Mach-O 版本字段宣称兼容。
+
+## 组件检查点
+
+macOS 每个架构分别构建 keqrnel、Mihomo、网络服务和 Flutter 应用，共八个组件。AWG 使用 Mihomo，不再构建或打包 wireproxy。Android、Windows、Linux 应用另有独立组件和打包任务。每个组件成功后立即上传带输入指纹及文件校验清单的 tar，保留 30 天。打包只依赖相应组件及公共/本平台检查；另一架构失败不阻塞已就绪架构出包。
+
+组件指纹包括相关源码、补丁、依赖锁、工具链、架构和构建参数，而不是整个提交编号。因此修改安装脚本后可以直接复用核心、网络服务和应用；修改 Dart 界面后仍可以复用核心和独立网络服务。
+
+依赖缓存用于减少下载和编译时间。缓存被淘汰时，工作流继续查找同仓库可信 `dev` 构建上传的精确指纹产物，验证其内容后恢复。整体运行失败不影响其中已经成功上传的组件。产物过期、缺失或输入变化时，只重新构建缺少的组件；校验失败不能作为成功恢复。
+
+tar 保留应用框架的符号链接和可执行权限。macOS 最终打包阶段重新检查组件来源、架构、最低系统版本，按由内到外顺序签名，直接生成安装 PKG、卸载 PKG、安装说明和验证报告，不再套 DMG。
+
+每份架构产物包含 `keqdroid-<version>-macos-<arch>.pkg`、同名前缀的 `-uninstall.pkg`、`-verification.json`、`-README.txt`，以及覆盖这四个文件的 `SHA256SUMS`，不依赖另一架构完成。打包时先替换暂存 app 内的核心目录，清理预编译 app 可能残留的旧核心，再重新签名。新包只允许 keqrnel、Mihomo 两个核心，验证报告也会拒绝额外核心。
+
+打包后运行 `verify_download.py --inspect-payload`，重新展开两个 PKG，核验包内应用版本、Mach-O、完整内部签名和安装脚本；外层 PKG 仍未签名、未公证。通过后封装为带提交记录的 tar，上传 `release-macos-<arch>-<commit>-attempt<运行尝试>`。各平台独立清单不能平铺覆盖；Release 发布流程验证并汇总全部资产，生成唯一的 `SHA256SUMS`。
+
+macOS 继续使用既有组件指纹脚本；新增平台的检查点和发布封装由 `tool/ci/checkpoint.py` 负责，避免仅扩展发布平台就使所有 macOS 核心缓存失效。Android 的组件指纹还包含持久发布证书指纹。修改相关源码或构建参数时，受影响组件仍必须重新编译。
+
+公共 Flutter 测试还会导出本次源码生成的 macOS 会话请求，覆盖各核心的 Proxy/TUN，以及默认 DNS、直连和代理 DoH、自定义 IP DNS。另有两份中国默认请求使用完整随包 Geo 数据，验证真实展开结果未超出 helper 的配置大小和安全边界。两个架构在打包前分别用同一份已验证 helper 组件内的原生检查程序校验这些请求，并验证非法文件配置仍被拒绝。这样可以发现“Dart 配置测试通过，但 helper 拒绝真实配置”的接口不一致。测试程序只解析请求，不启动核心或更改网络；随组件缓存保存，但不安装到用户系统。打包阶段直接运行预编译程序，不重新编译 Flutter 或 Swift。
+
+应用归档前还会分别检查每个 Universal 2 Mach-O 的 arm64、x86_64 切片，拒绝缺失架构或实际最低版本高于 12 的资产。原生依赖安装使用 `pod install --deployment`，在编译前检查锁文件；Ruby 版本同时固定，避免不同 JSON 序列化格式改变 CocoaPods 的 podspec 校验值。Flutter SDK、Pub 依赖、Xcode 中间文件和 Dart AOT 中间文件均按构建环境缓存，失败后的缓存保存不会代替组件完整性验证。
+
+## 失败后怎样继续
+
+- 临时下载或 runner 故障：在原运行中选择 **Re-run failed jobs**，或只重跑对应失败任务。
+- 编译或脚本错误：修复后推送新的 `dev` 提交。GitHub 的重跑使用原始提交，不会读取新修复。
+- 打包失败：保留成功组件，修复或重跑打包任务；不要选择 **Re-run all jobs**。
+- 检查 `always` 上传的日志、测试报告及组件复用记录，区分输入变化、缓存缺失和真正的编译失败。
+
+工作流不因新提交或另一架构失败自动取消有效运行。每份组件和最终产物记录来源提交、输入指纹及校验值；下载时按目标提交选择，不能把不同运行中名字相似的 PKG 当作同一版本。重写提交历史后，输入未变的组件仍可复用；最终打包报告绑定本次目标提交。
+
+可通过手动运行的 `fault_injection` 选择单个架构，主动验证打包失败后的续跑。在工作流尚未进入默认分支时，也可在 `dev` 提交说明中加入 `[test-package-retry-arm64]` 或 `[test-package-retry-x64]`，选择需要验证的架构。两种方式都仅在第一次运行、恢复并校验组件之后使指定架构的打包失败；选择 **Re-run failed jobs** 后完成打包，另一架构继续正常运行。
+
+## 全平台 Release
+
+应用更新和 Geo 下载统一使用 `caocaocc/keqdroid`。完成检查和本机验收后，将本仓库 `v<version>` 标签指向最终 `dev` 提交；`release.yml` 的标签推送工作流只负责发布，不编译应用或核心。它检索相同提交、同仓库可信且整体成功的 Development packages 运行，要求 Android、Windows、Linux、macOS 两架构资产齐全并通过摘要和构建报告验证。
+
+发布先创建或继续相符的草稿，上传完整产物和统一 `SHA256SUMS`，再发布为稳定 Latest Release。另保留 `geoip.dat.sha256` 兼容旧下载器；不发布到 AUR。标签、版本或已公开资产不符时拒绝覆盖。上传故障只重跑发布任务，继续使用原有构建产物；组件成功不等于可以跳过其他平台失败后直接发布。
+
+macOS 发布直接使用版本化的安装/卸载 PKG。更新器精确匹配版本和架构，验证后恢复网络、打开 Installer，再退出 GUI；清理或打开失败时不退出。旧版只识别 DMG 的客户端需要从本仓库 Release 手动安装一次 PKG，原有配置和安装位置保留。
+
+## 本地先验证，再打包
+
+定位连接问题不需要每次构建完整应用。先读取已安装版本的诊断，再按改动范围运行配置生成测试、原生网络测试，或使用已安装核心做隔离的本机端口探测。普通用户核心探测使用临时配置与端口，不设置系统代理、DNS 或 TUN；结束后停止自己的进程并删除含凭据的配置。它能验证节点及核心的 DNS 路径，但不能代替实际 utun、系统解析器和网络恢复验收。
+
+仅有 Command Line Tools 时，也可以在本机编译并运行网络服务的小型检查程序，增量产物会复用：
+
+```sh
+swift run --package-path macos/NetworkService --scratch-path build/macos-native-local keqdis-network-tests
+```
+
+此命令不安装或启动网络服务，不需要管理员权限；检查包含环回测试套接字和只读路由查询，受限执行环境需允许这些操作。完整 XCTest 仍使用配置好的 Xcode 环境。Dart 配置和状态逻辑可单独运行 `flutter test --no-pub <测试文件>`，提交前仍须完成全量分析和测试。
+
+本地回归通过后再集中推送、构建和安装。修改受保护的 helper 后，已安装程序不会自动获得修复，仍须通过完整 PKG 更新；独立 helper 源码变化可复用应用，而双方共享的原生客户端/C 源码变化会同时使应用和 helper 的组件指纹变化。核心输入未变时继续复用核心。经使用者授权，实际 TUN 连接、断开和验收由自动化执行；系统管理员凭据仍由使用者在系统界面输入。
+
+## 本机验收
+
+下载目标提交对应架构的安装 PKG、卸载 PKG、`SHA256SUMS` 和验证报告，先校验，再打开安装 PKG。管理员授权和首次允许运行由使用者在系统界面完成。
+
+在下载文件所在目录运行，源码路径和提交应替换为实际值；以下以 `0.21.1` 的 arm64 产物为例：
+
+```sh
+python3 /path/to/keqdroid/tool/macos/verify_download.py \
+  --pkg keqdroid-0.21.1-macos-arm64.pkg \
+  --uninstall-pkg keqdroid-0.21.1-macos-arm64-uninstall.pkg \
+  --sha256 SHA256SUMS \
+  --report keqdroid-0.21.1-macos-arm64-verification.json \
+  --arch arm64 --commit <完整提交SHA> --inspect-payload \
+  --output local-verification.json
+```
+
+检查核对安装包、卸载包及报告的下载摘要，展开 PKG，验证实际应用版本、所有 Mach-O 架构与最低系统版本和完整内部签名，并将安装脚本逐字节对照指定提交。清单必须精确匹配文件名；缺失、重复、非法路径或错误哈希都会失败。GitHub artifact 的外层 ZIP/tar 摘要不能代替包内 PKG 摘要。此检查不会执行安装脚本、启动包内程序或修改网络配置，也不把未签名的外层 PKG 标记为 Apple 签名有效。
+
+历史 DMG 验收记录保留原文件名和摘要；验证器仍支持 `--dmg` 审计旧安装介质，不用于新版本发布。
+
+本机测试配置只保存在本机，不进入 Git、Actions secrets、构建日志或公共测试报告。报告仅记录所测协议和结果。测试前保存系统代理、DNS、路由状态；断开、退出和异常恢复后核对状态。
+
+自动 TUN 验收先确认已安装版本与组件摘要，保存网络基线，并设置独立的限时退出保护。每次连接分别记录核心、虚拟 DNS、系统 DNS、实际流量和恢复结果。Codex 使用 SOCKS 代理不代表其上游客户端自动绕过被测 TUN，因此不能据此省略恢复保护。失败后先核对恢复，再进行下一组测试；仅建立 utun 或本地 DNS 返回 localhost 不能标记整条代理链路通过。
+
+当前本机为 Apple Silicon、macOS 15.6。所提供测试订阅包含两个 VLESS 节点，用于 keqrnel/Mihomo 的 Proxy、TUN、DNS、分流和恢复测试。未提供 AWG 测试节点。当前本机验收不能代表 Intel 或 macOS 12，完整发布矩阵见 [macOS 开发与验收](MACOS.md)。
+
+CI 通过、安装成功、节点连通和网络恢复分别记录结果，任何一项未执行都不能标记为通过。
+
+## 桌面传输与恢复回归
+
+`desktop-transport.yml` 在 `windows-2022`、`macos-15`、`macos-15-intel` 独立运行真实回环 CONNECT/TLS、临时核心启动、DNS 配置和恢复状态测试。证书仅在测试自建的 `SecurityContext` 中受信任，不安装到系统证书库。macOS 打包依赖公共检查及本架构传输检查；另一架构或 Windows 失败不会取消已完成组件。
+
+公共 Flutter 测试导出的 LAN 请求包含两个核心 × Proxy/TUN × 有/无认证 8 种组合。打包使用本次 helper 组件中的预编译验证器逐个校验，不重新编译组件。
+
+物理断网验收必须先启动本地独立监督程序。仅给 GUI 设置退出定时器不能恢复 Wi-Fi；监督程序需在 Codex 断线后仍恢复自己改变的电源状态，并核对断开后的系统配置。实际睡眠/唤醒和 LAN 跨设备测试需要对应人工或设备条件，不能由合成时钟或回环测试替代。

@@ -144,9 +144,11 @@ Windows/macOS 的临时测速核心使用现有直连/bootstrap DNS 设置；测
 | 核心 | 固定版本 |
 | --- | --- |
 | keqrnel | `38155c34606f77299a62902da11372ff1c1921d7` |
-| Mihomo | `v1.19.30`，保留原有仓库补丁 |
+| Mihomo | `v1.19.31`，保留原有仓库补丁 |
 
-AWG 使用 Mihomo 的协议实现，不再构建或安装 wireproxy。sing-box 仍为 keqrnel 原有依赖 `v1.13.19`；本次上游同步没有升级核心工具链或这些固定来源。保留补丁的原始行为、用途和测试依据见 [Darwin 补丁审计](../tool/patches/macos/README.md#retention-audit-against-pinned-sources)。
+AWG 使用 Mihomo 的协议实现，不再构建或安装 wireproxy。keqrnel 主源码仍锁定上述提交，依赖显式跟随本次上游二进制的来源：sing-box `v1.14.1`、sing-tun `v0.9.3`、Xray `c412e77a9b712082ac9ebf27fa793951cb5a7d85`（26.9.9）。这些来源及构建副本的补丁独立记录，不把上游未发布的 keqrnel 依赖更新当作新的主源码提交。
+
+Xray 的模块声明要求 Go 1.27；macOS 构建保留 Go 1.26.8，并使用仅用于该构建的声明兼容补丁，保持依赖与协议源码版本。核心编译、协议回归和最终 Mach-O 核验仍是出包条件，macOS 12 真机验收继续单独列示。保留补丁的原始行为、用途和测试依据见 [Darwin 补丁审计](../tool/patches/macos/README.md#retention-audit-against-pinned-sources)。
 
 安装完整 Xcode 并选择其 Developer 目录后，在项目根目录运行：
 
@@ -184,14 +186,14 @@ SHA256SUMS
 
 安装包直接使用 PKG，不再套 DMG。所有嵌套 Mach-O、框架、应用由内到外签名，然后生成客户端指纹和签名后核心摘要，最后制作 PKG；外层 PKG 未签名、未公证。`provenance.json` 保留原始核心构建来源、补丁、Go 模块和签名前摘要；签名后摘要单独记录。
 
-下载后先验证，再打开安装包；以下示例使用本次 `0.20.0` 的 arm64 产物，在文件所在目录执行，并将源码路径和提交替换为实际值：
+下载后先验证，再打开安装包；以下示例使用 `0.21.1` 的 arm64 产物，在文件所在目录执行，并将源码路径和提交替换为实际值：
 
 ```sh
 python3 /path/to/keqdroid/tool/macos/verify_download.py \
-  --pkg keqdroid-0.20.0-macos-arm64.pkg \
-  --uninstall-pkg keqdroid-0.20.0-macos-arm64-uninstall.pkg \
+  --pkg keqdroid-0.21.1-macos-arm64.pkg \
+  --uninstall-pkg keqdroid-0.21.1-macos-arm64-uninstall.pkg \
   --sha256 SHA256SUMS \
-  --report keqdroid-0.20.0-macos-arm64-verification.json \
+  --report keqdroid-0.21.1-macos-arm64-verification.json \
   --arch arm64 --commit <完整提交SHA> --inspect-payload
 ```
 
