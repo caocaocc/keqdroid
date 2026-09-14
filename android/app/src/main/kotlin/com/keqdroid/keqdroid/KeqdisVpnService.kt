@@ -1488,7 +1488,7 @@ class KeqdisVpnService : VpnService() {
         // Notify ContentProvider to update Quick Settings tile via ContentObserver.
         // This is more reliable than requestListeningState() which only works when QS is open.
         runCatching {
-            contentResolver.notifyChange(VpnStatusProvider.STATUS_URI, null)
+            contentResolver.notifyChange(VpnStatusProvider.statusUri(this), null)
         }.onFailure { e ->
             android.util.Log.w("KEQDIS", "notifyChange failed: ${e.message}")
         }
