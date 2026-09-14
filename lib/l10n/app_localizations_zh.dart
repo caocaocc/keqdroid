@@ -9,6 +9,24 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get macosTunDnsWarning => '已连接，但 DNS 查询失败';
+
+  @override
+  String get macosTunDnsOk => 'DNS 查询正常';
+
+  @override
+  String get macosTunDnsChecking => '正在检查 DNS…';
+
+  @override
+  String get macosTunDnsTitle => 'TUN DNS';
+
+  @override
+  String get settingsRoutingPresetChinaDesc => '中国大陆域名和 IP 直连。';
+
+  @override
+  String get settingsRoutingPresetChinaTitle => '中国直连';
+
+  @override
   String get appTitle => 'KEQDIS';
 
   @override
@@ -459,7 +477,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXrayDnsCustom => '自定义 DNS 服务器';
 
   @override
-  String get settingsXrayDnsCustomHint => '每行一个地址（DoH、DoT 或普通）';
+  String get settingsXrayDnsCustomHint => '每行一个地址。+local 直接访问 DNS，其余地址按代理规则连接。';
 
   @override
   String get settingsXrayDnsServers => 'DNS 服务器';
@@ -468,7 +486,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXrayDnsSplitDirect => '为直连域名使用独立解析器';
 
   @override
-  String get settingsXrayDnsSplitDirectHint => '对直连列表中的域名使用第一个服务器';
+  String get settingsXrayDnsSplitDirectHint => '两个及以上服务器：首个用于直连域名和节点解析，其余用于其他域名。桌面 Xray TUN 只使用前两个。本地域名使用系统 DNS，不自动识别企业分离 DNS。';
 
   @override
   String get settingsXrayDnsQueryStrategy => '查询策略';
@@ -534,7 +552,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXraySniffingRouteOnly => '嗅探到的域名仅用于路由';
 
   @override
-  String get settingsXrayDnsDefaultNote => '默认：Cloudflare 和 Google DoH';
+  String get settingsXrayDnsDefaultNote => '关闭自定义 DNS 时：Cloudflare 和 Google DoH';
 
   @override
   String get settingsXrayXmuxParamsTitle => '微调';
@@ -1278,6 +1296,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get desktopModeShort => '模式';
 
   @override
+  String get macosLaunchAtLogin => '登录时启动';
+
+  @override
+  String get macosAutoConnectOnLogin => '登录启动时自动连接';
+
+  @override
+  String get macosAutoConnectOnLoginHint => '登录启动时连接上次选择的服务器，使用侧栏中的模式。TUN 需提前授权；未授权时不会自动连接。Proxy 无需管理员授权。';
+
+  @override
+  String get macosAutoConnectRequiresLogin => '请先启用「登录时启动」';
+
+  @override
   String get settingsDesktopTitle => 'Windows';
 
   @override
@@ -1860,7 +1890,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsResetConfirmAction => '重置';
 
   @override
-  String get settingsResetRoutingConfirm => '将恢复内置路由规则并清除你的直连/代理/屏蔽列表。此操作无法撤销。';
+  String get settingsResetRoutingConfirm => '将恢复内置路由规则、清除你的直连/代理/屏蔽列表，并将其余流量设为代理。此操作无法撤销。';
 
   @override
   String get settingsXrayResetConfirm => '将恢复 Xray 内核、TUN 和本地端口的默认设置。此操作无法撤销。';
@@ -2514,4 +2544,60 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cardImageRejectUnreadable => '无法读取该图片。';
+
+  @override
+  String get macosSplitProcessHint => '规则匹配应用及其包内辅助进程的可执行文件路径。部分共享系统服务无法归属到具体应用。';
+
+  @override
+  String get macosAppNeedsMatching => '当前列表中未找到此应用；如已移动或删除，请重新选择。';
+
+  @override
+  String get macosNetworkServiceTitle => '网络服务';
+
+  @override
+  String get macosNetworkServiceHint => 'Proxy 连接时无需管理员授权，并会自动切换系统代理。TUN 每个已安装版本需要授权一次。';
+
+  @override
+  String get macosNetworkServiceMissing => '请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。';
+
+  @override
+  String get macosAuthorizeAccount => '授权当前账户使用 TUN';
+
+  @override
+  String get macosWaitingNetwork => '等待网络恢复';
+
+  @override
+  String get macosRestoringNetwork => '正在恢复原网络设置';
+
+  @override
+  String get macosRetryingNetwork => '正在自动重连';
+
+  @override
+  String get macosRecoveryPaused => '自动恢复已暂停';
+
+  @override
+  String get macosRetryRecovery => '重试恢复网络';
+
+  @override
+  String get pingTimingWarm => '复用连接';
+
+  @override
+  String get pingTimingCold => '完整请求';
+
+  @override
+  String get pingTimingFallback => '首次请求';
+
+  @override
+  String pingProbeDetails(String stage, int elapsed, int budget) {
+    return '阶段 $stage；总耗时 $elapsed ms / $budget ms';
+  }
+
+  @override
+  String get appearanceShowMenuBarSpeed => '菜单栏显示实时速率';
+
+  @override
+  String get appearanceShowMenuBarSpeedSubtitle => 'KEQDIS处理流量';
+
+  @override
+  String get macosMenuOpenServers => '打开窗口选择节点';
 }

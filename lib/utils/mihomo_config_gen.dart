@@ -108,7 +108,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
   }) =>
       const JsonEncoder.withIndent('  ').convert(
@@ -124,7 +126,9 @@ class MihomoConfigGen {
           tun: tun,
           routingMode: routingMode,
           managedProcessNames: managedProcessNames,
+          managedProcessPaths: managedProcessPaths,
           appProcessName: appProcessName,
+          appProcessPath: appProcessPath,
           windows: windows,
         ),
       );
@@ -153,7 +157,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
   }) {
     // Правила по процессам умеет только та сторона, где ядро способно найти
@@ -203,7 +209,9 @@ class MihomoConfigGen {
         tun: tun,
         routingMode: effectiveRoutingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         processRules: processRules,
         fakeIp: fakeIp,
         windows: windows,
@@ -246,7 +254,9 @@ class MihomoConfigGen {
         resolvedServerIp: resolvedServerIp,
         routingMode: effectiveRoutingMode,
         managedProcessNames: processRules ? managedProcessNames : const [],
+        managedProcessPaths: processRules ? managedProcessPaths : const [],
         appProcessName: processRules ? appProcessName : '',
+        appProcessPath: processRules ? appProcessPath : '',
         tunOwned: tun != null,
         fakeIp: fakeIp,
         windows: windows,
@@ -297,7 +307,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool processRules = false,
     bool fakeIp = false,
     bool? windows,
@@ -325,7 +337,9 @@ class MihomoConfigGen {
           ...buildProcessRules(
             routingMode: routingMode,
             managedProcessNames: managedProcessNames,
+            managedProcessPaths: managedProcessPaths,
             appProcessName: appProcessName,
+            appProcessPath: appProcessPath,
             proxyTarget: clash.primaryTarget,
             windows: windows,
           ),
@@ -528,6 +542,8 @@ class MihomoConfigGen {
     AppSettings settings, {
     required int socksPort,
     bool httpInbound = false,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
     final proxy = buildProxy(input.trim());
     return jsonEncode(<String, dynamic>{
@@ -541,12 +557,14 @@ class MihomoConfigGen {
       'mode': 'rule',
       // Логи замера никому не показываются, а ядро на `info` пишет строку на
       // каждое соединение — в короткоживущем процессе это чистые расходы.
-      'log-level': 'silent',
+      'log-level': desktopDns ? 'warning' : 'silent',
       'find-process-mode': 'off',
       // Ядро иначе полезет в сеть за своими копиями geo-баз — на замере это
       // лишний трафик и лишняя задержка старта.
       'geo-auto-update': false,
-      'dns': _pingDns(),
+      'dns': desktopDns
+          ? _desktopPingDns(settings, physicalBootstrapDns: physicalBootstrapDns)
+          : _pingDns(),
       'proxies': [proxy],
       // Единственное правило: всё в прокси. Своё же соединение до сервера ядро
       // правилами не гоняет, так что закольцевать здесь нечего.
@@ -572,6 +590,38 @@ class MihomoConfigGen {
         ],
       };
 
+  static Map<String, dynamic> _desktopPingDns(
+    AppSettings settings, {required bool physicalBootstrapDns}
+  ) {
+    final core = settings.xrayCore;
+    final custom = core.dnsUseCustom
+        ? _parseList(core.dnsServers).map(_dnsAddress).whereType<String>()
+            .where((server) => server != 'fakedns').toList()
+        : const <String>[];
+    final split = core.dnsSplitDirectDomains &&
+        splitDomainsAndIps(_parseList(settings.directRules)).domains.isNotEmpty && custom.length > 1;
+    final selected = physicalBootstrapDns && !core.dnsUseCustom
+        ? const <String>[]
+        : custom.isEmpty
+            ? const ['https://1.1.1.1/dns-query']
+            : (split ? custom.take(1) : custom.take(2));
+    final servers = <String>[];
+    for (final server in selected) {
+      final direct = server == 'system' ? server : '${server.split('#').first}#DIRECT';
+      if (!servers.contains(direct)) servers.add(direct);
+    }
+    if (!servers.contains('system')) servers.add('system');
+    final ipServers = servers.where(_hasIpAddress).map((s) => s.split('#').first).toList();
+    return {
+      'enable': true,
+      'ipv6': false,
+      'enhanced-mode': 'normal',
+      'default-nameserver': ipServers.isEmpty ? ['system'] : ipServers,
+      'proxy-server-nameserver': servers,
+      'nameserver': servers,
+    };
+  }
+
   // ─────────────────────────────── DNS ───────────────────────────────
 
   /// Резолвер самого ядра — аналог `dns`-блока xray.
@@ -591,6 +641,36 @@ class MihomoConfigGen {
   }) {
     final core = settings.xrayCore;
     final servers = dnsServers(core);
+    final directDomains = splitDomainsAndIps(_parseList(settings.directRules)).domains;
+    final splitCustom = core.dnsUseCustom && core.dnsSplitDirectDomains &&
+        directDomains.isNotEmpty && servers.length > 1 &&
+        _parseList(core.dnsServers).where((raw) => _dnsAddress(raw) != null).length > 1;
+    final directServer = servers.first;
+    final policy = <String, dynamic>{};
+    if (splitCustom) {
+      for (final raw in directDomains) {
+        final rule = raw.trim().toLowerCase();
+        if (rule.startsWith('geosite:')) {
+          policy[rule] = [directServer];
+        } else if (rule.startsWith('full:')) {
+          policy[rule.substring(5)] = [directServer];
+        } else if (!rule.startsWith('regexp:')) {
+          var domain = rule.startsWith('domain:') ? rule.substring(7).trim() : rule;
+          if (domain.startsWith('.')) domain = domain.substring(1);
+          if (domain.isNotEmpty) policy['+.$domain'] = [directServer];
+        }
+      }
+      // Reserved LAN names remain local. '*' matches one label in mihomo's
+      // domain trie; it does not match arbitrary multi-label enterprise zones.
+      for (final local in ['+.local', '+.home.arpa', '*']) {
+        policy[local] = ['system'];
+      }
+    }
+    // The first DNS resolves node/bootstrap names directly. A hostname-only
+    // first entry is bootstrapped by the OS, never the foreign proxy DNS.
+    final bootstrap = splitCustom
+        ? [_hasIpAddress(directServer) ? directServer : 'system']
+        : bootstrapNameservers(core);
     // Тот же смысл, что у `proxiedDoh` в xray-генераторе: перехват провайдером
     // имеет значение только там, где «всё остальное» и так идёт в туннель.
     final globalProxy =
@@ -616,12 +696,16 @@ class MihomoConfigGen {
         // туннеле.
         'fake-ip-filter': fakeIpFilter,
       },
-      'default-nameserver': bootstrapNameservers(core),
+      'default-nameserver': bootstrap,
       // Адрес прокси-сервера — отдельной записью и всегда мимо туннеля (у xray
       // это `bootstrapDomains` со `skipFallback`): запрос по нему через прокси
       // означал бы круг.
-      'proxy-server-nameserver': servers,
-      'nameserver': servers,
+      'proxy-server-nameserver': splitCustom
+          ? [directServer == 'system'
+              ? 'system' : '${directServer.split('#').first}#DIRECT']
+          : servers,
+      'nameserver': splitCustom ? servers.skip(1).toList() : servers,
+      if (policy.isNotEmpty) 'nameserver-policy': policy,
       // `respect-rules` гоняет DNS ядра по тем же правилам, что и трафик, то
       // есть в туннель. Ровно то, что делает схема `https://` вместо
       // `https+local://` у xray.
@@ -1972,7 +2056,9 @@ class MihomoConfigGen {
     String proxyTarget = proxyName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool tunOwned = false,
     bool fakeIp = false,
     bool? windows,
@@ -1981,7 +2067,9 @@ class MihomoConfigGen {
       ...buildProcessRules(
         routingMode: routingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         proxyTarget: proxyTarget,
         windows: windows,
       ),
@@ -2068,12 +2156,19 @@ class MihomoConfigGen {
   static List<String> buildProcessRules({
     required AppRoutingMode routingMode,
     required List<String> managedProcessNames,
+    List<String> managedProcessPaths = const [],
     required String appProcessName,
+    String appProcessPath = '',
     String proxyTarget = proxyName,
     bool? windows,
   }) {
     final app = appProcessName.trim();
-    if (app.isEmpty && managedProcessNames.isEmpty) return const [];
+    if (app.isEmpty &&
+        appProcessPath.isEmpty &&
+        managedProcessNames.isEmpty &&
+        managedProcessPaths.isEmpty) {
+      return const [];
+    }
 
     // Целевая ОС параметром, а не из `Platform`: три имени ниже несут `.exe`
     // только на Windows, и снятая там фикстура иначе падала бы на linux-раннере,
@@ -2084,6 +2179,7 @@ class MihomoConfigGen {
       // Наши собственные сокеты (tcp-пинг, спидтест, апдейтер) — мимо туннеля,
       // иначе пинг мерил бы локальный конец туннеля вместо сервера.
       if (app.isNotEmpty) 'PROCESS-NAME,$app,DIRECT',
+      if (appProcessPath.isNotEmpty) 'PROCESS-PATH,$appProcessPath,DIRECT',
       // Замер url-пинга и спидтест поднимают своё временное ядро ОТДЕЛЬНЫМ
       // процессом, и его соединение к измеряемому серверу туннель забирал себе:
       // замер уезжал через живой туннель, мерил заодно и его, и обычно не
@@ -2109,6 +2205,19 @@ class MihomoConfigGen {
         'PROCESS-NAME,openvpn$exe,DIRECT',
       ],
     ];
+
+    for (final path in managedProcessPaths) {
+      if (!path.startsWith('/') || path.contains(RegExp(r'[,\r\n\x00]'))) {
+        throw const FormatException(
+          'Invalid executable path in application routing.',
+        );
+      }
+      if (routingMode == AppRoutingMode.onlySelected) {
+        rules.add('PROCESS-PATH,$path,$proxyTarget');
+      } else if (routingMode == AppRoutingMode.allExceptSelected) {
+        rules.add('PROCESS-PATH,$path,DIRECT');
+      }
+    }
 
     for (final process in managedProcessNames) {
       final name = process.trim();

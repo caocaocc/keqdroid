@@ -282,8 +282,8 @@ object EphemeralXrayPing {
 
         val binary = coreBinary(nativeLibraryDir, core)
         if (!binary.exists()) {
-            val err = Result(false, null, "${binary.name} not found", null)
-            return probes.map { BatchResult(it.id, err) }
+            Log.e(TAG, "${binary.name} not found for the batch")
+            return emptyList()
         }
 
         val configFile = File(filesDir, "xray_ping_multi_${UUID.randomUUID()}.json")
@@ -292,8 +292,8 @@ object EphemeralXrayPing {
             configFile.writeText(configJson, Charsets.UTF_8)
             pid = NativeHelper.startCore(binary.absolutePath, configFile.absolutePath, assetDir, "", core)
             if (pid <= 0) {
-                val err = Result(false, null, "failed to start $core for the batch (pid=$pid)", null)
-                return probes.map { BatchResult(it.id, err) }
+                Log.e(TAG, "failed to start $core for the batch (pid=$pid)")
+                return emptyList()
             }
 
             // Порты поднимаются разом, поэтому бюджет общий: первый ждёт старта
@@ -301,8 +301,8 @@ object EphemeralXrayPing {
             val portWaitMs = min(timeoutMs, 8_000)
             for (probe in probes) {
                 if (!waitForPort("127.0.0.1", probe.port, portWaitMs)) {
-                    val err = Result(false, null, "port ${probe.port} not ready in the batch", null)
-                    return probes.map { BatchResult(it.id, err) }
+                    Log.e(TAG, "port ${probe.port} not ready in the batch")
+                    return emptyList()
                 }
             }
 
@@ -327,8 +327,7 @@ object EphemeralXrayPing {
             }
         } catch (e: Exception) {
             Log.e("KEQDIS", "urlTestMulti failed: ${e.message}")
-            val err = Result(false, null, e.message ?: "batch failed", null)
-            return probes.map { BatchResult(it.id, err) }
+            return emptyList()
         } finally {
             if (pid > 0) {
                 runCatching { android.os.Process.killProcess(pid) }

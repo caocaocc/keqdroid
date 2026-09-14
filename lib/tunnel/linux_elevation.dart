@@ -50,6 +50,7 @@ ElevationLaunch planElevation({
   required String helperPath,
   required bool asRoot,
   required bool passwordless,
+  String pkexecPath = 'pkexec',
 }) {
   if (asRoot) {
     return (
@@ -60,13 +61,13 @@ ElevationLaunch planElevation({
   }
   if (passwordless) {
     return (
-      executable: 'pkexec',
+      executable: pkexecPath,
       args: <String>[helperPath, ...coreArgs],
       viaPkexec: true,
     );
   }
   return (
-    executable: 'pkexec',
+    executable: pkexecPath,
     args: <String>['sh', '-c', wrapperBody, 'sh', ...coreArgs],
     viaPkexec: true,
   );

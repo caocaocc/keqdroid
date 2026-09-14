@@ -101,6 +101,42 @@ abstract class AppLocalizations {
     Locale('zh')
   ];
 
+  /// No description provided for @macosTunDnsWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected, but DNS queries failed'**
+  String get macosTunDnsWarning;
+
+  /// No description provided for @macosTunDnsOk.
+  ///
+  /// In en, this message translates to:
+  /// **'DNS queries succeeded'**
+  String get macosTunDnsOk;
+
+  /// No description provided for @macosTunDnsChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking DNS…'**
+  String get macosTunDnsChecking;
+
+  /// No description provided for @macosTunDnsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'TUN DNS'**
+  String get macosTunDnsTitle;
+
+  /// No description provided for @settingsRoutingPresetChinaDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Mainland China domains and IPs bypass the proxy.'**
+  String get settingsRoutingPresetChinaDesc;
+
+  /// No description provided for @settingsRoutingPresetChinaTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'China direct'**
+  String get settingsRoutingPresetChinaTitle;
+
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
@@ -938,7 +974,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsCustomHint.
   ///
   /// In en, this message translates to:
-  /// **'One address per line (DoH, DoT, or plain)'**
+  /// **'One address per line. +local connects directly; other addresses follow proxy routing.'**
   String get settingsXrayDnsCustomHint;
 
   /// No description provided for @settingsXrayDnsServers.
@@ -956,7 +992,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsSplitDirectHint.
   ///
   /// In en, this message translates to:
-  /// **'Uses first server for domains from direct list'**
+  /// **'With two or more servers: first for direct domains and node lookup, the rest for other domains. Desktop Xray TUN uses only the first two. Local names use system DNS; enterprise split DNS is not detected automatically.'**
   String get settingsXrayDnsSplitDirectHint;
 
   /// No description provided for @settingsXrayDnsQueryStrategy.
@@ -1088,7 +1124,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsDefaultNote.
   ///
   /// In en, this message translates to:
-  /// **'Default: Cloudflare and Google DoH'**
+  /// **'When custom DNS is off: Cloudflare and Google DoH'**
   String get settingsXrayDnsDefaultNote;
 
   /// No description provided for @settingsXrayXmuxParamsTitle.
@@ -2501,6 +2537,30 @@ abstract class AppLocalizations {
   /// **'Mode'**
   String get desktopModeShort;
 
+  /// No description provided for @macosLaunchAtLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Launch at login'**
+  String get macosLaunchAtLogin;
+
+  /// No description provided for @macosAutoConnectOnLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect automatically at login'**
+  String get macosAutoConnectOnLogin;
+
+  /// No description provided for @macosAutoConnectOnLoginHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the last selected server using the mode from the sidebar when launched at login. TUN requires prior authorization and will not connect automatically without it. Proxy requires no administrator authorization.'**
+  String get macosAutoConnectOnLoginHint;
+
+  /// No description provided for @macosAutoConnectRequiresLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable \"Launch at login\" first'**
+  String get macosAutoConnectRequiresLogin;
+
   /// No description provided for @settingsDesktopTitle.
   ///
   /// In en, this message translates to:
@@ -3644,7 +3704,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsResetRoutingConfirm.
   ///
   /// In en, this message translates to:
-  /// **'This restores the built-in routing rules and discards your direct/proxy/blocked lists. This can\'t be undone.'**
+  /// **'This restores the built-in routing rules, discards your direct/proxy/blocked lists, and routes other traffic through the proxy. This can\'t be undone.'**
   String get settingsResetRoutingConfirm;
 
   /// No description provided for @settingsXrayResetConfirm.
@@ -4888,6 +4948,114 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not read this image.'**
   String get cardImageRejectUnreadable;
+
+  /// No description provided for @macosSplitProcessHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Rules match executable paths, including helpers inside the selected app. Shared system services may not be attributable to an app.'**
+  String get macosSplitProcessHint;
+
+  /// No description provided for @macosAppNeedsMatching.
+  ///
+  /// In en, this message translates to:
+  /// **'App not found in this list. Locate it again if it moved or was removed.'**
+  String get macosAppNeedsMatching;
+
+  /// No description provided for @macosNetworkServiceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Network service'**
+  String get macosNetworkServiceTitle;
+
+  /// No description provided for @macosNetworkServiceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.'**
+  String get macosNetworkServiceHint;
+
+  /// No description provided for @macosNetworkServiceMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Install or update KEQDIS using the complete PKG installer to enable the network service.'**
+  String get macosNetworkServiceMissing;
+
+  /// No description provided for @macosAuthorizeAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorize TUN for this account'**
+  String get macosAuthorizeAccount;
+
+  /// No description provided for @macosWaitingNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for network to recover'**
+  String get macosWaitingNetwork;
+
+  /// No description provided for @macosRestoringNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Restoring previous network settings'**
+  String get macosRestoringNetwork;
+
+  /// No description provided for @macosRetryingNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting automatically'**
+  String get macosRetryingNetwork;
+
+  /// No description provided for @macosRecoveryPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic recovery paused'**
+  String get macosRecoveryPaused;
+
+  /// No description provided for @macosRetryRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry network restoration'**
+  String get macosRetryRecovery;
+
+  /// No description provided for @pingTimingWarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Warm connection'**
+  String get pingTimingWarm;
+
+  /// No description provided for @pingTimingCold.
+  ///
+  /// In en, this message translates to:
+  /// **'Full request'**
+  String get pingTimingCold;
+
+  /// No description provided for @pingTimingFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'First request'**
+  String get pingTimingFallback;
+
+  /// No description provided for @pingProbeDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Stage {stage}; elapsed {elapsed} ms / {budget} ms'**
+  String pingProbeDetails(String stage, int elapsed, int budget);
+
+  /// No description provided for @appearanceShowMenuBarSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Show real-time speed in the menu bar'**
+  String get appearanceShowMenuBarSpeed;
+
+  /// No description provided for @appearanceShowMenuBarSpeedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Traffic handled by KEQDIS'**
+  String get appearanceShowMenuBarSpeedSubtitle;
+
+  /// No description provided for @macosMenuOpenServers.
+  ///
+  /// In en, this message translates to:
+  /// **'Open window to select a node'**
+  String get macosMenuOpenServers;
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
