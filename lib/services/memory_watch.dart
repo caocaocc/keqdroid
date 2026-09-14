@@ -28,7 +28,10 @@ class MemoryWatch {
   /// На Android слепки снимает служба VPN (native.log): Dart там живёт не
   /// дольше окна, а память росла при закрытом.
   void start() {
-    if (_timer != null || !(Platform.isWindows || Platform.isLinux)) return;
+    if (_timer != null ||
+        !(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     _timer = Timer.periodic(MemoryWatchSchedule.beat, (_) => _onBeat());
     unawaited(_snapshot('start'));
   }
@@ -93,6 +96,18 @@ class MemoryWatch {
             if (entry.value case final Map core when core['ok'] == true)
               entry.key: core['privateBytes'] as int,
         },
+      );
+    }
+    // На macOS доступны общие счётчики процесса; /proc и Windows-канал там
+    // не работают. Память ядер не измерена — не выдаём это за их отсутствие.
+    if (Platform.isMacOS) {
+      return MemorySample(
+        rss: common.rss,
+        peakRss: common.peakRss,
+        liveImages: common.liveImages,
+        imageBytes: common.imageBytes,
+        polls: common.polls,
+        cores: null,
       );
     }
     final status = _procStatus('self');
@@ -264,7 +279,8 @@ class MemorySample {
   final String polls;
 
   /// Ядро → его память: выделенная на Windows, резидентная на Linux.
-  final Map<String, int> cores;
+  /// null — на платформе эти счётчики недоступны.
+  final Map<String, int>? cores;
 
   /// По чему судить о росте: выделенная, если она известна.
   int get size => privateBytes ?? rss;
@@ -281,9 +297,10 @@ class MemorySample {
       ].join(', '),
       'images $liveImages live, ${mb(imageBytes)} cached',
       if (polls.isNotEmpty) '/connections: $polls',
-      cores.isEmpty
-          ? 'no core running'
-          : 'cores ${cores.entries.map((e) => '${e.key} ${mb(e.value)}').join(', ')}',
+      if (cores case final cores?)
+        cores.isEmpty
+            ? 'no core running'
+            : 'cores ${cores.entries.map((e) => '${e.key} ${mb(e.value)}').join(', ')}',
     ];
     return parts.join('; ');
   }

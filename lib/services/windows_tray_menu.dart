@@ -398,7 +398,7 @@ class WindowsTrayMenu with TrayListener {
         final notifier = _ref.read(vpnStateProvider.notifier);
         if (status == VpnStatus.connected) {
           await notifier.disconnect();
-        } else if (status == VpnStatus.connecting) {
+        } else if (status == VpnStatus.connecting || notifier.hasConnectionIntent) {
           await notifier.cancelConnect();
         } else if (_ref.read(serversProvider).activeServer != null) {
           await notifier.connect();
@@ -415,16 +415,9 @@ class WindowsTrayMenu with TrayListener {
           }
         }
         if (server == null) return;
-        final status =
-            _ref.read(vpnStateProvider).value?.status ?? VpnStatus.disconnected;
-        final tunnelActive = status == VpnStatus.connected ||
-            status == VpnStatus.connecting;
-        // Повторный выбор активного сервера туннель не перезапускает.
-        if (tunnelActive && server.id == serversState.activeServer?.id) return;
-        await _ref.read(serversProvider.notifier).setActive(server);
-        if (tunnelActive) {
-          await _ref.read(vpnStateProvider.notifier).reconnectToActiveServer();
-        }
+        await _ref.read(vpnStateProvider.notifier).selectServerManually(
+          server, reconnectIfActive: true,
+        );
       }, 'server select');
 
   /// Смена режима.
@@ -437,12 +430,15 @@ class WindowsTrayMenu with TrayListener {
         final settings =
             _ref.read(settingsNotifierProvider).value ?? const AppSettings();
         if (next == settings.connectionModeEnum) return;
+        final vpn = _ref.read(vpnStateProvider.notifier);
+        final generation = vpn.connectionGeneration;
         // Окно разворачиваем заранее: переход в TUN может спросить про
         // перезапуск с правами администратора, а диалогу нужен экран. Раньше
         // ради этого же меню закрывалось вручную, и дальше тянулся хвост
         // «взять всё из ref до закрытия, иначе ref мёртв» — нативное меню к
         // этому моменту уже закрыто самой Windows.
         await WindowsDesktopService.restoreMainWindow();
+        if (!vpn.isConnectionChangeCurrent(generation)) return;
         final context = rootNavigatorKey.currentContext;
         if (context == null || !context.mounted) return;
         await applyDesktopConnectionMode(

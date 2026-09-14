@@ -55,26 +55,35 @@ Future<void> applyDesktopConnectionMode(
   ConnectionMode next,
 ) async {
   if (next == settings.connectionModeEnum) return;
+  final wasActive = deps.vpn.hasConnectionIntent;
+  var generation = deps.vpn.connectionGeneration;
+  bool current() => deps.vpn.isConnectionChangeCurrent(generation);
 
   // Linux elevates per-connect via pkexec (sing-box), so only Windows needs
   // the relaunch-as-admin flow before switching to TUN.
   if (next == ConnectionMode.tun && Platform.isWindows) {
     final elevated = await WindowsDesktopService.isProcessElevated();
+    if (!current()) return;
     if (!elevated) {
       if (!context.mounted) return;
       final restart = await showDesktopTunAdminDialog(context);
-      if (restart != true) return;
+      if (restart != true || !current()) return;
 
-      await stopSessionBeforeElevation(
+      generation = deps.vpn.beginConnectionChange();
+      final stopping = stopSessionBeforeElevation(
         notifier: deps.vpn,
         status: deps.status(),
       );
+      generation = deps.vpn.connectionGeneration;
+      await stopping;
+      if (!current()) return;
       await deps.settings.save(
-            settings.copyWith(
-              connectionMode: ConnectionMode.tun.storageValue,
-              connectionModeChosen: true,
-            ),
-          );
+        settings.copyWith(
+          connectionMode: ConnectionMode.tun.storageValue,
+          connectionModeChosen: true,
+        ),
+      );
+      if (!current()) return;
       final ok = await WindowsDesktopService.restartAsAdministrator();
       if (!ok && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -89,38 +98,28 @@ Future<void> applyDesktopConnectionMode(
     }
   }
 
-  final status = deps.status();
-  final wasActive =
-      status == VpnStatus.connected || status == VpnStatus.connecting;
-  if (wasActive) {
-    try {
-      await deps.vpn.disconnect();
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(friendlyError(e, context))),
-        );
-      }
-      return;
-    }
+  if (!current()) return;
+  generation = deps.vpn.beginConnectionChange();
+  Future<void> saveMode() => deps.settings.save(
+    settings.copyWith(
+      connectionMode: next.storageValue,
+      connectionModeChosen: true,
+    ),
+  );
+  if (!wasActive) {
+    await saveMode();
+    return;
   }
-  await deps.settings.save(
-        settings.copyWith(
-          connectionMode: next.storageValue,
-          connectionModeChosen: true,
-        ),
-      );
-  if (wasActive) {
-    try {
-      await deps.vpn.connect();
-    } catch (e) {
-      // Ошибка уже лежит в state (её покажет круг подключения); снекбар —
-      // немедленная подсказка, если пользователь смотрит на sidebar/трей.
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(friendlyError(e, context))),
-        );
-      }
+  try {
+    await deps.vpn.reconnectToActiveServer(
+      expectedGeneration: generation,
+      afterDisconnect: saveMode,
+    );
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e, context))));
     }
   }
 }

@@ -23,8 +23,24 @@ class _WindowsDesktopSettingsScreenState
   }
 
   Future<void> _save(AppSettings next) async {
+    if (Platform.isMacOS) {
+      try {
+        final previous = ref.read(settingsNotifierProvider).value;
+        await MacOSDesktopService.applySettings(
+          next,
+          updateLoginItem: previous?.launchAtStartup != next.launchAtStartup,
+        );
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$error')));
+        }
+        return;
+      }
+    }
     await ref.read(settingsNotifierProvider.notifier).save(next);
-    await WindowsDesktopService.applySettings(next);
+    if (Platform.isWindows) await WindowsDesktopService.applySettings(next);
   }
 
   /// Приводит настройки к тому, что на самом деле сделано в системе.
@@ -54,6 +70,10 @@ class _WindowsDesktopSettingsScreenState
   /// не намерение, а факт: оба переключателя обязаны показывать то, что система
   /// действительно делает на входе в систему.
   Future<void> _applyAutostart(AppSettings next) async {
+    if (Platform.isMacOS) {
+      await _save(next);
+      return;
+    }
     final ok = await WindowsDesktopService.applyLaunchAtStartup(
       enabled: next.launchAtStartup,
       elevated: next.launchAtStartupElevated,
@@ -62,7 +82,9 @@ class _WindowsDesktopSettingsScreenState
     final elevated = await WindowsDesktopService.isLaunchAtStartupElevated();
     final run = await WindowsDesktopService.isLaunchAtStartupEnabled();
     if (!mounted) return;
-    await ref.read(settingsNotifierProvider.notifier).save(
+    await ref
+        .read(settingsNotifierProvider.notifier)
+        .save(
           next.copyWith(
             launchAtStartup: elevated || run,
             launchAtStartupElevated: elevated,
@@ -71,7 +93,9 @@ class _WindowsDesktopSettingsScreenState
     if (ok || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(AppLocalizations.of(context)!.settingsAutostartAdminFailed),
+        content: Text(
+          AppLocalizations.of(context)!.settingsAutostartAdminFailed,
+        ),
       ),
     );
   }
@@ -90,18 +114,17 @@ class _WindowsDesktopSettingsScreenState
     // нет вовсе. Остался только абзац под группой — он отвечает на вопрос
     // «почему серое», из названия этого не узнать.
     Widget note(String text) => Padding(
-          padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
-          child: Text(
-            text,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: AppTheme.textLight(context)),
-          ),
-        );
+      padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+      child: Text(
+        text,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: AppTheme.textLight(context)),
+      ),
+    );
 
     return ExpressivePage(
-      title: l10n.settingsDesktopTitle,
+      title: Platform.isMacOS ? 'macOS' : l10n.settingsDesktopTitle,
       physics: const ClampingScrollPhysics(),
       children: [
         ExpressiveGroup(
@@ -114,27 +137,32 @@ class _WindowsDesktopSettingsScreenState
             ),
             _AppearanceSwitchTile(
               icon: Icons.power_settings_new_rounded,
-              title: l10n.settingsLaunchAtStartup,
+              title: Platform.isMacOS
+                  ? l10n.macosLaunchAtLogin
+                  : l10n.settingsLaunchAtStartup,
               value: settings.launchAtStartup,
               onChanged: (v) => unawaited(
                 _applyAutostart(settings.copyWith(launchAtStartup: v)),
               ),
             ),
-            _AppearanceSwitchTile(
-              icon: Icons.admin_panel_settings_rounded,
-              title: l10n.settingsLaunchAtStartupAdmin,
-              value: settings.launchAtStartupElevated,
-              onChanged: settings.launchAtStartup
-                  ? (v) => unawaited(
-                        _applyAutostart(
-                          settings.copyWith(launchAtStartupElevated: v),
-                        ),
-                      )
-                  : null,
-            ),
+            if (Platform.isWindows)
+              _AppearanceSwitchTile(
+                icon: Icons.admin_panel_settings_rounded,
+                title: l10n.settingsLaunchAtStartupAdmin,
+                value: settings.launchAtStartupElevated,
+                onChanged: settings.launchAtStartup
+                    ? (v) => unawaited(
+                          _applyAutostart(
+                            settings.copyWith(launchAtStartupElevated: v),
+                          ),
+                        )
+                    : null,
+              ),
             _AppearanceSwitchTile(
               icon: Icons.vpn_lock_rounded,
-              title: l10n.settingsAutoConnectOnAutostart,
+              title: Platform.isMacOS
+                  ? l10n.macosAutoConnectOnLogin
+                  : l10n.settingsAutoConnectOnAutostart,
               value: settings.autoConnectLastServer,
               onChanged: settings.launchAtStartup
                   ? (v) => _save(settings.copyWith(autoConnectLastServer: v))
@@ -143,7 +171,11 @@ class _WindowsDesktopSettingsScreenState
           ],
         ),
         if (!settings.launchAtStartup)
-          note(l10n.settingsAutoConnectRequiresAutostart),
+          note(
+            Platform.isMacOS
+                ? l10n.macosAutoConnectRequiresLogin
+                : l10n.settingsAutoConnectRequiresAutostart,
+          ),
       ],
     );
   }

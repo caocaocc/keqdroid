@@ -6,8 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../core/connections_poll_stats.dart';
 import '../models/connection_entry.dart';
 import '../platform/vpn_native_bridge.dart';
-import '../tunnel/linux_tunnel_backend.dart';
-import '../tunnel/windows_tunnel_backend.dart';
+import '../tunnel/desktop_runtime.dart';
 import '../utils/mihomo_api_session.dart';
 import 'connections_tracker.dart';
 import 'debug_log_service.dart';
@@ -45,7 +44,7 @@ class ConnectionsService {
   /// Что источник отдал прямо сейчас — до свёртки и без памяти о предыдущих
   /// опросах.
   static Future<ConnectionsSnapshot> _rawSnapshot() async {
-    if (Platform.isWindows || Platform.isLinux) {
+    if (DesktopRuntime.supported) {
       final api = await _fromClashApi();
       if (api.source == ConnectionsSource.coreApi) return api;
       // clash_api нет: движок `chain` (xray + sing-box) его не поднимает, да и
@@ -86,13 +85,12 @@ class ConnectionsService {
   /// сокету через систему. Имя всё равно бывает пустым (на Android нужен
   /// дебаг-режим и живое соединение), и тогда плитка просто его не рисует.
   static bool get supportsProcessNames =>
-      Platform.isWindows || Platform.isLinux || Platform.isAndroid;
+      DesktopRuntime.supported || Platform.isAndroid;
 
   // ── desktop: clash_api ────────────────────────────────────────────────────
 
   static int? _activeClashPort() {
-    if (Platform.isWindows) return WindowsTunnelBackend.activeInstance?.clashApiPort;
-    if (Platform.isLinux) return LinuxTunnelBackend.activeInstance?.clashApiPort;
+    if (DesktopRuntime.supported) return DesktopRuntime.clashApiPort;
     if (Platform.isAndroid) return MihomoApiSession().port;
     return null;
   }
@@ -101,7 +99,9 @@ class ConnectionsService {
   /// на Android петля общая для всех приложений, а разные правила для разных ОС
   /// означали бы 401 ровно на одной из них. Пустая строка — значит активной
   /// сессии mihomo нет, и заголовок не нужен.
-  static String _activeClashSecret() => MihomoApiSession().secret;
+  static String _activeClashSecret() => DesktopRuntime.supported
+      ? DesktopRuntime.clashApiSecret
+      : MihomoApiSession().secret;
 
   static Future<ConnectionsSnapshot> _fromClashApi() async {
     final port = _activeClashPort();
@@ -259,11 +259,12 @@ class ConnectionsService {
   }
 
   static ConnectionEntry _applyDecision(ConnectionEntry entry) {
-    final decision = _decisions[XrayAccessLogParser.targetKeyFor(
-      entry.network,
-      entry.host,
-      entry.destPort,
-    )];
+    final decision =
+        _decisions[XrayAccessLogParser.targetKeyFor(
+          entry.network,
+          entry.host,
+          entry.destPort,
+        )];
     if (decision == null || decision.outbound.isEmpty) {
       return entry.withRouting(
         rule: '',
@@ -326,7 +327,8 @@ class ConnectionsService {
       _ => rulePayload.isEmpty ? ruleType : '$ruleType($rulePayload)',
     };
 
-    final id = json['id']?.toString() ??
+    final id =
+        json['id']?.toString() ??
         '${str('sourceIP')}:${str('sourcePort')}>$host:${str('destinationPort')}';
 
     return ConnectionEntry(
@@ -378,12 +380,11 @@ class ConnectionsService {
   /// приложение-владелец туннеля. Им и спрашиваем.
   static Future<ConnectionsSnapshot> _withAndroidAppNamesFromSource(
     ConnectionsSnapshot snapshot,
-  ) async =>
-      withAppNamesFromSource(
-        snapshot,
-        resolve: VpnNativeBridge.resolveConnectionOwners,
-        cache: _appNames,
-      );
+  ) async => withAppNamesFromSource(
+    snapshot,
+    resolve: VpnNativeBridge.resolveConnectionOwners,
+    cache: _appNames,
+  );
 
   /// Обогащение по исходному сокету из самой записи.
   @visibleForTesting
@@ -426,9 +427,7 @@ class ConnectionsService {
     if (requests.isEmpty && !fromCache) {
       return entries.isEmpty ? snapshot : _withoutAppNames(snapshot);
     }
-    final names = requests.isEmpty
-        ? const <String>[]
-        : await resolve(requests);
+    final names = requests.isEmpty ? const <String>[] : await resolve(requests);
     for (var i = 0; i < indexes.length && i < names.length; i++) {
       final name = names[i];
       if (name.isEmpty) continue;
@@ -473,7 +472,6 @@ class ConnectionsService {
   /// секунды: экран опрашивается по таймеру, а соединение живёт дольше.
   static final Map<String, String> _appNames = {};
   static const _appNamesLimit = 300;
-
 }
 
 /// Разбор лога xray в список соединений.
@@ -571,10 +569,7 @@ class XrayAccessLogParser {
   /// `app/proxyman/inbound: connection ends > …` — соединение закрылось.
   /// Хвост строки это причина закрытия, она не нужна; важен сам факт и
   /// идентификатор сессии перед ним.
-  static final _sessionEnded = RegExp(
-    r'connection ends',
-    caseSensitive: false,
-  );
+  static final _sessionEnded = RegExp(r'connection ends', caseSensitive: false);
 
   /// Решения роутинга по назначению: `network:host:port` → правило и аутбаунд.
   ///
@@ -589,8 +584,11 @@ class XrayAccessLogParser {
     for (final line in log.split('\n')) {
       final detour = _detour.firstMatch(line);
       if (detour != null) {
-        final target =
-            _targetKey(detour.group(3), detour.group(4), detour.group(5));
+        final target = _targetKey(
+          detour.group(3),
+          detour.group(4),
+          detour.group(5),
+        );
         byTarget[target] = XrayRouteDecision(
           rule: detour.group(1)?.trim() ?? '',
           outbound: detour.group(2)?.trim() ?? '',
@@ -625,10 +623,7 @@ class XrayAccessLogParser {
     for (final raw in log.split('\n')) {
       final match = _sessionLine.firstMatch(raw.trimRight());
       if (match == null) continue;
-      final trace = sessions.putIfAbsent(
-        match.group(1)!,
-        XraySessionTrace.new,
-      );
+      final trace = sessions.putIfAbsent(match.group(1)!, XraySessionTrace.new);
       final rest = match.group(2)!;
 
       if (_sessionEnded.hasMatch(rest)) {
@@ -653,8 +648,7 @@ class XrayAccessLogParser {
       }
       final dest = _sessionDest.firstMatch(rest);
       if (dest != null) {
-        trace.destKey =
-            _targetKey(dest.group(1), dest.group(2), dest.group(3));
+        trace.destKey = _targetKey(dest.group(1), dest.group(2), dest.group(3));
         continue;
       }
       final detour = _detour.firstMatch(rest);
@@ -717,7 +711,8 @@ class XrayAccessLogParser {
       final detourField = m.group(6)?.trim() ?? '';
       final (inbound, outbound) = _splitDetour(detourField);
       final target = _targetKey(network, host, '$port');
-      final trace = byClient[source.toLowerCase()] ??
+      final trace =
+          byClient[source.toLowerCase()] ??
           _nextTraceForDest(byDest[target], target, destCursor);
 
       // Домен — в заголовок, IP уезжает строкой ниже: по одному IP гугла
@@ -735,8 +730,8 @@ class XrayAccessLogParser {
         outbound: outbound.isNotEmpty
             ? outbound
             : (trace?.outbound.isNotEmpty ?? false)
-                ? trace!.outbound
-                : (outboundByTarget[target] ?? ''),
+            ? trace!.outbound
+            : (outboundByTarget[target] ?? ''),
         rule: (trace?.rule.isNotEmpty ?? false)
             ? trace!.rule
             : (rulesByTarget[target] ?? ''),
@@ -870,7 +865,6 @@ class XraySessionTrace {
   /// Ядро сообщило о закрытии соединения.
   bool closed = false;
 }
-
 
 /// Решение роутинга ядра для одного назначения.
 class XrayRouteDecision {

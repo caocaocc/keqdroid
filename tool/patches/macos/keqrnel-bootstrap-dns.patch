@@ -1,0 +1,21 @@
+diff --git a/core/localdns/local.go b/core/localdns/local.go
+--- a/core/localdns/local.go
++++ b/core/localdns/local.go
+@@ -10,6 +10,8 @@
+ import (
+ 	"context"
+ 	"net"
++
++	"github.com/Lemonochka/keqrnel/internal/keqdisdns"
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+ 	C "github.com/sagernet/sing-box/constant"
+@@ -37,7 +39,7 @@
+ func NewTransport(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
+ 	return &Transport{
+ 		TransportAdapter: dns.NewTransportAdapterWithLocalOptions(C.DNSTypeLocal, tag, options),
+-		resolver:         &net.Resolver{},
++		resolver:         keqdisdns.Resolver(),
+ 	}, nil
+ }
+ 

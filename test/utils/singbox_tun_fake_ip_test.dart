@@ -5,6 +5,9 @@ import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/utils/fake_ip.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Keep this upstream suite independent of regional installation defaults.
+final _legacySettings = AppSettings.fromJson({});
+
 /// Fake-ip в TUN на десктопе: подменный адрес отдаёт DNS sing-box, а обратно в
 /// домен его превращает роутер sing-box (sing-box 1.14, route/route.go), и во
 /// встроенный xray уходит уже имя.
@@ -26,14 +29,14 @@ List<Map<String, dynamic>> _routeRules(Map<String, dynamic> c) =>
 
 void main() {
   test('по умолчанию выключен', () {
-    final c = _config(const AppSettings());
+    final c = _config(_legacySettings);
     final servers = (c['dns'] as Map)['servers'] as List;
     expect(servers.any((s) => (s as Map)['type'] == 'fakeip'), isFalse);
     expect(jsonEncode(c), isNot(contains(SingBoxTunConfigGen.fakeIpServerTag)));
   });
 
   test('подмена — последним правилом DNS, с TTL в секунду', () {
-    final c = _config(const AppSettings(fakeIp: true));
+    final c = _config(_legacySettings.copyWith(fakeIp: true));
     final servers = ((c['dns'] as Map)['servers'] as List).cast<Map>();
     final fake = servers.firstWhere((s) => s['type'] == 'fakeip');
     expect(fake['tag'], SingBoxTunConfigGen.fakeIpServerTag);
@@ -49,7 +52,7 @@ void main() {
   });
 
   test('проверки связности и локальные зоны получают настоящий адрес', () {
-    final rules = _dnsRules(_config(const AppSettings(fakeIp: true)));
+    final rules = _dnsRules(_config(_legacySettings.copyWith(fakeIp: true)));
     final exclusions = rules[rules.length - 2];
     expect(exclusions['server'], 'proxy-dns');
     expect(exclusions['domain'], contains('connectivitycheck.gstatic.com'));
@@ -58,11 +61,11 @@ void main() {
   });
 
   test('свои hosts и direct-домены по-прежнему раньше подмены', () {
-    final rules = _dnsRules(_config(const AppSettings(
+    final rules = _dnsRules(_config(_legacySettings.copyWith(
       fakeIp: true,
       directRules: 'corp.example',
     ).copyWith(
-      xrayCore: const AppSettings().xrayCore.copyWith(
+      xrayCore: _legacySettings.xrayCore.copyWith(
             dnsHosts: 'nas.example 10.0.0.5',
           ),
     )));
@@ -85,14 +88,14 @@ void main() {
     bool hasResolve(Map<String, dynamic> c) =>
         _routeRules(c).any((r) => r['action'] == 'resolve');
 
-    expect(hasResolve(_config(const AppSettings(fakeIp: true))), isFalse);
+    expect(hasResolve(_config(_legacySettings.copyWith(fakeIp: true))), isFalse);
     expect(
-      hasResolve(_config(const AppSettings(directRules: '10.10.0.0/16'))),
+      hasResolve(_config(_legacySettings.copyWith(directRules: '10.10.0.0/16'))),
       isFalse,
       reason: 'без fake-ip назначение и так адрес',
     );
 
-    final rules = _routeRules(_config(const AppSettings(
+    final rules = _routeRules(_config(_legacySettings.copyWith(
       fakeIp: true,
       directRules: '10.10.0.0/16',
       blockedRules: '203.0.113.0/24',

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/app_settings.dart';
@@ -22,7 +24,20 @@ import '../helpers/test_storage.dart';
 /// тест в цвет машины, на которой он запущен.
 class _RecordingBackend extends FakeTunnelBackend {
   final List<String> calls = [];
+  final sessions = <TunnelSessionRequest>[];
+  final changes = StreamController<VpnState>.broadcast(sync: true);
+  Completer<void>? holdState;
+  Completer<void>? enteredState;
   TunnelSessionRequest? session;
+
+  @override
+  Stream<VpnState> get stateStream => changes.stream;
+
+  @override
+  void dispose() {
+    unawaited(changes.close());
+    super.dispose();
+  }
 
   /// Состояние, которое движок отдаёт на запрос. `connecting` в начале означало
   /// бы «сессия уже поднимается» и увело бы connect() в другую ветку.
@@ -31,6 +46,11 @@ class _RecordingBackend extends FakeTunnelBackend {
   @override
   Future<VpnState> getCurrentState() async {
     calls.add('getCurrentState');
+    final hold = holdState;
+    holdState = null;
+    enteredState?.complete();
+    enteredState = null;
+    await hold?.future;
     return current;
   }
 
@@ -50,12 +70,15 @@ class _RecordingBackend extends FakeTunnelBackend {
   Future<void> startSession(TunnelSessionRequest request) async {
     calls.add('startSession');
     session = request;
+    sessions.add(request);
     current = const VpnState(status: VpnStatus.connected);
   }
 
   @override
   Future<void> stopSession() async {
     calls.add('stopSession');
+    current = VpnState.disconnected;
+    changes.add(current);
   }
 }
 
@@ -81,6 +104,7 @@ Future<(ProviderContainer, _RecordingBackend)> _container() async {
     ],
   );
   addTearDown(container.dispose);
+  addTearDown(backend.dispose);
 
   // Список серверов и состояние туннеля грузятся асинхронно в build()
   // нотифаеров. Не дождаться их — значит поймать гонку: build() завершится
@@ -92,6 +116,70 @@ Future<(ProviderContainer, _RecordingBackend)> _container() async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final modeChange in [false, true]) {
+    for (final cancelLatest in [false, true]) {
+      test(
+        'latest ${modeChange ? 'mode' : 'node'} drains an initial non-Mac connect (cancel=$cancelLatest)',
+        () async {
+          final (container, backend) = await _container();
+          final vpn = container.read(vpnStateProvider.notifier);
+          final gate = backend.holdState = Completer<void>();
+          final entered = backend.enteredState = Completer<void>();
+          final first = vpn.connect();
+          await entered.future;
+          late Future<void> latest;
+          if (modeChange) {
+            final generation = vpn.beginConnectionChange();
+            latest = vpn.reconnectToActiveServer(
+              expectedGeneration: generation,
+              afterDisconnect: () => container
+                  .read(settingsNotifierProvider.notifier)
+                  .save(
+                    container
+                        .read(settingsNotifierProvider)
+                        .value!
+                        .copyWith(connectionMode: 'proxy'),
+                  ),
+            );
+          } else {
+            final next = ServerItem(
+              id: 'srv-2',
+              type: ServerItemType.manual,
+              customName: 'second',
+              config: _server.config,
+            );
+            await container.read(storageProvider).saveServers([_server, next]);
+            await container.read(serversProvider.notifier).reload();
+            latest = vpn.selectServerManually(next, reconnectIfActive: true);
+          }
+          if (cancelLatest) await vpn.disconnect();
+          gate.complete();
+          await Future.wait([first, latest]);
+          if (cancelLatest) {
+            expect(backend.sessions, isEmpty);
+            expect(
+              container.read(vpnStateProvider).value?.status,
+              VpnStatus.disconnected,
+            );
+            return;
+          }
+          expect(backend.sessions, hasLength(1));
+          expect(
+            backend.sessions.single.serverName,
+            modeChange ? _server.displayName : 'second',
+          );
+          if (modeChange) {
+            expect(backend.sessions.single.mode, ConnectionMode.proxy);
+          }
+          expect(
+            container.read(vpnStateProvider).value?.status,
+            VpnStatus.connected,
+          );
+        },
+      );
+    }
+  }
 
   test('креды забираются до старта сессии, а сессия — последний шаг', () async {
     final (container, backend) = await _container();

@@ -155,6 +155,8 @@ class _AppInternalsScreen extends ConsumerWidget {
 
       ExpressiveSectionHeader(l10n.settingsInternalsSession),
       ExpressiveGroup(children: _sessionRows(context, l10n, data.session)),
+      if (Platform.isMacOS) const DesktopDnsNotice(showDetails: true),
+      if (Platform.isMacOS) const DesktopRecoveryNotice(showDetails: true),
 
       // Журнал — последним: сюда приходят, когда что-то уже сломалось. Там же
       // и записи системы о закрытиях процесса.

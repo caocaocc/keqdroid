@@ -316,19 +316,32 @@ class ActiveLocalPorts {
 
   int? _socksPort;
   int? _httpPort;
+  int? _lanSocksPort;
+  int? _lanHttpPort;
 
-  void set({required int socksPort, required int httpPort}) {
+  void set({
+    required int socksPort,
+    required int httpPort,
+    int? lanSocksPort,
+    int? lanHttpPort,
+  }) {
     _socksPort = socksPort;
     _httpPort = httpPort;
+    _lanSocksPort = lanSocksPort;
+    _lanHttpPort = lanHttpPort;
   }
 
   void clear() {
     _socksPort = null;
     _httpPort = null;
+    _lanSocksPort = null;
+    _lanHttpPort = null;
   }
 
   int? get socksPort => _socksPort;
   int? get httpPort => _httpPort;
+  int? get lanSocksPort => _lanSocksPort;
+  int? get lanHttpPort => _lanHttpPort;
 
   /// Порт активной сессии, а при её отсутствии — из настроек.
   int httpPortOr(int fallback) => _httpPort ?? fallback;

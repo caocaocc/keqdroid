@@ -5,6 +5,7 @@ import '../tunnel/connection_mode.dart';
 import '../tunnel/tunnel_backend.dart';
 import '../tunnel/tunnel_backend_factory.dart';
 import '../tunnel/android_tunnel_backend.dart';
+import '../tunnel/macos_tunnel_backend.dart';
 import '../tunnel/tunnel_session_request.dart';
 import '../tunnel/tunnel_state.dart';
 import '../tunnel/vpn_backend.dart';
@@ -28,6 +29,8 @@ class VpnEngine {
 
   Stream<VpnState> get stateStream => _backend.stateStream;
 
+  bool get usesMacOSNetworkService => _backend is MacOSTunnelBackend;
+  MacOSTunnelBackend? get macOSBackend => _backend is MacOSTunnelBackend ? _backend : null;
 
   void init() => _backend.init();
 
@@ -61,8 +64,8 @@ class VpnEngine {
     return null;
   }
 
-  Future<void> startSession(TunnelSessionRequest request) =>
-      _backend.startSession(request);
+  Future<void> startSession(TunnelSessionRequest request, {bool allowPermissionPrompt = true}) =>
+      macOSBackend?.startSession(request, allowPermissionPrompt: allowPermissionPrompt) ?? _backend.startSession(request);
 
   /// Android: TUN через VpnService, пакеты читает само ядро.
   Future<void> startVpn(

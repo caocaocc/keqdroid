@@ -35,7 +35,10 @@ class AppLogger {
   /// Crashlytics, но он берёт только ошибки и только с согласия, а файл
   /// человек видит сам — в «Журнале приложения».
   Future<void> enableFileLog() async {
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isAndroid) return;
+    if (!Platform.isWindows && !Platform.isLinux &&
+        !Platform.isMacOS && !Platform.isAndroid) {
+      return;
+    }
     try {
       enableFileLogIn(await getApplicationSupportDirectory());
     } catch (_) {
