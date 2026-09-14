@@ -213,7 +213,8 @@ void main() {
 
     testWidgets('без своего DNS показан: прямые домены идут в системный резолвер',
         (tester) async {
-      await _pumpSettings(tester, const AppSettings());
+      await _pumpSettings(tester,
+          const AppSettings(xrayCore: XrayCoreSettings(dnsUseCustom: false)));
       await _open(tester, _coreSettings);
       expect(find.text(label), findsOneWidget);
       // buildDnsBlock кладёт их на localhost, первого своего сервера тут нет
@@ -233,6 +234,28 @@ void main() {
       expect(find.text('Uses first server for domains from direct list'), findsOneWidget);
     });
   });
+
+  for (final sample in [
+    (name: 'single', dns: 'https://1.1.1.1/dns-query', custom: true, visible: false),
+    (name: 'duplicate', dns: '1.1.1.1, 1.1.1.1', custom: true, visible: false),
+    (name: 'unsupported', dns: 'sdns://invalid', custom: true, visible: false),
+    (name: 'DoT pair', dns: 'tls://1.1.1.1, tls://8.8.8.8', custom: true, visible: true),
+    (name: 'automatic', dns: '1.1.1.1, 8.8.8.8', custom: false, visible: false),
+  ]) {
+    testWidgets('mihomo split switch follows effective DNS: ${sample.name}', (tester) async {
+      await _pumpSettings(
+        tester,
+        AppSettings(xrayCore: XrayCoreSettings(
+          dnsUseCustom: sample.custom,
+          dnsServers: sample.dns,
+        )),
+        backend: VpnBackend.mihomo,
+      );
+      await _open(tester, _coreSettings);
+      expect(find.text('Split resolver for direct domains'),
+          sample.visible ? findsOneWidget : findsNothing);
+    });
+  }
 
   group('Подписи и выбор по ядру', () {
     const customDns = AppSettings(

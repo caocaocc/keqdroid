@@ -55,7 +55,7 @@ const _settings = AppSettings(
   lanHttpPort: 8080,
   lanUsername: '',
   lanPassword: '',
-  xrayCore: XrayCoreSettings(),
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
 );
 
 /// Синтетика: ни один адрес/UUID/пароль ниже не должен быть настоящим.
@@ -95,7 +95,7 @@ void main() {
         'vless://$_uuid@198.51.100.23:443?type=ws&security=tls'
         '&sni=mux.example&host=mux.example&path=%2Fm#mux',
         _settings.copyWith(
-          xrayCore: const XrayCoreSettings(muxEnabled: true),
+          xrayCore: const XrayCoreSettings(dnsUseCustom: false, muxEnabled: true),
         ),
       );
     });
@@ -275,6 +275,7 @@ void main() {
         '&obfs=salamander&obfs-password=obfspass&sni=hy2.example#hy2noise',
         _settings.copyWith(
           xrayCore: const XrayCoreSettings(
+            dnsUseCustom: false,
             noiseEnabled: true,
             noiseDelay: '5-20',
             noiseReset: '60',

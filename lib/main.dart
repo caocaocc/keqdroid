@@ -47,7 +47,7 @@ Future<void> main() async {
     // до всего остального: ошибка до runApp иначе не оставит следа
     await AppLogger.instance.enableFileLog();
     if (Platform.isWindows) HttpOverrides.global = WindowsSystemTrust();
-    await PrefsRecovery.prepare();
+    if (!Platform.isLinux) await PrefsRecovery.prepare();
 
     var crashlyticsReady = false;
     if (Platform.isAndroid) {
@@ -80,6 +80,8 @@ Future<void> main() async {
         if (!primary) {
           exit(0);
         }
+        // Второй запуск не должен чинить файл посреди записи первого процесса.
+        await PrefsRecovery.prepare();
         await LinuxTunnelBackend.cleanupStaleState();
         await LinuxBackgroundService.instance.initWindowAndTray();
       }

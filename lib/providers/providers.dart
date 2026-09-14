@@ -70,6 +70,8 @@ import '../utils/routing_profiles.dart';
 import '../utils/traffic_routes.dart';
 import '../utils/rule_lists.dart';
 import '../utils/singbox_outbounds.dart';
+import '../utils/geo_dat_reader.dart';
+import '../utils/singbox_tun_config.dart';
 import '../utils/socks5_credentials.dart';
 import '../utils/socks_uri.dart';
 import '../utils/split_tunnel_routing.dart';

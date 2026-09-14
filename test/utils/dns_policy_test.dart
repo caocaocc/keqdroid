@@ -63,6 +63,58 @@ void main() {
   });
 
   group('в конфигах ядер', () {
+    test('China defaults keep lifted DNS above direct without changing bootstrap', () {
+      const core = XrayCoreSettings();
+      final dns = core.buildDnsBlock(
+        directDomains: const ['geosite:cn'],
+        liftedDomains: const ['domain:proxy.example'],
+        bootstrapDomains: const ['full:node.example'],
+        physicalBootstrapDns: true,
+      );
+      final servers = (dns['servers'] as List).cast<Map<String, dynamic>>();
+      List<Map<String, dynamic>> matching(String domain) => servers
+          .where((server) => (server['domains'] as List?)?.contains(domain) == true)
+          .toList();
+      final lifted = matching('domain:proxy.example').single;
+      final direct = matching('geosite:cn').single;
+      expect(lifted['address'], 'https://1.1.1.1/dns-query');
+      expect(direct['address'], 'tcp+local://223.5.5.5:53');
+      expect(servers.indexOf(lifted), lessThan(servers.indexOf(direct)));
+      expect(matching('full:node.example').map((server) => server['address']),
+          ['tcp+local://223.5.5.5:53', 'localhost']);
+      expect(servers.any((server) =>
+          server['address'] == 'https+local://1.1.1.1/dns-query'), isFalse);
+    });
+
+    test('single custom resolver stays global with lifted routes', () {
+      final core = const XrayCoreSettings().copyWith(
+        dnsServers: 'https://dns.example/dns-query',
+      );
+      final servers = core.buildDnsBlock(
+        directDomains: const ['geosite:cn'],
+        liftedDomains: const ['domain:proxy.example'],
+      )['servers'] as List;
+      expect(servers, hasLength(2));
+      expect(servers.every((server) => !(server as Map).containsKey('domains')),
+          isTrue);
+    });
+
+    test('new defaults do not rewrite old JSON DNS fields', () {
+      expect(const XrayCoreSettings().dnsUseCustom, isTrue);
+      expect(const XrayCoreSettings().dnsServers,
+          XrayCoreSettings.defaultDnsServers);
+      for (final json in [null, <String, dynamic>{}]) {
+        final core = XrayCoreSettings.fromJson(json);
+        expect(core.dnsUseCustom, isFalse);
+        expect(core.dnsServers, XrayCoreSettings.legacyDnsServers);
+      }
+      final saved = const XrayCoreSettings().copyWith(
+        dnsServers: 'tls://dns.example',
+        dnsSplitDirectDomains: false,
+      );
+      expect(XrayCoreSettings.fromJson(saved.toJson()), saved);
+    });
+
     test('xray: запись выше общего списка и без отката', () {
       final servers = _xrayServers(_withPolicy('home.lan 192.168.1.1'));
 
@@ -118,10 +170,11 @@ void main() {
       );
     });
 
-    test('пустое поле ничего не добавляет', () {
+    test('пустое поле ничего не добавляет без раздельного DNS', () {
+      final legacy = AppSettings.fromJson({});
       final config = MihomoConfigGen.build(
         _vless,
-        const AppSettings(),
+        legacy,
         socksPort: 2080,
       );
 
@@ -130,7 +183,7 @@ void main() {
         isFalse,
       );
       expect(
-        _xrayServers(const AppSettings()).any((s) => s['skipFallback'] == true &&
+        _xrayServers(legacy).any((s) => s['skipFallback'] == true &&
             (s['domains'] as List?)?.contains('full:home.lan') == true),
         isFalse,
       );
