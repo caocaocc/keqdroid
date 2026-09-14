@@ -42,7 +42,7 @@ const _settings = AppSettings(
   lanHttpPort: 8080,
   lanUsername: '',
   lanPassword: '',
-  xrayCore: XrayCoreSettings(),
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
 );
 
 /// Синтетика: ни один адрес/UUID/пароль ниже не должен быть настоящим.

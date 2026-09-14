@@ -1,3 +1,4 @@
+import 'url_test_diagnostics.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -229,6 +230,7 @@ class AndroidTunnelBackend implements TunnelBackend {
         int? latencyMs,
         String error,
         int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
       })>> xrayUrlTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,
@@ -263,6 +265,7 @@ class AndroidTunnelBackend implements TunnelBackend {
           latencyMs: (map['latencyMs'] as num?)?.toInt(),
           error: map['error'] as String? ?? '',
           httpStatus: (map['httpStatus'] as num?)?.toInt(),
+          diagnostics: UrlTestDiagnostics.fromMap(map['diagnostics']),
         );
       }).toList();
     } on PlatformException catch (e) {
@@ -274,6 +277,7 @@ class AndroidTunnelBackend implements TunnelBackend {
               latencyMs: null,
               error: e.message ?? e.code,
               httpStatus: null,
+              diagnostics: null,
             ),
           )
           .toList();
