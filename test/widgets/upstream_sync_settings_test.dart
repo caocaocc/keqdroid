@@ -91,7 +91,7 @@ void main() {
       // An upstream backup has the new icon preference but no macOS menu field.
       await SettingsBackupService.applyBackup(
         storage,
-        backup: KeqdisBackup(
+        backup: KeqdroidBackup(
           version: 1,
           exportedAt: DateTime(2026, 9, 13),
           data: {

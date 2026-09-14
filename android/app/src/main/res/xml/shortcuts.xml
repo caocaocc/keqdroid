@@ -10,7 +10,7 @@
         android:shortcutLongLabel="@string/shortcut_connect_long">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetPackage="com.keqdroid.keqdroid"
+            android:targetPackage="@string/application_id"
             android:targetClass="com.keqdroid.keqdroid.LaunchAction">
             <extra
                 android:name="action"
@@ -26,7 +26,7 @@
         android:shortcutLongLabel="@string/shortcut_disconnect_long">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetPackage="com.keqdroid.keqdroid"
+            android:targetPackage="@string/application_id"
             android:targetClass="com.keqdroid.keqdroid.LaunchAction">
             <extra
                 android:name="action"

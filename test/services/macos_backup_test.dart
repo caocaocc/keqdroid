@@ -46,7 +46,7 @@ void main() {
         storage,
         sections: {BackupSection.splitTunneling},
       );
-      final restored = KeqdisBackup.fromJson(
+      final restored = KeqdroidBackup.fromJson(
         jsonDecode(backup.toJsonString()) as Map<String, dynamic>,
       );
       await MacOSAppRoutingStore.save(const MacOSAppRoutingSettings());
@@ -65,7 +65,7 @@ void main() {
     await MacOSAppRoutingStore.save(selected);
     await SettingsBackupService.applyBackup(
       storage,
-      backup: KeqdisBackup(
+      backup: KeqdroidBackup(
         version: 1,
         exportedAt: DateTime(2026),
         data: {
@@ -84,7 +84,7 @@ void main() {
   test(
     'invalid Mac routing is rejected before writing other platform fields',
     () async {
-      final backup = KeqdisBackup(
+      final backup = KeqdroidBackup(
         version: 1,
         exportedAt: DateTime(2026),
         data: {

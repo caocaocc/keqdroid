@@ -5948,7 +5948,7 @@ abstract class AppLocalizations {
   /// No description provided for @macosNetworkServiceMissing.
   ///
   /// In en, this message translates to:
-  /// **'Install or update KEQDIS using the complete PKG installer to enable the network service.'**
+  /// **'Install or update keqdroid using the complete PKG installer to enable the network service.'**
   String get macosNetworkServiceMissing;
 
   /// No description provided for @macosAuthorizeAccount.
@@ -6020,7 +6020,7 @@ abstract class AppLocalizations {
   /// No description provided for @appearanceShowMenuBarSpeedSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Traffic handled by KEQDIS'**
+  /// **'Traffic handled by keqdroid'**
   String get appearanceShowMenuBarSpeedSubtitle;
 
   /// No description provided for @macosMenuOpenServers.

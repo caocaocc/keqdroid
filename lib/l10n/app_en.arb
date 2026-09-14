@@ -1617,7 +1617,7 @@
   "macosAppNeedsMatching": "App not found in this list. Locate it again if it moved or was removed.",
   "macosNetworkServiceTitle": "Network service",
   "macosNetworkServiceHint": "Proxy connects and switches the system proxy without administrator authorization. TUN requires authorization once per installed version.",
-  "macosNetworkServiceMissing": "Install or update KEQDIS using the complete PKG installer to enable the network service.",
+  "macosNetworkServiceMissing": "Install or update keqdroid using the complete PKG installer to enable the network service.",
   "macosAuthorizeAccount": "Authorize TUN for this account",
   "macosWaitingNetwork": "Waiting for network to recover",
   "macosRestoringNetwork": "Restoring previous network settings",
@@ -1630,6 +1630,6 @@
   "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
   "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
   "appearanceShowMenuBarSpeed": "Show real-time speed in the menu bar",
-  "appearanceShowMenuBarSpeedSubtitle": "Traffic handled by KEQDIS",
+  "appearanceShowMenuBarSpeedSubtitle": "Traffic handled by keqdroid",
   "macosMenuOpenServers": "Open window to select a node"
 }

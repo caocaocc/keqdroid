@@ -1515,7 +1515,7 @@
   "macosAppNeedsMatching": "App nicht in der Liste gefunden. Nach Verschieben oder Entfernen erneut auswählen.",
   "macosNetworkServiceTitle": "Netzwerkdienst",
   "macosNetworkServiceHint": "Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.",
-  "macosNetworkServiceMissing": "Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.",
+  "macosNetworkServiceMissing": "Installiere oder aktualisiere keqdroid mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.",
   "macosAuthorizeAccount": "TUN für dieses Konto autorisieren",
   "macosWaitingNetwork": "Waiting for network to recover",
   "macosRestoringNetwork": "Restoring previous network settings",
@@ -1528,6 +1528,6 @@
   "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
   "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
   "appearanceShowMenuBarSpeed": "Aktuelle Geschwindigkeit in der Menüleiste anzeigen",
-  "appearanceShowMenuBarSpeedSubtitle": "Von KEQDIS verarbeiteter Datenverkehr",
+  "appearanceShowMenuBarSpeedSubtitle": "Von keqdroid verarbeiteter Datenverkehr",
   "macosMenuOpenServers": "Fenster zur Knotenauswahl öffnen"
 }

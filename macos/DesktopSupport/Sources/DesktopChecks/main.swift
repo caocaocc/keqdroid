@@ -58,7 +58,7 @@ var statePixels: [StatusItemPresentation.Status: Data] = [:]
 for status in StatusItemPresentation.Status.allCases {
     let presentation = try StatusItemPresentation(arguments: statusArguments(status.rawValue))
     check(presentation.status == status, "menu bar accepts \(status.rawValue)")
-    check(presentation.accessibilityText == "KEQDIS — 已连接\n上传: 12 MB/s\n下载: — KB/s", "localized accessible rates")
+    check(presentation.accessibilityText == "keqdroid — 已连接\n上传: 12 MB/s\n下载: — KB/s", "localized accessible rates")
     for speed in [false, true] {
         let value = try StatusItemPresentation(arguments: statusArguments(status.rawValue, speed: speed))
         let image = StatusItemRenderer.image(for: value)
@@ -66,7 +66,7 @@ for status in StatusItemPresentation.Status.allCases {
         check(image.size == NSSize(width: speed ? 87 : 18, height: 18), "fixed menu bar image dimensions")
         check(image.accessibilityDescription == value.accessibilityText, "image includes accessible status")
         if !speed {
-            check(value.accessibilityText == "KEQDIS — 已连接", "icon-only accessibility omits rates")
+            check(value.accessibilityText == "keqdroid — 已连接", "icon-only accessibility omits rates")
             statePixels[status] = image.tiffRepresentation
         }
     }

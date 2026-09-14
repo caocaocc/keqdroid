@@ -1352,7 +1352,7 @@ class KeqdisVpnService : VpnService() {
 
         // ContentObserver надёжнее requestListeningState(): тот работает, только пока открыта шторка
         runCatching {
-            contentResolver.notifyChange(VpnStatusProvider.STATUS_URI, null)
+            contentResolver.notifyChange(VpnStatusProvider.statusUri(this), null)
         }.onFailure { e ->
             NativeLog.w("KEQDIS", "notifyChange failed: ${e.message}")
         }

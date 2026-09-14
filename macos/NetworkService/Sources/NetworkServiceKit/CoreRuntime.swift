@@ -91,7 +91,7 @@ public final class CoreRuntime {
         let manifest = try SecureFiles.loadJSON(root.appendingPathComponent("core-manifest.json"))
         guard let item = manifest[name] as? [String: Any], let expected = item["sha256"] as? String else { throw ServiceFailure("coreVerificationFailed", "Installed core manifest is incomplete.") }
         let actual = SHA256.hash(data: try Data(contentsOf: path, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
-        guard actual == expected.lowercased(), keq_validate_code(path.path, nil, 0) == 0 else { throw ServiceFailure("coreVerificationFailed", "The installed \(name) executable failed integrity validation. Reinstall KEQDIS.pkg.") }
+        guard actual == expected.lowercased(), keq_validate_code(path.path, nil, 0) == 0 else { throw ServiceFailure("coreVerificationFailed", "The installed \(name) executable failed integrity validation. Reinstall using the keqdroid PKG installer.") }
         return path
     }
 

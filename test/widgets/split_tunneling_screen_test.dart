@@ -58,7 +58,7 @@ class _FakeVpn extends VpnStateNotifier {
   Future<VpnState> build() async => VpnState(status: _status);
 
   @override
-  Future<void> reconnectToActiveServer() async => reconnects++;
+  Future<void> reconnectToActiveServer({int? expectedGeneration, Future<void> Function()? afterDisconnect}) async => reconnects++;
 }
 
 AppInfo _app(String pkg, String name, {bool running = false}) => AppInfo(

@@ -39,11 +39,11 @@ public enum LoginItem {
             return
         }
         guard fm.fileExists(atPath: appPath) else {
-            throw DesktopError.message("Install KEQDIS in Applications before enabling login startup.")
+            throw DesktopError.message("Install keqdroid in Applications before enabling login startup.")
         }
         if fm.fileExists(atPath: plistURL.path) {
             if (status()["requiresApproval"] as? Bool) == true {
-                throw DesktopError.message("Allow KEQDIS in System Settings → Login Items first.")
+                throw DesktopError.message("Allow keqdroid in System Settings → Login Items first.")
             }
             return
         }

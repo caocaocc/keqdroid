@@ -1,5 +1,9 @@
 # Building keqdroid
 
+This fork uses the staged development and release workflows in [MACOS_CI.md](MACOS_CI.md), including Android, Windows, Linux and two macOS architectures. Build the final `dev` commit, verify its artifacts and complete local acceptance before tagging it. Release publication collects those exact artifacts and does not rebuild them; no AUR publication is performed. Android signing and update-signature keys belong to `caocaocc/keqdroid`, not upstream.
+
+macOS retains Flutter 3.44.4, Go 1.26.8, Xcode 16.4 and CocoaPods 1.16.2 with a macOS 12 deployment target. See [MACOS.md](MACOS.md) for the protected helper, direct PKG distribution and device validation limits. Existing application/data paths remain compatible.
+
 English | [Русский](BUILD.ru.md)
 
 ## Requirements
@@ -89,85 +93,36 @@ Windows cores are not fully stripped (`-w`, not `-s -w`) and must not be started
 
 ## Release
 
-Releases are built on GitHub: Actions → release → Run workflow. `.github/workflows/release.yml` builds every file, writes and signs `SHA256SUMS`, attests the files and leaves a draft release. Write the notes in the draft and publish it. With draft unticked, the run only builds and keeps the files in its `release-files` artifact. The secrets it needs are listed at the top of the workflow.
+Push the final four-category `dev` history to run Development packages. Each platform and component uploads its successful output immediately; a failed job does not discard completed components. After the exact commit's checks and local acceptance pass, push `v<version>` pointing to that commit. The tag workflow collects only its trusted successful artifacts, validates their reports and hashes, signs the aggregate `SHA256SUMS`, then uploads a draft and publishes it as stable Latest. A publication retry uploads the existing build, without compiling again.
 
-Locally, the same files go to `release\<version>\`:
+`UPDATE_SIGNING_KEY` contains this fork's Ed25519 main private key and is exposed only to the publication step. The app's main and reserve public keys are in `lib/services/release_signature.dart`; the reserve private key stays outside GitHub. Never commit private keys. A missing or mismatched signature blocks publication, application updates and Geo downloads. The aggregate manifest requires one exact filename per entry, and every release asset except the checksum/signature files must be covered.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -SigningKey key.pem -Publish -NotesFile notes.md
-```
+Android signing uses the existing `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` Secrets. Android's independent application ID is `io.github.caocaocc.keqdroid`. Native JVM/Robolectric tests run on JDK 25 separately from the JDK 17 application build.
 
-`-Publish` creates the GitHub release through `gh` and requires `-SigningKey`. `-SkipAndroid`, `-SkipWindows`, `-SkipInstaller` and `-SkipLinux` leave parts out. Once the release is public, `tool/publish_aur.sh` pushes the PKGBUILD to the AUR package `keqdroid-bin`; this needs an AUR account with the machine's SSH key.
-
-What the app expects from a release:
-
-- The version and the `vX.Y.Z` tag come from `version:` in `pubspec.yaml`.
-- `SHA256SUMS.sig` is an Ed25519 signature of `SHA256SUMS`. Without it, versions after 0.35.0 install no update and no full geo base. The key is the `UPDATE_SIGNING_KEY` secret; the app also accepts a reserve key kept off GitHub (`lib/services/release_signature.dart`).
-- `SHA256SUMS` names each file in exactly one line: the updater takes the first line that contains the name.
-- The APKs and the Windows zip go through `tool/repack_zip.dart`: the same deflate, at 7-Zip's maximum, every file inside unchanged. The APK is then signed again with the same key and only the v2 scheme, like AGP signs it. The Android updater builds the new APK from the installed one and downloads only the entries whose compressed bytes changed, so an unchanged core costs nothing as long as every release is packed the same way.
-- File names never change. Installed versions look for exactly these:
+Release assets include:
 
 ```
 keqdroid-<version>-android.apk
 keqdroid-<version>-armeabi-v7a-android.apk
 keqdroid-windows-x64-<version>.zip
-keqdroid-windows-x64-<version>-setup.exe
 keqdroid-<version>-linux-x64.tar.gz
 keqdroid_<version>_amd64.deb
 keqdroid-<version>-1.x86_64.rpm
 keqdroid-<version>-x86_64.AppImage
+keqdroid-<version>-macos-{arm64,x64}.pkg
+keqdroid-<version>-macos-{arm64,x64}-uninstall.pkg
 geoip.dat
 geoip.dat.sha256
+SHA256SUMS
+SHA256SUMS.sig
 ```
 
-`geoip.dat.sha256` is for versions 0.15.0 to 0.18.0, which download the geo base by that name. A portable Windows copy updates from the zip and an installed one from `setup.exe`, so every release carries both.
+Build reports, macOS verification reports and install instructions are also included and covered by the aggregate manifest. The Geo sidecar remains for older downloaders. Windows currently ships ZIP only; its updater retains upstream installed-copy support when an installer exists. APK differential download retains its full-download fallback; this fork does not currently add upstream's optional 7-Zip repacking stage.
 
-Checking a downloaded file:
+The upstream local `make_release.ps1`, Windows installer and AUR helper remain available as source, but are not this fork's release path. SignPath and GitHub build attestations are not enabled for these artifacts; their presence in upstream documentation must not be treated as verification of a fork package. This fork does not publish to AUR.
+
+Verify downloads using the application's signed manifest checks and the platform-specific inspectors described in [MACOS_CI.md](MACOS_CI.md). A SHA-256 comparison alone proves consistency with a manifest, not the manifest's authenticity:
 
 ```bash
-gh attestation verify <file> --repo Lemonochka/keqdroid
 sha256sum -c --ignore-missing SHA256SUMS
 ```
-
-### Windows code signing
-
-Signing through SignPath Foundation is part of the workflow and stays off until the repository has the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` and the secret `SIGNPATH_API_TOKEN`. Without them the same files are built unsigned. With them, a release makes two signing requests, and under the release policy each waits to be approved on signpath.io:
-
-1. `sign-windows` sends the release zip together with the Inno Setup uninstaller. Only `keqdroid.exe` and the uninstaller are signed: `xray.exe` and `mihomo.exe` are upstream builds.
-2. `installer` builds `setup.exe` from these signed files, and `sign-installer` sends it.
-
-Inno Setup signs its uninstaller only while compiling, so `tool/build_windows_installer.ps1` takes it out of one compile (`-ExportUninstaller`) and puts the signed copy into the next (`-SignedUninstaller`). Inno refuses a signed file that differs from its own in anything but the signature.
-
-The `test-signing` policy signs with a test certificate that Windows does not trust. Such a run is only a check: untick draft and do not publish its files.
-
-Artifact configurations in the SignPath project:
-
-`win-files`
-
-```xml
-<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
-  <zip-file>
-    <zip-file path="keqdroid-windows-x64.zip">
-      <pe-file path="keqdroid.exe" product-name="keqdroid">
-        <authenticode-sign/>
-      </pe-file>
-    </zip-file>
-    <pe-file path="keqdroid-uninstaller.exe">
-      <authenticode-sign/>
-    </pe-file>
-  </zip-file>
-</artifact-configuration>
-```
-
-`win-setup`
-
-```xml
-<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
-  <pe-file path="keqdroid-windows-x64-*-setup.exe">
-    <authenticode-sign/>
-  </pe-file>
-</artifact-configuration>
-```
-
-Inno pads the product name in its version resource with spaces to 60 characters, so the uninstaller and `setup.exe` are matched by file name only.

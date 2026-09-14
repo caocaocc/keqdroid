@@ -29,7 +29,7 @@ for dark in [false, true] {
         background.setFill()
         NSRect(x: 0, y: 0, width: width, height: height).fill()
         let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: foreground]
-        let heading = "KEQDIS · menu bar · \(dark ? "dark" : "light") · \(scale)× · rendered at actual point size"
+        let heading = "keqdroid · menu bar · \(dark ? "dark" : "light") · \(scale)× · rendered at actual point size"
         (heading as NSString).draw(at: NSPoint(x: 18, y: 223), withAttributes: label)
         for (index, state) in states.enumerated() {
             let x = CGFloat(18 + index * 128)

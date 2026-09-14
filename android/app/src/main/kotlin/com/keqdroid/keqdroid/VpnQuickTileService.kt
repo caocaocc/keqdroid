@@ -81,7 +81,7 @@ class VpnQuickTileService : TileService() {
         super.onStartListening()
         try {
             contentResolver.registerContentObserver(
-                VpnStatusProvider.STATUS_URI,
+                VpnStatusProvider.statusUri(this),
                 false,
                 observer
             )

@@ -3152,7 +3152,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get macosNetworkServiceHint => 'Proxy 连接时无需管理员授权，并会自动切换系统代理。TUN 每个已安装版本需要授权一次。';
 
   @override
-  String get macosNetworkServiceMissing => '请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。';
+  String get macosNetworkServiceMissing => '请使用完整 PKG 安装或更新 keqdroid，以启用网络服务。';
 
   @override
   String get macosAuthorizeAccount => '授权当前账户使用 TUN';
@@ -3190,7 +3190,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appearanceShowMenuBarSpeed => '菜单栏显示实时速率';
 
   @override
-  String get appearanceShowMenuBarSpeedSubtitle => 'KEQDIS处理流量';
+  String get appearanceShowMenuBarSpeedSubtitle => 'keqdroid处理流量';
 
   @override
   String get macosMenuOpenServers => '打开窗口选择节点';

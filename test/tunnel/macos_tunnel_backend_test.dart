@@ -6,7 +6,7 @@ import 'package:keqdroid/tunnel/connection_mode.dart';
 import 'package:keqdroid/tunnel/desktop_dns_diagnostics.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/services/xray_route_decisions.dart';
-import 'package:keqdroid/services/connections_service.dart';
+import 'package:keqdroid/services/xray_access_log_parser.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 import 'package:keqdroid/tunnel/macos_tunnel_backend.dart';
 import 'package:keqdroid/tunnel/macos_network_context.dart';
