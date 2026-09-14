@@ -131,6 +131,8 @@ LAN 复用 Windows 的核心入站和分流规则；两个端口与本地/API �
 
 ### 桌面 GET 延迟
 
+桌面逐节点 URL 测速跟随上游最多并行 16 路，每路使用独立临时核心；Android 的单核心批量接口在 macOS 返回不支持，继续使用既有逐节点流程。
+
 Windows/macOS 的临时测速核心使用现有直连/bootstrap DNS 设置；测试请求仍经所选节点，不复制完整 Geo 流量路由。macOS TUN 中沿用物理 DNS 快照。核心启动和网络请求使用各自原有预算，网络连接、CONNECT、TLS、首次 GET 与复用 GET 共用一个截止时间，并记录各阶段耗时。
 
 关闭复用时显示包含连接/握手的首次请求耗时；开启时优先显示同连接的第二次请求耗时。首次响应完整成功、后续复用失败时保留首次结果并标明失败阶段。HTTP 响应必须完整符合其定界方式；超时关闭实际底层连接，不能只丢弃 Future。
@@ -144,9 +146,11 @@ Windows/macOS 的临时测速核心使用现有直连/bootstrap DNS 设置；测
 | 核心 | 固定版本 |
 | --- | --- |
 | keqrnel | `38155c34606f77299a62902da11372ff1c1921d7` |
-| Mihomo | `v1.19.30`，保留原有仓库补丁 |
+| Mihomo | `v1.19.31`，保留原有仓库补丁 |
 
-AWG 使用 Mihomo 的协议实现，不再构建或安装 wireproxy。sing-box 仍为 keqrnel 原有依赖 `v1.13.19`；本次上游同步没有升级核心工具链或这些固定来源。保留补丁的原始行为、用途和测试依据见 [Darwin 补丁审计](../tool/patches/macos/README.md#retention-audit-against-pinned-sources)。
+AWG 使用 Mihomo 的协议实现，不再构建或安装 wireproxy。keqrnel 主源码仍锁定上述提交，依赖显式跟随本次上游二进制的来源：sing-box `v1.14.1`、sing-tun `v0.9.3`、Xray `c412e77a9b712082ac9ebf27fa793951cb5a7d85`（26.9.9）。这些来源及构建副本的补丁独立记录，不把上游未发布的 keqrnel 依赖更新当作新的主源码提交。
+
+Xray 的模块声明要求 Go 1.27；macOS 构建保留 Go 1.26.8，并使用仅用于该构建的声明兼容补丁，保持依赖与协议源码版本。核心编译、协议回归和最终 Mach-O 核验仍是出包条件，macOS 12 真机验收继续单独列示。保留补丁的原始行为、用途和测试依据见 [Darwin 补丁审计](../tool/patches/macos/README.md#retention-audit-against-pinned-sources)。
 
 安装完整 Xcode 并选择其 Developer 目录后，在项目根目录运行：
 

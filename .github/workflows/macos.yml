@@ -1,0 +1,124 @@
+name: Development packages
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      fault_injection:
+        description: Fail this packaging job on attempt 1, then verify failed-job rerun
+        type: choice
+        options: [none, arm64, x64]
+        default: none
+
+permissions:
+  contents: read
+  actions: read
+
+# Stable independent jobs let an architecture finish even when the other fails.
+# No cancelling concurrency group: earlier runs keep their completed components.
+# The opt-in dev commit marker also exercises reruns before this workflow exists
+# on the default branch. macos-package.yml limits the failure to attempt 1.
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  transport-windows:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: windows-2022, platform: windows-x64}
+  transport-arm64:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: macos-15, platform: macos-arm64}
+  transport-x64:
+    uses: ./.github/workflows/desktop-transport.yml
+    with: {runner: macos-15-intel, platform: macos-x64}
+
+  keqrnel-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: keqrnel, arch: arm64, runner: macos-15}
+  mihomo-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: mihomo, arch: arm64, runner: macos-15}
+  helper-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: helper, arch: arm64, runner: macos-15}
+  app-arm64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: app, arch: arm64, runner: macos-15}
+
+  keqrnel-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: keqrnel, arch: x64, runner: macos-15-intel}
+  mihomo-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: mihomo, arch: x64, runner: macos-15-intel}
+  helper-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: helper, arch: x64, runner: macos-15-intel}
+  app-x64:
+    uses: ./.github/workflows/macos-component.yml
+    with: {component: app, arch: x64, runner: macos-15-intel}
+
+  package-arm64:
+    needs: [checks, transport-arm64, keqrnel-arm64, mihomo-arm64, helper-arm64, app-arm64]
+    uses: ./.github/workflows/macos-package.yml
+    with:
+      arch: arm64
+      runner: macos-15
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
+      keqrnel_artifact: ${{ needs.keqrnel-arm64.outputs.artifact-name }}
+      mihomo_artifact: ${{ needs.mihomo-arm64.outputs.artifact-name }}
+      helper_artifact: ${{ needs.helper-arm64.outputs.artifact-name }}
+      app_artifact: ${{ needs.app-arm64.outputs.artifact-name }}
+      session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}
+
+  package-x64:
+    needs: [checks, transport-x64, keqrnel-x64, mihomo-x64, helper-x64, app-x64]
+    uses: ./.github/workflows/macos-package.yml
+    with:
+      arch: x64
+      runner: macos-15-intel
+      fault_injection: ${{ inputs.fault_injection || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-arm64]') && 'arm64') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-package-retry-x64]') && 'x64') || 'none' }}
+      keqrnel_artifact: ${{ needs.keqrnel-x64.outputs.artifact-name }}
+      mihomo_artifact: ${{ needs.mihomo-x64.outputs.artifact-name }}
+      helper_artifact: ${{ needs.helper-x64.outputs.artifact-name }}
+      app_artifact: ${{ needs.app-x64.outputs.artifact-name }}
+      session_contract_artifact: ${{ needs.checks.outputs.session-contract-artifact }}
+
+  app-android:
+    if: github.repository == 'caocaocc/keqdroid' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    uses: ./.github/workflows/platform-component.yml
+    with: {platform: android-arm64, runner: ubuntu-24.04}
+    secrets: inherit
+  app-windows:
+    uses: ./.github/workflows/platform-component.yml
+    with: {platform: windows-x64, runner: windows-2022}
+  app-linux:
+    uses: ./.github/workflows/platform-component.yml
+    with: {platform: linux-x64, runner: ubuntu-24.04}
+
+  package-android:
+    needs: [checks, app-android]
+    uses: ./.github/workflows/platform-package.yml
+    with:
+      platform: android-arm64
+      runner: ubuntu-24.04
+      app_artifact: ${{ needs.app-android.outputs.artifact-name }}
+      fingerprint: ${{ needs.app-android.outputs.fingerprint }}
+  package-windows:
+    needs: [checks, transport-windows, app-windows]
+    uses: ./.github/workflows/platform-package.yml
+    with:
+      platform: windows-x64
+      runner: windows-2022
+      app_artifact: ${{ needs.app-windows.outputs.artifact-name }}
+      fingerprint: ${{ needs.app-windows.outputs.fingerprint }}
+  package-linux:
+    needs: [checks, app-linux]
+    uses: ./.github/workflows/platform-package.yml
+    with:
+      platform: linux-x64
+      runner: ubuntu-24.04
+      app_artifact: ${{ needs.app-linux.outputs.artifact-name }}
+      fingerprint: ${{ needs.app-linux.outputs.fingerprint }}

@@ -1,0 +1,54 @@
+name: Desktop HTTP transport regression
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  transport:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          cache: true
+      - run: mkdir -p build/ci-logs
+      - name: Record local fixture toolchain
+        run: |
+          flutter --version 2>&1 | tee build/ci-logs/flutter-version.log
+          openssl version 2>&1 | tee build/ci-logs/openssl-version.log
+      - run: flutter pub get --enforce-lockfile 2>&1 | tee build/ci-logs/pub-get.log
+      - name: Real loopback CONNECT and TLS tests
+        run: >-
+          flutter test --no-pub --reporter expanded
+          test/services/desktop_http_probe_test.dart
+          test/services/ephemeral_ping_startup_test.dart
+          test/services/desktop_ping_dns_test.dart
+          test/widgets/ping_diagnostics_test.dart
+          test/tunnel/macos_recovery_controller_test.dart
+          test/tunnel/macos_recovery_repeat_failure_test.dart
+          test/tunnel/macos_service_recovery_contract_test.dart
+          test/providers/macos_vpn_recovery_test.dart
+          test/providers/macos_recovery_latest_mode_test.dart
+          test/widgets/macos_lan_settings_test.dart
+          2>&1 | tee build/ci-logs/desktop-transport.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-transport-${{ inputs.platform }}-${{ github.sha }}-attempt${{ github.run_attempt }}
+          path: build/ci-logs/
+          retention-days: 30

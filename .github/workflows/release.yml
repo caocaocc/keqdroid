@@ -1,0 +1,51 @@
+name: Publish verified release
+
+on:
+  push:
+    tags: ['v*']
+
+# Serialize publication of the same tag without interrupting a valid upload.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Only this workflow can write release metadata or assets. It never compiles.
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: github.repository == 'caocaocc/keqdroid'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Validate release assembly and immutable-publication rules
+        run: python3 -m unittest discover -s tool/tests -p 'test_release_ci.py' -v
+      - name: Collect verified exact-commit development artifacts and publish
+        run: |
+          mkdir -p build/release-logs
+          set -o pipefail
+          python3 tool/ci/publish_release.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --output build/verified-release --notes docs/RELEASE_NOTES.md --publish \
+            2>&1 | tee build/release-logs/publish.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-report-${{ github.sha }}-attempt${{ github.run_attempt }}
+          path: |
+            build/release-logs/
+            build/verified-release/*-build-report.json
+            build/verified-release/SHA256SUMS
+          retention-days: 30
