@@ -1,3 +1,4 @@
+import '../tunnel/url_test_diagnostics.dart';
 import '../tunnel/connection_mode.dart';
 import '../tunnel/tunnel_backend.dart';
 import '../tunnel/tunnel_backend_factory.dart';
@@ -17,12 +18,13 @@ class VpnEngine {
   factory VpnEngine() => _instance;
 
   VpnEngine._internal({TunnelBackend? backend})
-      : _backend = backend ?? createTunnelBackend();
+    : _backend = backend ?? createTunnelBackend();
 
   factory VpnEngine.withBackend(TunnelBackend backend) =>
       VpnEngine._internal(backend: backend);
 
   Stream<VpnState> get stateStream => _backend.stateStream;
+
 
   void init() => _backend.init();
 
@@ -42,7 +44,7 @@ class VpnEngine {
       _backend.fetchSocksCredentials();
 
   Future<({String username, String password})?>
-      fetchActiveSocksCredentials() async {
+  fetchActiveSocksCredentials() async {
     final backend = _backend;
     if (backend is AndroidTunnelBackend) {
       return backend.fetchActiveSocksCredentials();
@@ -59,45 +61,41 @@ class VpnEngine {
     List<String> excludePackages = const [],
     List<String> includePackages = const [],
     String? serverName,
-  }) =>
-      startSession(
-        TunnelSessionRequest(
-          mode: ConnectionMode.tun,
-          xrayConfig: xrayConfig,
-          socksPort: socksPort,
-          excludePackages: excludePackages,
-          includePackages: includePackages,
-          serverName: serverName,
-        ),
-      );
+  }) => startSession(
+    TunnelSessionRequest(
+      mode: ConnectionMode.tun,
+      xrayConfig: xrayConfig,
+      socksPort: socksPort,
+      excludePackages: excludePackages,
+      includePackages: includePackages,
+      serverName: serverName,
+    ),
+  );
 
   Future<void> stopVpn() => _backend.stopSession();
 
   Future<bool> requestVpnPermission() => _backend.requestTunnelPermission();
 
   Future<
-      List<({
-        String id,
-        bool success,
-        int? latencyMs,
-        String error,
-        int? httpStatus,
-      })>> xrayUrlTestBatch({
+    List<
+      ({String id, bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})
+    >
+  >
+  xrayUrlTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,
     VpnBackend core = VpnBackend.xray,
     String testUrl = 'https://connectivitycheck.gstatic.com/generate_204',
     int timeoutMs = 15000,
     bool keepAlive = true,
-  }) =>
-      _backend.xrayUrlTestBatch(
-        items: items,
-        socksPort: socksPort,
-        core: core,
-        testUrl: testUrl,
-        timeoutMs: timeoutMs,
-        keepAlive: keepAlive,
-      );
+  }) => _backend.xrayUrlTestBatch(
+    items: items,
+    socksPort: socksPort,
+    core: core,
+    testUrl: testUrl,
+    timeoutMs: timeoutMs,
+    keepAlive: keepAlive,
+  );
 
   Future<({int down, int up})?> sessionTrafficCounters() =>
       _backend.sessionTrafficCounters();
@@ -129,8 +127,8 @@ class VpnEngine {
         onEach: onEach,
       );
 
-  Future<({bool success, int? latencyMs, String error, int? httpStatus})>
-      xrayUrlTest({
+  Future<({bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})>
+  xrayUrlTest({
     required String xrayConfig,
     required int socksPort,
     VpnBackend core = VpnBackend.xray,
@@ -147,7 +145,13 @@ class VpnEngine {
       keepAlive: keepAlive,
     );
     if (batch.isEmpty) {
-      return (success: false, latencyMs: null, error: 'null response', httpStatus: null);
+      return (
+        success: false,
+        latencyMs: null,
+        error: 'null response',
+        httpStatus: null,
+        diagnostics: null,
+      );
     }
     final r = batch.first;
     return (
@@ -155,29 +159,24 @@ class VpnEngine {
       latencyMs: r.latencyMs,
       error: r.error,
       httpStatus: r.httpStatus,
+      diagnostics: r.diagnostics,
     );
   }
 
-  Future<
-      List<({
-        String id,
-        bool success,
-        int? kbps,
-        String error,
-      })>> xraySpeedTestBatch({
+  Future<List<({String id, bool success, int? kbps, String error})>>
+  xraySpeedTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,
     VpnBackend core = VpnBackend.xray,
     String downloadUrl = kDefaultSpeedTestUrl,
     int timeoutMs = 20000,
-  }) =>
-      _backend.xraySpeedTestBatch(
-        items: items,
-        socksPort: socksPort,
-        core: core,
-        downloadUrl: downloadUrl,
-        timeoutMs: timeoutMs,
-      );
+  }) => _backend.xraySpeedTestBatch(
+    items: items,
+    socksPort: socksPort,
+    core: core,
+    downloadUrl: downloadUrl,
+    timeoutMs: timeoutMs,
+  );
 
   Future<({bool success, int? kbps, String error})> xraySpeedTest({
     required String xrayConfig,
@@ -205,8 +204,7 @@ class VpnEngine {
 
   Future<List<Map<String, dynamic>>> getInstalledApps({
     bool includeSystem = false,
-  }) =>
-      _backend.getInstalledApps(includeSystem: includeSystem);
+  }) => _backend.getInstalledApps(includeSystem: includeSystem);
 
   Future<String?> getAppIcon(String path) => _backend.getAppIcon(path);
 

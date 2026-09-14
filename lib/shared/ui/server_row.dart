@@ -6,6 +6,8 @@ import '../../models/app_settings.dart';
 import '../../models/server_item.dart';
 import '../../models/server_name_utils.dart';
 import '../../services/ping_service.dart';
+import '../../l10n/app_localizations.dart';
+import '../../tunnel/url_test_diagnostics.dart';
 import '../../utils/bidi.dart';
 import 'app_theme.dart';
 import 'expressive.dart';
@@ -22,6 +24,7 @@ class ServerRow extends StatelessWidget {
   final DateTime? lastTestedAt;
 
   final PingType pingColorType;
+  final UrlTestDiagnostics? pingDiagnostics;
 
   final Color? foreground;
 
@@ -41,6 +44,7 @@ class ServerRow extends StatelessWidget {
     this.pingMs,
     this.lastTestedAt,
     this.pingColorType = PingType.tcp,
+    this.pingDiagnostics,
     this.foreground,
     this.opaqueBadge = false,
     this.emphasizeTitle = false,
@@ -48,6 +52,41 @@ class ServerRow extends StatelessWidget {
     this.trailing,
     this.status,
   });
+
+  String _timingSuffix(BuildContext context) {
+    final diagnostic = pingDiagnostics;
+    if (diagnostic == null) return '';
+    final l10n = AppLocalizations.of(context)!;
+    final label = switch (diagnostic.timingKind) {
+      'warm' => l10n.pingTimingWarm,
+      'coldFallback' => l10n.pingTimingFallback,
+      _ => l10n.pingTimingCold,
+    };
+    return ' · $label';
+  }
+
+  String _diagnosticLabel(BuildContext context) {
+    final diagnostic = pingDiagnostics;
+    if (diagnostic == null) return '';
+    final l10n = AppLocalizations.of(context)!;
+    final timing = _timingSuffix(context).replaceFirst(' · ', '');
+    final detail =
+        '$timing; ${l10n.pingProbeDetails(diagnostic.stage, diagnostic.elapsedMs, diagnostic.budgetMs)}';
+    final phases = diagnostic.stageDurationsMs.entries
+        .map((entry) {
+          final startupBudget = entry.key == 'coreStartup'
+              ? diagnostic.coreStartupBudgetMs
+              : null;
+          return '${entry.key}: ${entry.value} ms'
+              '${startupBudget == null ? '' : ' / $startupBudget ms'}';
+        })
+        .join('; ');
+    return [
+      detail,
+      if (phases.isNotEmpty) phases,
+      if (diagnostic.warning != null) diagnostic.warning!,
+    ].join('\n');
+  }
 
   static const double height = 76;
 
@@ -153,19 +192,24 @@ class ServerRow extends StatelessWidget {
           )
         : null;
 
-    final ping = Text(
-      ltrIsolate(
-        pingMs != null
-            ? PingService.formatPingValue(pingMs!, pingColorType)
-            : (lastTestedAt != null ? 'N/A' : '- ms'),
+    final ping = Tooltip(
+      message: _diagnosticLabel(context),
+      child: Text(
+        ltrIsolate(
+          pingMs != null
+              ? '${PingService.formatPingValue(pingMs!, pingColorType)}${_timingSuffix(context)}'
+              : (lastTestedAt != null
+                    ? 'N/A${pingDiagnostics == null ? '' : ' · ${pingDiagnostics!.stage}'}'
+                    : '- ms'),
+        ),
+        style: textTheme.labelLarge?.copyWith(
+          color: pingMs != null
+              ? pingQualityColor(context, pingMs!, pingColorType)
+              : mutedColor,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      style: textTheme.labelLarge?.copyWith(
-        color: pingMs != null
-            ? pingQualityColor(context, pingMs!, pingColorType)
-            : mutedColor,
-      ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
     );
 
     if (layout == ServerRowLayout.card) {

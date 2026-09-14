@@ -731,8 +731,29 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         );
       }
 
+      // macOS keeps the sing-box DNS frontend around Xray.
+      if (!mihomoPicked &&
+          Platform.isMacOS &&
+          connectionMode == ConnectionMode.tun) {
+        final ignored = SingBoxTunConfigGen.ignoredCustomDnsServers(settings);
+        if (ignored.isNotEmpty) {
+          AppLogger.instance.warn(
+            'Custom DNS: TUN uses one address per DNS group. Not used: '
+            '${ignored.join(', ')}.',
+          );
+        }
+      }
+
+      final chinaDnsDomains = !mihomoPicked &&
+              Platform.isMacOS &&
+              connectionMode == ConnectionMode.tun &&
+              SingBoxTunConfigGen.needsChinaDnsDomains(settings)
+          ? await GeoAssetService.chinaDnsDomains()
+          : const <GeoDomain>[];
+
       final session = TunnelSessionBuilder.build(
         settings: listedSettings,
+        chinaDnsDomains: chinaDnsDomains,
         xrayConfig: xrayConfig,
         vpnBackend: vpnBackend,
         mihomoConfig: mihomoConfig,

@@ -28,7 +28,7 @@ class RoutingPresets {
   RoutingPresets._();
 
   // единственный источник дефолтов: на них ссылаются AppSettings и сброс экрана
-  static const String defaultDirectRules = 'ru, yandex.ru, vk.com';
+  static const String defaultDirectRules = 'geosite:cn, geoip:cn';
   static const String defaultProxyRules = '';
   static const String defaultBlockedRules = '';
 
@@ -58,6 +58,11 @@ class RoutingPresets {
   static const List<String> whitelist = ['geosite:ru-whitelist'];
 
   static const List<RoutingPreset> all = [
+    RoutingPreset(
+      id: 'china',
+      field: RoutingField.direct,
+      values: ['geosite:cn', 'geoip:cn'],
+    ),
     RoutingPreset(
       id: 'ru',
       field: RoutingField.direct,

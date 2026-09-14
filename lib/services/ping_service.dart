@@ -1,3 +1,5 @@
+import '../tunnel/url_test_diagnostics.dart';
+import '../tunnel/macos_network_context.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -32,6 +34,9 @@ class PingResult {
   final int? latencyMs;
   final bool success;
   final String error;
+  final UrlTestDiagnostics? diagnostics;
+
+  /// метод, которым получили результат (нужен для порогов цвета)
   final PingType pingType;
 
   const PingResult({
@@ -40,6 +45,7 @@ class PingResult {
     this.latencyMs,
     required this.success,
     this.error = '',
+    this.diagnostics,
     this.pingType = PingType.tcp,
   });
 
@@ -152,9 +158,17 @@ class PingService {
       } else {
         final args = Platform.isWindows
             ? ['-n', '1', '-w', '$timeoutMs', host]
-            : ['-c', '1', '-W', '$timeoutSeconds', host];
-        result = await Process.run('ping', args)
-            .timeout(Duration(seconds: timeoutSeconds + 3));
+            : [
+                '-c',
+                '1',
+                '-W',
+                '${Platform.isMacOS ? timeoutMs : timeoutSeconds}',
+                host,
+              ];
+        result = await Process.run(
+          'ping',
+          args,
+        ).timeout(Duration(seconds: timeoutSeconds + 3));
       }
       sw.stop();
       final out = '${result.stdout}\n${result.stderr}';
@@ -215,7 +229,10 @@ class PingService {
     final udp = await _pingUdp(server, timeoutSeconds: timeoutSeconds);
     if (udp.success) return udp;
 
-    final tcp = await _pingTcpReachability(server, timeoutSeconds: timeoutSeconds);
+    final tcp = await _pingTcpReachability(
+      server,
+      timeoutSeconds: timeoutSeconds,
+    );
     if (tcp.success) {
       return PingResult(
         serverId: server.id,
@@ -308,8 +325,9 @@ class PingService {
 
     RawDatagramSocket? socket;
     try {
-      final targets = await InternetAddress.lookup(address)
-          .timeout(Duration(seconds: timeoutSeconds));
+      final targets = await InternetAddress.lookup(
+        address,
+      ).timeout(Duration(seconds: timeoutSeconds));
       if (targets.isEmpty) {
         return PingResult(
           serverId: server.id,
@@ -699,23 +717,26 @@ class PingService {
     required int socksPort,
     String? resolvedServerIp,
     required String? outboundInterface,
-  }) =>
-      core == VpnBackend.mihomo
-          ? MihomoConfigGen.generatePingConfig(
-              serverConfig,
-              settings,
-              socksPort: socksPort,
-              httpInbound: !Platform.isAndroid,
-              outboundInterface: outboundInterface,
-            )
-          : ConfigGeneratorV2.generatePingConfig(
-              serverConfig,
-              settings,
-              socksPort: socksPort,
-              resolvedServerIp: resolvedServerIp,
-              httpInbound: !Platform.isAndroid,
-              outboundInterface: outboundInterface,
-            );
+  }) => core == VpnBackend.mihomo
+      ? MihomoConfigGen.generatePingConfig(
+          serverConfig,
+          settings,
+          socksPort: socksPort,
+          httpInbound: !Platform.isAndroid,
+          outboundInterface: outboundInterface,
+          desktopDns: !Platform.isAndroid,
+          physicalBootstrapDns: Platform.isMacOS && MacOSNetworkContext.active != null,
+        )
+      : ConfigGeneratorV2.generatePingConfig(
+          serverConfig,
+          settings,
+          socksPort: socksPort,
+          resolvedServerIp: resolvedServerIp,
+          httpInbound: !Platform.isAndroid,
+          outboundInterface: outboundInterface,
+          desktopDns: !Platform.isAndroid,
+          physicalBootstrapDns: Platform.isMacOS && MacOSNetworkContext.active != null,
+        );
 
   // в TUN туннель нюхает SNI раньше правила своих процессов и подменяет адрес REALITY на маску:
   // замер сервера с маской store.teamfortress.com уходил к Valve. выходим той сетью, что ядро туннеля
@@ -778,6 +799,7 @@ class PingService {
         latencyMs: raw.latencyMs,
         success: raw.success,
         error: raw.error,
+        diagnostics: raw.diagnostics,
         pingType: PingType.url,
       );
     } catch (e) {
@@ -866,8 +888,9 @@ class PingService {
     await Future.wait(
       servers.map((s) async {
         try {
-          final addresses = await InternetAddress.lookup(s.address)
-              .timeout(const Duration(seconds: 3));
+          final addresses = await InternetAddress.lookup(
+            s.address,
+          ).timeout(const Duration(seconds: 3));
           if (addresses.isNotEmpty) out[s.id] = addresses.first.address;
         } catch (_) {}
       }),
@@ -914,6 +937,8 @@ class PingService {
     PingType base, {
     required bool vpnConnected,
     required bool tunMode,
+
+    /// платформа, где туннель всегда TUN; подменяется только в тестах
     bool? platformAlwaysTun,
   }) {
     // на Android активный режим в состояние не доезжает, а туннель там всегда TUN

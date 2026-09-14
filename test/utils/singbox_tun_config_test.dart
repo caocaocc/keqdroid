@@ -1,0 +1,604 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:keqdroid/models/app_settings.dart';
+import 'package:keqdroid/models/tun_settings.dart';
+import 'package:keqdroid/models/xray_core_settings.dart';
+import 'package:keqdroid/tunnel/app_routing_mode.dart';
+import 'package:keqdroid/utils/singbox_tun_config.dart';
+
+// Existing routing regression fixtures retain the pre-China defaults.
+const _legacySettings = AppSettings(
+  directRules: 'ru, yandex.ru, vk.com',
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
+);
+
+List<Map<String, dynamic>> _rules(String json) {
+  final map = jsonDecode(json) as Map<String, dynamic>;
+  return ((map['route'] as Map)['rules'] as List).cast<Map<String, dynamic>>();
+}
+
+Map<String, dynamic>? _processRule(
+  List<Map<String, dynamic>> rules,
+  String name,
+) {
+  for (final r in rules) {
+    final procs = r['process_name'];
+    if (procs is List && procs.contains(name)) return r;
+  }
+  return null;
+}
+
+void main() {
+  test(
+    'TUN inbound uses route sniff action, not legacy inbound sniff fields',
+    () {
+      final json = SingBoxTunConfigGen.generate(
+        localSocksPort: 10808,
+        socksUsername: 'u',
+        socksPassword: 'p',
+        serverIpToExclude: '1.2.3.4',
+        settings: _legacySettings,
+      );
+      final map = jsonDecode(json) as Map<String, dynamic>;
+      final inbound = (map['inbounds'] as List).first as Map<String, dynamic>;
+
+      expect(inbound.containsKey('sniff'), isFalse);
+      expect(inbound.containsKey('sniff_override_destination'), isFalse);
+
+      final rules = (map['route'] as Map)['rules'] as List;
+      final sniffRule = rules.first as Map<String, dynamic>;
+      expect(sniffRule['action'], 'sniff');
+      expect(sniffRule['inbound'], ['tun-in']);
+      expect(sniffRule.containsKey('sniff_override_destination'), isFalse);
+
+      final icmpRule =
+          rules.firstWhere((r) => (r as Map)['protocol'] == 'icmp')
+              as Map<String, dynamic>;
+      expect(icmpRule['outbound'], 'direct');
+
+      final tunSubnetRule =
+          rules.firstWhere(
+                (r) =>
+                    (r as Map).containsKey('ip_cidr') &&
+                    ((r['ip_cidr'] as List).contains('172.19.0.0/30')),
+              )
+              as Map<String, dynamic>;
+      expect(tunSubnetRule['outbound'], 'direct');
+    },
+  );
+
+  test('cores and the app itself bypass the TUN (ping originates locally)', () {
+    final rules = _rules(
+      SingBoxTunConfigGen.generate(
+        localSocksPort: 10808,
+        socksUsername: 'u',
+        socksPassword: 'p',
+        serverIpToExclude: '1.2.3.4',
+        settings: _legacySettings,
+        appProcessName: 'keqdroid.exe',
+      ),
+    );
+
+    // Core names carry `.exe` on Windows only; mirror the generator's suffix
+    // so the test matches the host OS it runs on.
+    const exe = '';
+
+    final xrayRule = _processRule(rules, 'xray$exe');
+    expect(xrayRule, isNotNull, reason: 'xray must bypass the TUN');
+    expect(xrayRule!['outbound'], 'direct');
+
+    final singRule = _processRule(rules, 'sing-box$exe');
+    expect(singRule, isNotNull);
+    expect(singRule!['outbound'], 'direct');
+
+    final appRule = _processRule(rules, 'keqdroid.exe');
+    expect(appRule, isNotNull, reason: 'app exe must bypass for local ping');
+    expect(appRule!['outbound'], 'direct');
+  });
+
+  test('onlySelected: selected processes proxied, everything else direct', () {
+    final json = SingBoxTunConfigGen.generate(
+      localSocksPort: 10808,
+      socksUsername: 'u',
+      socksPassword: 'p',
+      serverIpToExclude: '1.2.3.4',
+      settings: _legacySettings,
+      managedProcessNames: const ['chrome.exe'],
+      routingMode: AppRoutingMode.onlySelected,
+    );
+    final map = jsonDecode(json) as Map<String, dynamic>;
+    final rules = _rules(json);
+
+    final chromeRule = _processRule(rules, 'chrome.exe');
+    expect(chromeRule, isNotNull);
+    expect(chromeRule!['outbound'], 'proxy');
+    expect((map['route'] as Map)['final'], 'direct');
+  });
+
+  test(
+    'mixed-case process name keeps its real case (sing-box match is case-sensitive)',
+    () {
+      final rules = _rules(
+        SingBoxTunConfigGen.generate(
+          localSocksPort: 10808,
+          socksUsername: 'u',
+          socksPassword: 'p',
+          serverIpToExclude: '1.2.3.4',
+          settings: _legacySettings,
+          managedProcessNames: const ['Telegram.exe'],
+          routingMode: AppRoutingMode.onlySelected,
+        ),
+      );
+
+      // The exact on-disk case must be present, otherwise sing-box never matches
+      // and Telegram falls through to the `direct` final rule.
+      final rule = _processRule(rules, 'Telegram.exe');
+      expect(rule, isNotNull, reason: 'exact-case key must be emitted');
+      expect(rule!['outbound'], 'proxy');
+      // A lowercase fallback variant is also emitted for resilience.
+      expect((rule['process_name'] as List), contains('telegram.exe'));
+    },
+  );
+
+  test(
+    'allExceptSelected: selected processes direct, everything else proxied',
+    () {
+      final json = SingBoxTunConfigGen.generate(
+        localSocksPort: 10808,
+        socksUsername: 'u',
+        socksPassword: 'p',
+        serverIpToExclude: '1.2.3.4',
+        settings: _legacySettings,
+        managedProcessNames: const ['chrome.exe'],
+        routingMode: AppRoutingMode.allExceptSelected,
+      );
+      final map = jsonDecode(json) as Map<String, dynamic>;
+      final rules = _rules(json);
+
+      final chromeRule = _processRule(rules, 'chrome.exe');
+      expect(chromeRule, isNotNull);
+      expect(chromeRule!['outbound'], 'direct');
+      expect((map['route'] as Map)['final'], 'proxy');
+    },
+  );
+
+  Map<String, dynamic> dnsBlockFor(AppSettings settings) {
+    final json = SingBoxTunConfigGen.generate(
+      localSocksPort: 10808,
+      socksUsername: 'u',
+      socksPassword: 'p',
+      serverIpToExclude: '1.2.3.4',
+      settings: settings,
+    );
+    return ((jsonDecode(json) as Map<String, dynamic>)['dns']
+        as Map<String, dynamic>);
+  }
+
+  Map<String, dynamic> proxyDnsFor(AppSettings settings) {
+    final servers = (dnsBlockFor(settings)['servers'] as List)
+        .cast<Map<String, dynamic>>();
+    return servers.firstWhere((s) => s['tag'] == 'proxy-dns');
+  }
+
+  test('default proxy-dns is DoH over the tunnel (port 53 may be blocked)', () {
+    // Многие VPS режут исходящий 53 → UDP/TCP DNS через прокси умирали с EOF,
+    // «сайты не грузятся» при живом туннеле. DoH:443 неотличим от HTTPS.
+    final proxyDns = proxyDnsFor(_legacySettings);
+    expect(proxyDns['type'], 'https');
+    expect(proxyDns['server'], '1.1.1.1');
+    expect(proxyDns['detour'], 'proxy');
+  });
+
+  test('custom plain-IP DNS rides TCP (never UDP) over the SOCKS detour', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: true, dnsServers: '8.8.8.8'),
+      ),
+    );
+    expect(proxyDns['type'], 'tcp');
+    expect(proxyDns['server'], '8.8.8.8');
+    expect(proxyDns['detour'], 'proxy');
+  });
+
+  test(
+    'legacy custom DNS (https+local://) becomes a valid DoH server, not raw tcp',
+    () {
+      // Регрессия: раньше xray-адрес скармливался sing-box как {type:tcp,
+      // server:"https+local://1.1.1.1/dns-query"} — невалидный адрес ронял
+      // keqrnel (exit code 2) при любом включении кастомного DNS.
+      final proxyDns = proxyDnsFor(
+        AppSettings(
+          directRules: 'ru, yandex.ru, vk.com',
+          xrayCore: XrayCoreSettings(
+            dnsUseCustom: true,
+            dnsSplitDirectDomains: false,
+            dnsServers: XrayCoreSettings.legacyDnsServers,
+          ),
+        ),
+      );
+      expect(proxyDns['type'], 'https');
+      expect(proxyDns['server'], '1.1.1.1');
+      expect(proxyDns['path'], '/dns-query');
+      // адрес НИКОГДА не должен утечь в server целиком
+      expect(proxyDns['server'], isNot(contains('://')));
+    },
+  );
+
+  test('+local резолвит мимо туннеля: detour не ставится', () {
+    // Суффикс `+local` у xray значит «мимо роутинга», и в TUN это единственный
+    // способ увести системный DNS из туннеля: сам DNS системы исполняет
+    // sing-box, до xray-слоя такой запрос не доходит. Раньше detour ставился
+    // всем подряд, и настройка молча не работала.
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'https+local://9.9.9.9/dns-query',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'https');
+    expect(proxyDns['server'], '9.9.9.9');
+    expect(proxyDns.containsKey('detour'), isFalse);
+  });
+
+  test('без +local резолвер остаётся в туннеле', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'https://9.9.9.9/dns-query',
+        ),
+      ),
+    );
+    expect(proxyDns['detour'], 'proxy');
+  });
+
+  test('лишние адреса списка называются, а не теряются молча', () {
+    // Резолвер в этом ядре ровно один, и это единственное место, где про
+    // выброшенные строки вообще можно узнать: в конфиг они не попадают.
+    expect(
+      SingBoxTunConfigGen.ignoredCustomDnsServers(
+        const AppSettings(
+          directRules: 'ru, yandex.ru, vk.com',
+          xrayCore: XrayCoreSettings(
+            dnsUseCustom: true,
+            dnsServers: 'localhost\nhttps://1.1.1.1/dns-query\ntls://9.9.9.9',
+          ),
+        ),
+      ),
+      // localhost is unsupported; the two usable addresses fill the direct
+      // and general DNS groups.
+      ['localhost'],
+    );
+    expect(
+      SingBoxTunConfigGen.ignoredCustomDnsServers(_legacySettings),
+      isEmpty,
+    );
+  });
+
+  test('«отключить кэш DNS» доезжает до ядра', () {
+    expect(
+      dnsBlockFor(
+        const AppSettings(
+          directRules: 'ru, yandex.ru, vk.com',
+          xrayCore: XrayCoreSettings(
+            dnsUseCustom: false,
+            dnsDisableCache: true,
+          ),
+        ),
+      )['disable_cache'],
+      isTrue,
+    );
+    expect(dnsBlockFor(_legacySettings).containsKey('disable_cache'), isFalse);
+  });
+
+  test('«отдельный резолвер для direct» выключается', () {
+    const direct = AppSettings(
+      xrayCore: XrayCoreSettings(dnsUseCustom: false),
+      directRules: 'corp.example',
+    );
+    expect(dnsBlockFor(direct)['rules'], isNotNull);
+    expect(
+      dnsBlockFor(
+        const AppSettings(
+          directRules: 'corp.example',
+          xrayCore: XrayCoreSettings(
+            dnsUseCustom: false,
+            dnsSplitDirectDomains: false,
+          ),
+        ),
+      )['rules'],
+      isNull,
+    );
+  });
+
+  test('plain https:// DoH keeps host and path', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'https://dns.google/dns-query',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'https');
+    expect(proxyDns['server'], 'dns.google');
+    expect(proxyDns['path'], '/dns-query');
+  });
+
+  test('tls:// (DoT) maps to a tls server with port', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'tls://1.1.1.1:853',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'tls');
+    expect(proxyDns['server'], '1.1.1.1');
+    expect(proxyDns['server_port'], 853);
+  });
+
+  test('quic:// (DoQ) maps to DoT — the core has no quic transport', () {
+    // Реестр DNS-транспортов keqrnel: udp/tcp/tls/https/hosts/fakeip/local.
+    // `type: quic` не разбирается вовсе — «decode config: dns.servers[1]:
+    // unknown transport type: quic», ядро не стартует, TUN не поднимается.
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'quic://dns.adguard-dns.com:784',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'tls');
+    expect(proxyDns['server'], 'dns.adguard-dns.com');
+    // Порт DoQ (784) к DoT не относится — там свой дефолтный 853.
+    expect(proxyDns.containsKey('server_port'), isFalse);
+  });
+
+  test('первый переводимый адрес, а не просто первый', () {
+    // `localhost` sing-box'у как upstream не скормишь; раньше он утягивал в
+    // дефолт весь список, включая нормальный DoH следующей строкой.
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: 'localhost\nhttps+local://9.9.9.9/dns-query',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'https');
+    expect(proxyDns['server'], '9.9.9.9');
+  });
+
+  test('plain host:port DNS rides TCP with the given port', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(
+          dnsUseCustom: true,
+          dnsServers: '8.8.8.8:5353',
+        ),
+      ),
+    );
+    expect(proxyDns['type'], 'tcp');
+    expect(proxyDns['server'], '8.8.8.8');
+    expect(proxyDns['server_port'], 5353);
+  });
+
+  test('non-networkable resolver (localhost) falls back to default DoH', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: true, dnsServers: 'localhost'),
+      ),
+    );
+    expect(proxyDns['type'], 'https');
+    expect(proxyDns['server'], '1.1.1.1');
+  });
+
+  Map<String, dynamic> tunInboundFor(AppSettings settings) {
+    final json = SingBoxTunConfigGen.generate(
+      localSocksPort: 10808,
+      socksUsername: 'u',
+      socksPassword: 'p',
+      serverIpToExclude: '1.2.3.4',
+      settings: settings,
+    );
+    final map = jsonDecode(json) as Map<String, dynamic>;
+    return (map['inbounds'] as List).first as Map<String, dynamic>;
+  }
+
+  test('default tun inbound is gvisor/9000', () {
+    final inbound = tunInboundFor(_legacySettings);
+    expect(inbound['stack'], 'gvisor');
+    expect(inbound['mtu'], 9000);
+    expect(inbound['auto_route'], isTrue);
+    // дефолтные значения не должны раздувать конфиг новыми ключами
+    expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
+    expect(inbound.containsKey('udp_timeout'), isFalse);
+  });
+
+  test('tun settings flow into the inbound (stack, mtu, udp_timeout)', () {
+    final inbound = tunInboundFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        tun: TunSettings(
+          stack: 'gvisor',
+          mtu: 9000,
+          strictRoute: TunSettings.strictRouteOn,
+          udpTimeoutSec: 60,
+        ),
+      ),
+    );
+    expect(inbound['stack'], 'gvisor');
+    expect(inbound['mtu'], 9000);
+    expect(inbound['strict_route'], isNull);
+    expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
+    // sing-box 1.13 (keqrnel): badoption.Duration — строка вида "60s"
+    expect(inbound['udp_timeout'], '60s');
+  });
+
+  test('endpoint_independent_nat is dropped on the system stack', () {
+    // system-стек его не поддерживает — не шлём ядру бессмысленный ключ
+    final inbound = tunInboundFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        tun: TunSettings(stack: 'system'),
+      ),
+    );
+    expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
+  });
+
+  test('strict route on/off is honored on platforms that implement it', () {
+    final on = tunInboundFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        tun: TunSettings(strictRoute: TunSettings.strictRouteOn),
+      ),
+    );
+    expect(on['strict_route'], isNull);
+
+    final off = tunInboundFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        tun: TunSettings(strictRoute: TunSettings.strictRouteOff),
+      ),
+    );
+    expect(off['strict_route'], isNull);
+  });
+
+  test('auto_route can be disabled for manual route management', () {
+    final inbound = tunInboundFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        tun: TunSettings(autoRoute: false),
+      ),
+    );
+    expect(inbound['auto_route'], isFalse);
+  });
+
+  test('custom DNS is ignored while dnsUseCustom is off', () {
+    final proxyDns = proxyDnsFor(
+      const AppSettings(
+        directRules: 'ru, yandex.ru, vk.com',
+        xrayCore: XrayCoreSettings(dnsUseCustom: false, dnsServers: '8.8.8.8'),
+      ),
+    );
+    expect(proxyDns['type'], 'https'); // дефолтный DoH, а не выключенный кастом
+  });
+
+  Map<String, dynamic> dnsFor(AppSettings settings) {
+    final json = SingBoxTunConfigGen.generate(
+      localSocksPort: 10808,
+      socksUsername: 'u',
+      socksPassword: 'p',
+      serverIpToExclude: '1.2.3.4',
+      settings: settings,
+    );
+    return (jsonDecode(json) as Map<String, dynamic>)['dns']
+        as Map<String, dynamic>;
+  }
+
+  test(
+    'direct-list domains resolve via local-dns (split-DNS), rest via tunnel',
+    () {
+      // hijack-dns перехватывает все запросы, поэтому корпоративные/LAN-зоны
+      // достижимы только через dns.rules → local-dns; без правила домен из
+      // Direct-списка получает NXDOMAIN от публичного DoH при direct-маршруте.
+      final dns = dnsFor(
+        const AppSettings(
+          xrayCore: XrayCoreSettings(dnsUseCustom: false),
+          directRules: 'ru, .corp.example, full:host.exact, 10.0.0.0/8',
+        ),
+      );
+
+      final rules = (dns['rules'] as List).cast<Map<String, dynamic>>();
+      expect(rules, hasLength(1));
+      final rule = rules.single;
+      expect(rule['server'], 'local-dns');
+      expect(rule['domain'], ['host.exact']);
+      expect(rule['domain_suffix'], containsAll(['ru', 'corp.example']));
+      // IP/CIDR-записи — не доменные, в dns-правило не попадают
+      expect((rule['domain_suffix'] as List), isNot(contains('10.0.0.0/8')));
+      // всё остальное по-прежнему резолвится через туннель
+      expect(dns['final'], 'proxy-dns');
+    },
+  );
+
+  test('no dns.rules emitted when the direct list has no domains', () {
+    final dns = dnsFor(
+      const AppSettings(
+        xrayCore: XrayCoreSettings(dnsUseCustom: false),
+        directRules: '10.0.0.0/8',
+      ),
+    );
+    expect(dns.containsKey('rules'), isFalse);
+    expect(dns['final'], 'proxy-dns');
+  });
+
+  test('newline-separated routing lists parse per line, same as commas', () {
+    final rules = _rules(
+      SingBoxTunConfigGen.generate(
+        localSocksPort: 10808,
+        socksUsername: 'u',
+        socksPassword: 'p',
+        serverIpToExclude: '1.2.3.4',
+        settings: const AppSettings(
+          xrayCore: XrayCoreSettings(dnsUseCustom: false),
+          directRules: 'yandex.ru\n192.168.50.0/24\nvk.com',
+        ),
+      ),
+    );
+
+    final domainRule = rules.firstWhere(
+      (r) => r['outbound'] == 'direct' && r.containsKey('domain_suffix'),
+    );
+    expect(domainRule['domain_suffix'], containsAll(['yandex.ru', 'vk.com']));
+
+    final cidrRule = rules.firstWhere(
+      (r) =>
+          r['outbound'] == 'direct' &&
+          (r['ip_cidr'] as List?)?.contains('192.168.50.0/24') == true,
+    );
+    expect(cidrRule, isNotNull);
+  });
+
+  test('mips в sing-box не уезжает: такого стека у него нет', () {
+    // Выбрать mips можно только на mihomo, но значение хранится одно на оба
+    // ядра, и переключение на xray привело бы сюда чужое имя. sing-box
+    // отвергает неизвестный стек вместе со всем конфигом — то есть туннель
+    // не поднялся бы вовсе, а не потерял одну опцию.
+    final json = SingBoxTunConfigGen.generate(
+      localSocksPort: 10808,
+      socksUsername: 'u',
+      socksPassword: 'p',
+      serverIpToExclude: '1.2.3.4',
+      settings: _legacySettings.copyWith(
+        tun: const TunSettings(stack: TunSettings.stackMips),
+      ),
+    );
+    final inbound =
+        ((jsonDecode(json) as Map<String, dynamic>)['inbounds'] as List).first
+            as Map<String, dynamic>;
+    expect(inbound['stack'], TunSettings.stackGvisor);
+    // full-cone NAT считается по подставленному стеку, а не по сохранённому.
+    expect(inbound.containsKey('endpoint_independent_nat'), isFalse);
+  });
+}

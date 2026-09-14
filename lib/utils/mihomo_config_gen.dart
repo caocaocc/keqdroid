@@ -72,34 +72,37 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
     RuleListDomains ruleLists = RuleListDomains.none,
     List<RouteServerOutbound> routeServers = const [],
     List<RouteAppRules> appRoutes = const [],
     OwnerGuard ownerGuard = OwnerGuard.off,
-  }) =>
-      const JsonEncoder.withIndent('  ').convert(
-        build(
-          input,
-          settings,
-          socksPort: socksPort,
-          httpPort: httpPort,
-          resolvedServerIp: resolvedServerIp,
-          localInboundsNoAuth: localInboundsNoAuth,
-          apiPort: apiPort,
-          apiSecret: apiSecret,
-          tun: tun,
-          routingMode: routingMode,
-          managedProcessNames: managedProcessNames,
-          appProcessName: appProcessName,
-          windows: windows,
-          ruleLists: ruleLists,
-          routeServers: routeServers,
-          appRoutes: appRoutes,
-          ownerGuard: ownerGuard,
-        ),
-      );
+  }) => const JsonEncoder.withIndent('  ').convert(
+    build(
+      input,
+      settings,
+      socksPort: socksPort,
+      httpPort: httpPort,
+      resolvedServerIp: resolvedServerIp,
+      localInboundsNoAuth: localInboundsNoAuth,
+      apiPort: apiPort,
+      apiSecret: apiSecret,
+      tun: tun,
+      routingMode: routingMode,
+      managedProcessNames: managedProcessNames,
+      managedProcessPaths: managedProcessPaths,
+      appProcessName: appProcessName,
+      appProcessPath: appProcessPath,
+      windows: windows,
+      ruleLists: ruleLists,
+      routeServers: routeServers,
+      appRoutes: appRoutes,
+      ownerGuard: ownerGuard,
+    ),
+  );
 
   // httpPort нужен и на Android: Dart HttpClient не умеет SOCKS, а прямой запрос уходит мимо туннеля
   static Map<String, dynamic> build(
@@ -114,7 +117,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool? windows,
     RuleListDomains ruleLists = RuleListDomains.none,
     List<RouteServerOutbound> routeServers = const [],
@@ -156,7 +161,9 @@ class MihomoConfigGen {
         tun: tun,
         routingMode: effectiveRoutingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
         processRules: processRules,
         fakeIp: fakeIp,
         windows: windows,
@@ -221,7 +228,9 @@ class MihomoConfigGen {
         resolvedServerIp: resolvedServerIp,
         routingMode: effectiveRoutingMode,
         managedProcessNames: processRules ? managedProcessNames : const [],
+        managedProcessPaths: processRules ? managedProcessPaths : const [],
         appProcessName: processRules ? appProcessName : '',
+        appProcessPath: processRules ? appProcessPath : '',
         tunOwned: tun != null,
         windows: windows,
         ruleLists: ruleLists,
@@ -259,7 +268,9 @@ class MihomoConfigGen {
     MihomoTunOptions? tun,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool processRules = false,
     bool fakeIp = false,
     bool? windows,
@@ -291,7 +302,10 @@ class MihomoConfigGen {
           ...buildProcessRules(
             routingMode: routingMode,
             managedProcessNames: managedProcessNames,
+            managedProcessPaths: managedProcessPaths,
             appProcessName: appProcessName,
+            appProcessPath: appProcessPath,
+            proxyTarget: clash.primaryTarget,
             windows: windows,
           ),
         ...buildServerDirectRules(
@@ -486,6 +500,8 @@ class MihomoConfigGen {
     required int socksPort,
     bool httpInbound = false,
     String? outboundInterface,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
     final proxies = buildProxies(input.trim());
     return jsonEncode(<String, dynamic>{
@@ -495,11 +511,16 @@ class MihomoConfigGen {
       // как xray в пробе: только IPv4, иначе разница цифр окажется разницей семейства адресов
       'ipv6': false,
       'mode': 'rule',
-      'log-level': 'silent',
+      'log-level': desktopDns ? 'warning' : 'silent',
       'find-process-mode': 'off',
       'geo-auto-update': false,
       'interface-name': ?outboundInterface,
-      'dns': _pingDns(),
+      'dns': desktopDns
+          ? _desktopPingDns(
+              settings,
+              physicalBootstrapDns: physicalBootstrapDns,
+            )
+          : _pingDns(),
       'proxies': proxies,
       'rules': ['MATCH,$proxyName'],
     });
@@ -518,6 +539,51 @@ class MihomoConfigGen {
         ],
       };
 
+  static Map<String, dynamic> _desktopPingDns(
+    AppSettings settings, {
+    required bool physicalBootstrapDns,
+  }) {
+    final core = settings.xrayCore;
+    final custom = core.dnsUseCustom
+        ? _parseList(core.dnsServers)
+              .map(_dnsAddress)
+              .whereType<String>()
+              .where((server) => server != 'fakedns')
+              .toList()
+        : const <String>[];
+    final split =
+        core.dnsSplitDirectDomains &&
+        splitDomainsAndIps(
+          _parseRuleList(settings.directRules),
+        ).domains.isNotEmpty &&
+        custom.length > 1;
+    final selected = physicalBootstrapDns && !core.dnsUseCustom
+        ? const <String>[]
+        : custom.isEmpty
+        ? const ['https://1.1.1.1/dns-query']
+        : (split ? custom.take(1) : custom.take(2));
+    final servers = <String>[];
+    for (final server in selected) {
+      final direct = server == 'system'
+          ? server
+          : '${server.split('#').first}#DIRECT';
+      if (!servers.contains(direct)) servers.add(direct);
+    }
+    if (!servers.contains('system')) servers.add('system');
+    final ipServers = servers
+        .where(_hasIpAddress)
+        .map((s) => s.split('#').first)
+        .toList();
+    return {
+      'enable': true,
+      'ipv6': false,
+      'enhanced-mode': 'normal',
+      'default-nameserver': ipServers.isEmpty ? ['system'] : ipServers,
+      'proxy-server-nameserver': servers,
+      'nameserver': servers,
+    };
+  }
+
   // без enable mihomo резолвит средствами Go, а на Android нет /etc/resolv.conf, и домен сервера не резолвится
 
   static Map<String, dynamic> buildDns(
@@ -526,7 +592,51 @@ class MihomoConfigGen {
   }) {
     final core = settings.xrayCore;
     final servers = dnsServers(core);
-    final policy = buildNameserverPolicy(core);
+    final directDomains = splitDomainsAndIps(
+      _parseRuleList(settings.directRules),
+    ).domains;
+    final splitCustom =
+        core.dnsUseCustom &&
+        core.dnsSplitDirectDomains &&
+        directDomains.isNotEmpty &&
+        servers.length > 1 &&
+        _parseList(
+              core.dnsServers,
+            ).where((raw) => _dnsAddress(raw) != null).length >
+            1;
+    final directServer = servers.first;
+    // Явная политика — раньше geosite: mihomo проверяет записи по порядку.
+    final policy = <String, dynamic>{...buildNameserverPolicy(core)};
+    if (splitCustom) {
+      for (final raw in directDomains) {
+        final rule = raw.trim().toLowerCase();
+        if (rule.startsWith('geosite:')) {
+          policy.putIfAbsent(rule, () => [directServer]);
+        } else if (rule.startsWith('full:')) {
+          policy.putIfAbsent(rule.substring(5), () => [directServer]);
+        } else if (!rule.startsWith('regexp:')) {
+          var domain = rule.startsWith('domain:')
+              ? rule.substring(7).trim()
+              : rule;
+          if (domain.startsWith('.')) domain = domain.substring(1);
+          if (domain.isNotEmpty) {
+            policy.putIfAbsent('+.$domain', () => [directServer]);
+          }
+        }
+      }
+      // Reserved LAN names remain local. '*' matches one label in mihomo's
+      // domain trie; it does not match arbitrary multi-label enterprise zones.
+      for (final local in ['+.local', '+.home.arpa', '*']) {
+        policy.putIfAbsent(local, () => ['system']);
+      }
+    }
+    // The first DNS resolves node/bootstrap names directly. A hostname-only
+    // first entry is bootstrapped by the OS, never the foreign proxy DNS.
+    final bootstrap = splitCustom
+        ? [_hasIpAddress(directServer) ? directServer : 'system']
+        : bootstrapNameservers(core);
+    // Тот же смысл, что у `proxiedDoh` в xray-генераторе: перехват провайдером
+    // имеет значение только там, где «всё остальное» и так идёт в туннель.
     final globalProxy =
         settings.finalOutbound == AppSettings.finalOutboundProxy;
     // через туннель CDN отдаёт узлы рядом с сервером, прямым соединениям нужен ближний к дому,
@@ -544,17 +654,29 @@ class MihomoConfigGen {
         'fake-ip-range': fakeIpRange,
         'fake-ip-filter': fakeIpFilter,
       },
+      'default-nameserver': bootstrap,
+      // Адрес прокси-сервера — отдельной записью и всегда мимо туннеля (у xray
+      // это `bootstrapDomains` со `skipFallback`): запрос по нему через прокси
+      // означал бы круг.
+      'proxy-server-nameserver': splitCustom
+          ? [
+              directServer == 'system'
+                  ? 'system'
+                  : '${directServer.split('#').first}#DIRECT',
+            ]
+          : servers,
+      'nameserver': splitCustom ? servers.skip(1).toList() : servers,
       if (policy.isNotEmpty) 'nameserver-policy': policy,
-      'default-nameserver': bootstrapNameservers(core),
-      // адрес прокси-сервера всегда мимо туннеля, иначе круг
-      'proxy-server-nameserver': servers,
-      'nameserver': servers,
+      // `respect-rules` гоняет DNS ядра по тем же правилам, что и трафик, то
+      // есть в туннель. Ровно то, что делает схема `https://` вместо
+      // `https+local://` у xray.
       if (viaTunnel) ...{
-        'direct-nameserver': [...servers, ...directPlainFallback(servers)],
+        'direct-nameserver': splitCustom
+            ? [directServer]
+            : [...servers, ...directPlainFallback(servers)],
         // иначе домен со своим резолвером напрямую не открылся бы
         if (policy.isNotEmpty) 'direct-nameserver-follow-policy': true,
       },
-      // respect-rules гоняет DNS ядра по правилам, то есть в туннель
       if (globalProxy) 'respect-rules': true,
     };
   }
@@ -1749,7 +1871,9 @@ class MihomoConfigGen {
     String proxyTarget = proxyName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     List<String> managedProcessNames = const [],
+    List<String> managedProcessPaths = const [],
     String appProcessName = '',
+    String appProcessPath = '',
     bool tunOwned = false,
     bool? windows,
     RuleListDomains ruleLists = RuleListDomains.none,
@@ -1763,7 +1887,10 @@ class MihomoConfigGen {
       ...buildProcessRules(
         routingMode: routingMode,
         managedProcessNames: managedProcessNames,
+        managedProcessPaths: managedProcessPaths,
         appProcessName: appProcessName,
+        appProcessPath: appProcessPath,
+        proxyTarget: proxyTarget,
         windows: windows,
       ),
       ...buildUserRules(
@@ -1830,11 +1957,19 @@ class MihomoConfigGen {
   static List<String> buildProcessRules({
     required AppRoutingMode routingMode,
     required List<String> managedProcessNames,
+    List<String> managedProcessPaths = const [],
     required String appProcessName,
+    String appProcessPath = '',
+    String proxyTarget = proxyName,
     bool? windows,
   }) {
     final app = appProcessName.trim();
-    if (app.isEmpty && managedProcessNames.isEmpty) return const [];
+    if (app.isEmpty &&
+        appProcessPath.isEmpty &&
+        managedProcessNames.isEmpty &&
+        managedProcessPaths.isEmpty) {
+      return const [];
+    }
 
     // ОС параметром: фикстура, снятая на Windows, иначе падала бы на linux-раннере
     final exe = (windows ?? Platform.isWindows) ? '.exe' : '';
@@ -1844,6 +1979,8 @@ class MihomoConfigGen {
       // приложение шлёт то, что обязано ехать в туннель (подписки, апдейтер, флаг выхода)
       if (app.isNotEmpty)
         'AND,((IN-TYPE,TUN),(PROCESS-NAME-REGEX,^${processRegexLiteral(app)}\$)),DIRECT',
+      if (appProcessPath.isNotEmpty)
+        'AND,((IN-TYPE,TUN),(PROCESS-PATH-REGEX,^${processRegexLiteral(appProcessPath)}\$)),DIRECT',
       // временное ядро замера отдельным процессом: туннель забирал его соединение, и пинговались два сервера из двадцати
       'PROCESS-NAME,keqrnel$exe,DIRECT',
       'PROCESS-NAME,mihomo$exe,DIRECT',
@@ -1861,7 +1998,7 @@ class MihomoConfigGen {
     // только из TUN: на HTTP-вход приложение шлёт подписки и апдейтер, а невыбранное мимо уводило их напрямую
     String fromTun(String rule) => 'AND,((IN-TYPE,TUN),($rule)),DIRECT';
     final names = <String>[];
-    final paths = <String>[];
+    final paths = <String>[...managedProcessPaths];
     for (final process in managedProcessNames) {
       final entry = process.trim();
       if (entry.isEmpty) continue;

@@ -68,8 +68,8 @@ class XrayCoreSettings {
   const XrayCoreSettings({
     this.logLevel = 'warning',
     this.routingDomainStrategy = 'AsIs',
-    this.dnsUseCustom = false,
-    this.dnsServers = 'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query',
+    this.dnsUseCustom = true,
+    this.dnsServers = defaultDnsServers,
     this.dnsQueryStrategy = 'UseIPv4',
     this.dnsDisableCache = false,
     this.dnsSplitDirectDomains = true,
@@ -102,6 +102,11 @@ class XrayCoreSettings {
     this.dnsHosts = '',
     this.dnsPolicy = '',
   });
+
+  static const defaultDnsServers =
+      'tcp+local://223.5.5.5:53\nhttps://1.1.1.1/dns-query';
+  static const legacyDnsServers =
+      'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query';
 
   static const logLevels = ['none', 'error', 'warning', 'info', 'debug'];
 
@@ -194,7 +199,13 @@ class XrayCoreSettings {
       };
 
   factory XrayCoreSettings.fromJson(Map<String, dynamic>? json) {
-    if (json == null) return const XrayCoreSettings();
+    // Missing fields belong to an existing installation/backup, not a new one.
+    if (json == null) {
+      return const XrayCoreSettings(
+        dnsUseCustom: false,
+        dnsServers: legacyDnsServers,
+      );
+    }
     String str(String k, String def) => (json[k] as String?)?.trim().isNotEmpty == true
         ? (json[k] as String).trim()
         : def;
@@ -219,8 +230,7 @@ class XrayCoreSettings {
       routingDomainStrategy:
           routingDomainStrategies.contains(domain) ? domain : 'AsIs',
       dnsUseCustom: b('dnsUseCustom', false),
-      dnsServers: json['dnsServers'] as String? ??
-          'https+local://1.1.1.1/dns-query\nhttps+local://8.8.8.8/dns-query',
+      dnsServers: json['dnsServers'] as String? ?? legacyDnsServers,
       dnsQueryStrategy: dnsQueryStrategies.contains(query) ? query : 'UseIPv4',
       dnsDisableCache: b('dnsDisableCache', false),
       dnsSplitDirectDomains: b('dnsSplitDirectDomains', true),
@@ -530,10 +540,13 @@ class XrayCoreSettings {
     };
   }
 
+  /// [physicalBootstrapDns] uses the protected macOS TUN resolver only for
+  /// automatic node bootstrap; ordinary and explicit custom DNS stay intact.
   Map<String, dynamic> buildDnsBlock({
     required List<String> directDomains,
     List<String> bootstrapDomains = const [],
     bool proxiedDoh = false,
+    bool physicalBootstrapDns = false,
   }) {
     final servers = <Map<String, dynamic>>[];
 
@@ -543,13 +556,22 @@ class XrayCoreSettings {
         ? xrayDnsServers(dnsServers).servers
         : const <Map<String, dynamic>>[];
 
+    final splitCustom = dnsSplitDirectDomains &&
+        directDomains.isNotEmpty &&
+        custom.length > 1;
     if (bootstrapDomains.isNotEmpty) {
-      for (final server in _bootstrapResolvers(custom)) {
-        servers.add({
-          ...server,
-          'domains': bootstrapDomains,
-          'skipFallback': true,
-        });
+      // macOS TUN's localhost resolver uses the protected physical snapshot.
+      // Skip automatic public DoH delays without replacing explicit user DNS.
+      if (!physicalBootstrapDns || dnsUseCustom) {
+        for (final server in _bootstrapResolvers(
+          splitCustom ? [custom.first] : custom,
+        )) {
+          servers.add({
+            ...server,
+            'domains': bootstrapDomains,
+            'skipFallback': true,
+          });
+        }
       }
       servers.add({
         'address': 'localhost',
@@ -574,9 +596,25 @@ class XrayCoreSettings {
       }
     }
 
+    if (splitCustom) {
+      // Reserved local names stay with the OS; public DNS cannot resolve LAN
+      // names. Do not guess or rewrite enterprise scoped DNS zones.
+      servers.add({
+        'address': 'localhost',
+        'domains': ['domain:local', 'domain:home.arpa', r'regexp:^[^.]+$'],
+        'skipFallback': true,
+        'finalQuery': true,
+      });
+    }
+
     if (custom.isNotEmpty) {
-      // length > 1: с одним сервером сплит оставил бы всё, кроме Direct, без резолвера
-      if (dnsSplitDirectDomains && directDomains.isNotEmpty && custom.length > 1) {
+      // `length > 1`, а не `isNotEmpty`: первая строка уходит под
+      // Direct-домены со `skipFallback`, то есть общего резолва не касается.
+      // Когда сервер в списке один, такой раскладке не остаётся резолвера
+      // вообще — всё, чего нет в Direct-списке, не резолвится ничем, и это
+      // выглядит как «прописал свой DNS, и интернет пропал». С одним сервером
+      // сплит и не нужен: он и так отвечает на всё, включая Direct-домены.
+      if (splitCustom) {
         servers.add({
           ...custom.first,
           'domains': directDomains,
@@ -618,6 +656,37 @@ class XrayCoreSettings {
     };
   }
 
+  /// Desktop measurement needs only bootstrap DNS, without Geo/domain rules.
+  /// Use the same direct resolver selection and limits as a real connection.
+  Map<String, dynamic> buildBootstrapDnsBlock({
+    bool splitDirectDomains = false,
+    bool physicalBootstrapDns = false,
+  }) {
+    final custom = dnsUseCustom
+        ? xrayDnsServers(dnsServers).servers
+        : const <Map<String, dynamic>>[];
+    return {
+      'servers': [
+        if (!physicalBootstrapDns || dnsUseCustom)
+          for (final server in _bootstrapResolvers(
+            splitDirectDomains && dnsSplitDirectDomains && custom.length > 1
+                ? [custom.first] : custom,
+          )) _withDnsLimits(server),
+        _withDnsLimits({'address': 'localhost'}),
+      ],
+      'queryStrategy': 'UseIPv4',
+      if (dnsDisableCache) 'disableCache': true,
+    };
+  }
+
+  /// Чем искать адрес самого сервера, в порядке опроса. Системный резолвер
+  /// идёт после них и добавляется вызывающим.
+  ///
+  /// Не больше двух записей: каждый молчащий резолвер стоит [_dnsTimeoutMs], а
+  /// этот список лежит на критическом пути к подключению. В сети, где DoH
+  /// режут, цена платится не один раз при старте, а перед каждым коннектом с
+  /// истёкшим TTL — поэтому по умолчанию тут один адрес, а не пара, как в
+  /// общем списке.
   static List<Map<String, dynamic>> _bootstrapResolvers(
     List<Map<String, dynamic>> custom,
   ) {

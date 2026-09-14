@@ -92,6 +92,9 @@ class _ServerTile extends ConsumerWidget {
         pingMs: pingMs,
         lastTestedAt: lastTestedAt,
         pingColorType: pingColorType,
+        pingDiagnostics: ref.watch(
+          pingDiagnosticsProvider.select((all) => all[server.id]),
+        ),
         foreground: isActive && TvFocusHighlight.containerOf(context) == null
             ? (accent?.onContainer ?? scheme.onSecondaryContainer)
             : null,
