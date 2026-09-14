@@ -1,11 +1,13 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/core/app_logger.dart';
 
 /// На десктопе файл лога — единственный след поломки: Crashlytics только под
 /// Android, а developer.log в релизе не видно нигде.
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
 
   File log() => File('${dir.path}${Platform.pathSeparator}app.log');
@@ -64,4 +66,20 @@ void main() {
 
     expect(() => AppLogger.instance.warn('no disk'), returnsNormally);
   });
+
+  test('macOS startup opens the application support log', () async {
+    final support = Directory('${dir.path}/support')..createSync();
+    const channel = MethodChannel('plugins.flutter.io/path_provider');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async =>
+        call.method == 'getApplicationSupportDirectory' ? support.path : null);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    await AppLogger.instance.enableFileLog();
+    AppLogger.instance.info('macOS startup');
+
+    expect(File('${support.path}/app.log').readAsStringSync(),
+        contains('[INFO] macOS startup'));
+    expect(await AppLogger.instance.readFileLog(), contains('macOS startup'));
+  }, skip: !Platform.isMacOS);
 }

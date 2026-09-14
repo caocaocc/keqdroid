@@ -6,6 +6,7 @@ import 'package:keqdroid/services/ping_service.dart';
 import 'package:keqdroid/services/vpn_engine.dart';
 import 'package:keqdroid/tunnel/tunnel_backend.dart';
 import 'package:keqdroid/tunnel/vpn_backend.dart';
+import 'package:keqdroid/tunnel/url_test_diagnostics.dart';
 
 import '../helpers/fake_tunnel_backend.dart';
 
@@ -51,7 +52,8 @@ class _OneBadServerBackend extends FakeTunnelBackend {
   }
 
   @override
-  Future<List<_Probe>> xrayUrlTestBatch({
+  Future<List<({String id, bool success, int? latencyMs, String error,
+    int? httpStatus, UrlTestDiagnostics? diagnostics})>> xrayUrlTestBatch({
     required List<(String id, String xrayConfig)> items,
     required int socksPort,
     VpnBackend core = VpnBackend.xray,
@@ -61,7 +63,10 @@ class _OneBadServerBackend extends FakeTunnelBackend {
   }) async =>
       [
         for (final item in items)
-          _answer(item.$1, alive: !_isBad(item.$2)),
+          (id: item.$1, success: !_isBad(item.$2),
+            latencyMs: !_isBad(item.$2) ? 120 : null,
+            error: !_isBad(item.$2) ? '' : 'dead',
+            httpStatus: !_isBad(item.$2) ? 204 : null, diagnostics: null),
       ];
 }
 

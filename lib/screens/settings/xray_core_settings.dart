@@ -152,7 +152,7 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
           const _XrayNoiseSection(),
         ],
         const _XrayGeneralSection(),
-        if (Platform.isWindows || Platform.isLinux) const _XrayTunSection(),
+        if (PlatformBootstrap.isDesktop) const _XrayTunSection(),
         const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: () => _resetDefaults(settings),
@@ -1153,7 +1153,8 @@ class _XrayGeneralSection extends ConsumerWidget {
                 ),
               ),
             ),
-            SwitchListTile(
+            if (!Platform.isMacOS || core.udpPerAddress || ref.watch(activeVpnBackendProvider) == VpnBackend.mihomo)
+              SwitchListTile(
               value: core.udpPerAddress,
               onChanged: (v) =>
                   _saveXrayCore(ref, settings, core.copyWith(udpPerAddress: v)),
@@ -1370,7 +1371,7 @@ class _XrayTunSection extends ConsumerWidget {
                 l10n.settingsTunAutoRouteHint,
               ),
             ),
-            if (xray)
+            if (xray || Platform.isMacOS)
               SwitchListTile(
                 value: tun.blockIpv6Leak,
                 onChanged: (v) =>

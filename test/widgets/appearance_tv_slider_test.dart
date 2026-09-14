@@ -7,8 +7,10 @@ import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/platform/platform_bootstrap.dart';
 import 'package:keqdroid/providers/providers.dart';
 import 'package:keqdroid/screens/settings_tab.dart';
+import 'package:keqdroid/services/vpn_engine.dart';
 
 import '../helpers/test_storage.dart';
+import '../helpers/fake_tunnel_backend.dart';
 
 // жалоба с Android TV 30.10.2026: дошёл пультом до масштаба, и обратно наверх не уйти
 Future<FocusNode> _focusScaleSlider(
@@ -25,7 +27,10 @@ Future<FocusNode> _focusScaleSlider(
       ));
   final tab = appearanceGeneralTabForTest(settings, onSave: onSave);
   await tester.pumpWidget(ProviderScope(
-    overrides: [storageProvider.overrideWithValue(storage!)],
+    overrides: [
+      storageProvider.overrideWithValue(storage!),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(FakeTunnelBackend())),
+    ],
     child: KeqdroidApp(
       // кнопка сверху вместо вкладок экрана
       home: Scaffold(

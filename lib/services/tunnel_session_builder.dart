@@ -38,6 +38,7 @@ class TunnelSessionBuilder {
     List<String> includeProcesses = const [],
     List<String> managedProcessPaths = const [],
     List<GeoDomain> chinaDnsDomains = const [],
+    bool delegateRoutingToXray = false,
     String? serverName,
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
     ConnectionMode? modeOverride,
@@ -55,6 +56,9 @@ class TunnelSessionBuilder {
     if (Platform.isMacOS &&
         mode == ConnectionMode.tun &&
         vpnBackend == VpnBackend.xray) {
+      if (settings.xrayCore.udpPerAddress) {
+        throw UnsupportedError('UDP per-exit routing requires mihomo on macOS. Disable this option to use Xray TUN.');
+      }
       final managed = switch (routingMode) {
         AppRoutingMode.onlySelected => includeProcesses,
         AppRoutingMode.allExceptSelected => excludeProcesses,
@@ -67,6 +71,7 @@ class TunnelSessionBuilder {
         serverIpToExclude: resolvedServerIp,
         settings: settings,
         chinaDnsDomains: chinaDnsDomains,
+        delegateRoutingToXray: delegateRoutingToXray,
         managedProcessNames: managed,
         managedProcessPaths: managedProcessPaths,
         routingMode: routingMode,

@@ -1,0 +1,280 @@
+diff --git a/bridge/xray/outbound.go b/bridge/xray/outbound.go
+--- a/bridge/xray/outbound.go
++++ b/bridge/xray/outbound.go
+@@ -96,9 +96,9 @@
+ 	}
+ 	switch N.NetworkName(network) {
+ 	case N.NetworkTCP:
+-		return engine.DialTCP(ctx, host(destination), destination.Port)
++		return engine.DialTCP(keqdisRoutingContext(ctx), host(destination), destination.Port)
+ 	case N.NetworkUDP:
+-		return engine.DialUDP(ctx, host(destination), destination.Port)
++		return engine.DialUDP(keqdisRoutingContext(ctx), host(destination), destination.Port)
+ 	default:
+ 		return nil, E.New("xray outbound: unsupported network: ", network)
+ 	}
+@@ -112,7 +112,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return engine.DialUDPPacket(ctx)
++	return engine.DialUDPPacket(keqdisRoutingContext(ctx))
+ }
+ 
+ // Close stops the embedded xray engine.
+diff --git a/bridge/xray/keqdis_routing_darwin.go b/bridge/xray/keqdis_routing_darwin.go
+new file mode 100644
+--- /dev/null
++++ b/bridge/xray/keqdis_routing_darwin.go
+@@ -0,0 +1,55 @@
++//go:build darwin && !ios
++
++package xray
++
++import (
++	"context"
++
++	"github.com/sagernet/sing-box/adapter"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/session"
++)
++
++// Preserve TUN identity for application rules and the fixed LAN listeners for
++// Xray's LAN source allow/deny rules. Ordinary loopback proxy and DNS dispatches
++// do not inherit an application's TUN routing policy.
++func keqdisRoutingContext(ctx context.Context) context.Context {
++	// DNS transports inherit the original ingress metadata. The transport tag
++	// marks their own upstream dial, even when that tag is an empty string.
++	if _, dnsTransport := adapter.DNSTransportTagFromContext(ctx); dnsTransport {
++		return ctx
++	}
++	metadata := adapter.ContextFrom(ctx)
++	if metadata == nil || !metadata.Source.Addr.IsValid() || metadata.Source.Port == 0 {
++		return ctx
++	}
++	switch metadata.Inbound {
++	case "tun-in":
++		if metadata.InboundType != "tun" {
++			return ctx
++		}
++	case "socks-lan":
++		if metadata.InboundType != "socks" {
++			return ctx
++		}
++	case "http-lan":
++		if metadata.InboundType != "http" {
++			return ctx
++		}
++	default:
++		return ctx
++	}
++	var network xnet.Network
++	switch metadata.Network {
++	case "tcp":
++		network = xnet.Network_TCP
++	case "udp":
++		network = xnet.Network_UDP
++	default:
++		return ctx
++	}
++	return session.ContextWithInbound(ctx, &session.Inbound{
++		Source: xnet.Destination{Network: network, Address: xnet.IPAddress(metadata.Source.Addr.AsSlice()), Port: xnet.Port(metadata.Source.Port)},
++		Tag:    metadata.Inbound, Name: metadata.InboundType,
++	})
++}
+diff --git a/bridge/xray/keqdis_routing_other.go b/bridge/xray/keqdis_routing_other.go
+new file mode 100644
+--- /dev/null
++++ b/bridge/xray/keqdis_routing_other.go
+@@ -0,0 +1,7 @@
++//go:build !darwin || ios
++
++package xray
++
++import "context"
++
++func keqdisRoutingContext(ctx context.Context) context.Context { return ctx }
+diff --git a/bridge/xray/keqdis_routing_darwin_test.go b/bridge/xray/keqdis_routing_darwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/bridge/xray/keqdis_routing_darwin_test.go
+@@ -0,0 +1,37 @@
++//go:build darwin && !ios
++
++package xray
++
++import (
++ "context"
++ "testing"
++
++ "github.com/sagernet/sing-box/adapter"
++ "github.com/sagernet/sing-box/log"
++ M "github.com/sagernet/sing/common/metadata"
++ "github.com/xtls/xray-core/common/session"
++)
++
++func TestKeqdisRoutingMetadata(t *testing.T) {
++ for _, network := range []string{"tcp", "udp"} {
++  metadata := &adapter.InboundContext{Inbound: "tun-in", InboundType: "tun", Network: network, Source: M.ParseSocksaddr("192.168.1.2:45678")}
++  inbound := session.InboundFromContext(keqdisRoutingContext(adapter.WithContext(context.Background(), metadata)))
++  if inbound == nil || inbound.Tag != "tun-in" || inbound.Source.Address.String() != "192.168.1.2" || inbound.Source.Port != 45678 || inbound.Source.Network.SystemString() != network {
++   t.Fatalf("lost TUN identity: %#v", inbound)
++  }
++ }
++ for _, metadata := range []*adapter.InboundContext{nil, {Inbound: "socks-in", InboundType: "socks", Network: "tcp", Source: M.ParseSocksaddr("127.0.0.1:45678")}, {Inbound: "tun-in", InboundType: "tun", Network: "tcp"}} {
++  ctx := context.Background()
++  if metadata != nil {ctx = adapter.WithContext(ctx, metadata)}
++  if session.InboundFromContext(keqdisRoutingContext(ctx)) != nil {t.Fatal("non-TUN or invalid source gained process identity")}
++ }
++}
++
++func TestKeqdisScopeClosesEmbeddedXray(t *testing.T) {
++ outbound := &Outbound{config: []byte(`{"outbounds":[{"protocol":"blackhole","tag":"block"}]}`)}
++ scope := adapter.NewScope(context.Background(), log.NewNOPFactory().Logger())
++ if err := outbound.Start(adapter.StartStateStart, scope); err != nil {t.Fatal(err)}
++ if _, err := outbound.currentEngine(); err != nil {t.Fatal(err)}
++ if err := scope.Close(); err != nil {t.Fatal(err)}
++ if _, err := outbound.currentEngine(); err == nil {t.Fatal("scope left embedded engine alive")}
++}
+diff --git a/bridge/xray/keqdis_lan_dispatch_darwin_test.go b/bridge/xray/keqdis_lan_dispatch_darwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/bridge/xray/keqdis_lan_dispatch_darwin_test.go
+@@ -0,0 +1,137 @@
++//go:build darwin && !ios
++
++package xray
++
++import (
++	"context"
++	"net"
++	"testing"
++	"time"
++
++	"github.com/sagernet/sing-box/adapter"
++	M "github.com/sagernet/sing/common/metadata"
++	"github.com/xtls/xray-core/common"
++	"github.com/xtls/xray-core/common/serial"
++	"github.com/xtls/xray-core/common/session"
++	"github.com/xtls/xray-core/features/outbound"
++	"github.com/xtls/xray-core/transport"
++)
++
++// Test the real embedded dispatcher, replacing only its terminal handlers with
++// recorders. No DNS, sockets, process lookup or physical network are required.
++type keqdisRouteRecorder struct {
++	tag   string
++	calls chan string
++}
++
++func (h *keqdisRouteRecorder) Tag() string                          { return h.tag }
++func (h *keqdisRouteRecorder) Start() error                         { return nil }
++func (h *keqdisRouteRecorder) Close() error                         { return nil }
++func (h *keqdisRouteRecorder) SenderSettings() *serial.TypedMessage { return nil }
++func (h *keqdisRouteRecorder) ProxySettings() *serial.TypedMessage  { return nil }
++func (h *keqdisRouteRecorder) Dispatch(_ context.Context, link *transport.Link) {
++	h.calls <- h.tag
++	common.Close(link.Writer)
++	common.Interrupt(link.Reader)
++}
++
++func TestKeqdisLANDispatchBoundary(t *testing.T) {
++	engine, err := NewEngine([]byte(`{
++        "outbounds": [
++            {"protocol":"blackhole","tag":"proxy"},
++            {"protocol":"blackhole","tag":"direct"},
++            {"protocol":"blackhole","tag":"block"},
++            {"protocol":"blackhole","tag":"tun-route"}
++        ],
++        "routing": {"domainStrategy":"AsIs","rules":[
++            {"type":"field","inboundTag":["socks-lan","http-lan"],"source":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","127.0.0.0/8"],"outboundTag":"proxy"},
++            {"type":"field","inboundTag":["socks-lan","http-lan"],"network":"tcp,udp","outboundTag":"block"},
++            {"type":"field","inboundTag":["tun-in"],"domain":["full:direct.example"],"outboundTag":"tun-route"},
++            {"type":"field","domain":["full:direct.example"],"outboundTag":"direct"},
++            {"type":"field","ip":["198.51.100.1/32"],"outboundTag":"direct"}
++        ]}
++    }`))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer engine.Close()
++	calls := make(chan string, 1)
++	manager := engine.instance.GetFeature(outbound.ManagerType()).(outbound.Manager)
++	for _, tag := range []string{"proxy", "direct", "block", "tun-route"} {
++		original := manager.GetHandler(tag)
++		if err := manager.RemoveHandler(context.Background(), tag); err != nil {
++			t.Fatal(err)
++		}
++		if err := original.Close(); err != nil {
++			t.Fatal(err)
++		}
++		if err := manager.AddHandler(context.Background(), &keqdisRouteRecorder{tag: tag, calls: calls}); err != nil {
++			t.Fatal(err)
++		}
++	}
++	bridge := &Outbound{engine: engine}
++	for _, test := range []struct {
++		name, tag, kind, source, network, want string
++		packet, dns                            bool
++	}{
++		{name: "SOCKS LAN TCP", tag: "socks-lan", kind: "socks", source: "192.168.1.2:12345", network: "tcp", want: "proxy"},
++		{name: "HTTP LAN", tag: "http-lan", kind: "http", source: "10.0.0.2:12345", network: "tcp", want: "proxy"},
++		{name: "SOCKS LAN UDP dial", tag: "socks-lan", kind: "socks", source: "172.16.1.2:12345", network: "udp", want: "proxy"},
++		{name: "SOCKS LAN UDP packet", tag: "socks-lan", kind: "socks", source: "192.168.1.2:12345", network: "udp", packet: true, want: "proxy"},
++		{name: "LAN public source denied", tag: "socks-lan", kind: "socks", source: "203.0.113.2:12345", network: "tcp", want: "block"},
++		{name: "loopback SOCKS retains domain routing", tag: "socks-in", kind: "socks", source: "127.0.0.1:12345", network: "tcp", want: "direct"},
++		{name: "loopback HTTP retains domain routing", tag: "http-in", kind: "http", source: "127.0.0.1:12345", network: "tcp", want: "direct"},
++		{name: "TUN retains scoped routing", tag: "tun-in", kind: "tun", source: "192.168.1.2:12345", network: "tcp", want: "tun-route"},
++		{name: "TUN DNS must not inherit application routing", tag: "tun-in", kind: "tun", source: "192.168.1.2:12345", network: "tcp", dns: true, want: "direct"},
++		{name: "LAN DNS must not inherit LAN policy", tag: "socks-lan", kind: "socks", source: "192.168.1.2:12345", network: "tcp", dns: true, want: "direct"},
++		{name: "unknown tag", tag: "unknown", kind: "socks", source: "192.168.1.2:12345", network: "tcp", want: "direct"},
++		{name: "LAN tag on wrong type", tag: "socks-lan", kind: "tun", source: "192.168.1.2:12345", network: "tcp", want: "direct"},
++		{name: "TUN tag on wrong type", tag: "tun-in", kind: "socks", source: "192.168.1.2:12345", network: "tcp", want: "direct"},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++			defer cancel()
++			ctx = adapter.WithContext(ctx, &adapter.InboundContext{Inbound: test.tag, InboundType: test.kind, Source: M.ParseSocksaddr(test.source), Network: test.network})
++			if test.dns {
++				ctx = adapter.ContextWithDNSTransportTag(ctx, "proxy-dns")
++			}
++			destination := M.ParseSocksaddr("direct.example:80")
++			if test.packet {
++				connection, err := bridge.ListenPacket(ctx, destination)
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer connection.Close()
++				if _, err := connection.WriteTo([]byte("test"), &net.UDPAddr{IP: net.ParseIP("198.51.100.1"), Port: 80}); err != nil {
++					t.Fatal(err)
++				}
++			} else {
++				connection, err := bridge.DialContext(ctx, test.network, destination)
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer connection.Close()
++			}
++			select {
++			case got := <-calls:
++				if got != test.want {
++					t.Fatalf("dispatch %s, want %s", got, test.want)
++				}
++			case <-ctx.Done():
++				t.Fatal("embedded dispatch did not finish")
++			}
++		})
++	}
++}
++
++func TestKeqdisDNSDoesNotInheritIngressIdentity(t *testing.T) {
++	for _, tag := range []string{"", "proxy-dns"} {
++		for _, ingress := range []struct{ tag, kind string }{{"tun-in", "tun"}, {"socks-lan", "socks"}, {"http-lan", "http"}} {
++			ctx := adapter.WithContext(context.Background(), &adapter.InboundContext{Inbound: ingress.tag, InboundType: ingress.kind, Source: M.ParseSocksaddr("192.168.1.2:12345"), Network: "tcp"})
++			ctx = adapter.ContextWithDNSTransportTag(ctx, tag)
++			if session.InboundFromContext(keqdisRoutingContext(ctx)) != nil {
++				t.Fatalf("DNS transport %q inherited %s", tag, ingress.tag)
++			}
++		}
++	}
++}

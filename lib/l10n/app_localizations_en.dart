@@ -692,7 +692,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Custom DNS servers';
 
   @override
-  String get settingsXrayDnsCustomHint => 'One address per line. +local connects directly; other addresses follow proxy routing.';
+  String get settingsXrayDnsCustomHint => 'One address per line (DoH, DoT, or plain)';
 
   @override
   String get settingsXrayDnsCustomHintXray => 'One address per line (DoH or plain), Xray has no DoT';

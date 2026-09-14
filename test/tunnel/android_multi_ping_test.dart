@@ -5,7 +5,7 @@ import 'package:keqdroid/tunnel/vpn_backend.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('keqdis_vpn_channel');
+  const channel = MethodChannel('keqdroid_vpn_channel');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   late AndroidTunnelBackend backend;

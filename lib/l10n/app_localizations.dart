@@ -1256,7 +1256,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsXrayDnsCustomHint.
   ///
   /// In en, this message translates to:
-  /// **'One address per line. +local connects directly; other addresses follow proxy routing.'**
+  /// **'One address per line (DoH, DoT, or plain)'**
   String get settingsXrayDnsCustomHint;
 
   /// No description provided for @settingsXrayDnsCustomHintXray.

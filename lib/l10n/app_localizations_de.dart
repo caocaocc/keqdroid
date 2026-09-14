@@ -692,7 +692,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Eigene DNS-Server';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile. +local verbindet direkt; andere Adressen folgen den Proxy-Regeln.';
+  String get settingsXrayDnsCustomHint => 'Eine Adresse pro Zeile (DoH, DoT oder unverschlüsselt)';
 
   @override
   String get settingsXrayDnsCustomHintXray => 'Eine Adresse pro Zeile (DoH oder unverschlüsselt), DoT kann Xray nicht';

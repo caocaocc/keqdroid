@@ -688,7 +688,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get settingsXrayDnsCustom => 'سرورهای DNS دلخواه';
 
   @override
-  String get settingsXrayDnsCustomHint => 'هر خط یک آدرس. +local مستقیماً متصل می‌شود؛ سایر آدرس‌ها از قوانین پروکسی پیروی می‌کنند.';
+  String get settingsXrayDnsCustomHint => 'هر آدرس در یک خط (DoH، DoT یا ساده)';
 
   @override
   String get settingsXrayDnsCustomHintXray => 'هر آدرس در یک خط (DoH یا ساده)، Xray از DoT پشتیبانی نمی‌کند';
