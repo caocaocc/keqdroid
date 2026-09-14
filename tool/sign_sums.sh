@@ -12,7 +12,9 @@
 # fails the release instead of every user's update.
 #
 # The key may also come in UPDATE_SIGNING_KEY (PEM text) with "-" as the path.
+set +x
 set -euo pipefail
+umask 077
 
 SUMS="${1:?usage: sign_sums.sh SHA256SUMS key.pem|-}"
 KEY="${2:?usage: sign_sums.sh SHA256SUMS key.pem|-}"
@@ -26,12 +28,13 @@ if [ "$KEY" = "-" ]; then
   KEY="$WORK/key.pem"
 fi
 
+rm -f "$SUMS.sig"
 openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$SUMS" -out "$WORK/sig.bin"
 [ "$(wc -c < "$WORK/sig.bin")" -eq 64 ] || { echo "not an Ed25519 signature"; exit 1; }
-base64 -w0 "$WORK/sig.bin" > "$SUMS.sig"
-printf '\n' >> "$SUMS.sig"
+base64 < "$WORK/sig.bin" | tr -d '\r\n' > "$WORK/signature"
+printf '\n' >> "$WORK/signature"
 
-PUB="$(openssl pkey -in "$KEY" -pubout -outform DER | tail -c 32 | base64 -w0)"
+PUB="$(openssl pkey -in "$KEY" -pubout -outform DER | tail -c 32 | base64 | tr -d '\r\n')"
 if ! grep -qF "'$PUB'" "$REPO_DIR/lib/services/release_signature.dart"; then
   echo "the key is not one of the public keys in lib/services/release_signature.dart"
   rm -f "$SUMS.sig"
@@ -39,4 +42,5 @@ if ! grep -qF "'$PUB'" "$REPO_DIR/lib/services/release_signature.dart"; then
 fi
 openssl pkey -in "$KEY" -pubout -out "$WORK/pub.pem"
 openssl pkeyutl -verify -pubin -inkey "$WORK/pub.pem" -rawin -in "$SUMS" -sigfile "$WORK/sig.bin" >/dev/null
+cp "$WORK/signature" "$SUMS.sig"
 echo "signed $(basename "$SUMS") with key $PUB"

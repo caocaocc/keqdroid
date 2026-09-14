@@ -1,365 +1,56 @@
-# Builds every release file on GitHub runners, signs SHA256SUMS and leaves a
-# draft release for a human to publish. Started by hand: Actions -> release ->
-# Run workflow. The version comes from pubspec.yaml of the chosen branch.
-#
-# Secrets (Settings -> Secrets and variables -> Actions):
-#   ANDROID_KEYSTORE_BASE64  the APK signing keystore, base64
-#   ANDROID_KEY_PROPERTIES   android/key.properties as is (storeFile is replaced)
-#   GOOGLE_SERVICES_JSON     android/app/google-services.json
-#   UPDATE_SIGNING_KEY       Ed25519 PEM for tool/sign_sums.sh; the app checks
-#                            its public half (lib/services/release_signature.dart)
-# Optional Windows code signing through SignPath Foundation, off until these
-# variables exist: SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
-# SIGNPATH_SIGNING_POLICY_SLUG, and the secret SIGNPATH_API_TOKEN. The project
-# there needs the artifact configurations win-files and win-setup
-# (docs/BUILD.md, Windows code signing).
-name: release
+name: Publish verified release
 
 on:
-  workflow_dispatch:
-    inputs:
-      draft:
-        description: Create a draft release (off = only build, files stay in this run)
-        type: boolean
-        default: true
+  push:
+    tags: ['v*']
 
-permissions:
-  contents: read
-
+# Serialize publication of the same tag without interrupting a valid upload.
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # the same as ci.yml and the local SDK
-  FLUTTER_VERSION: '3.44.4'
+# Only this workflow can write release metadata or assets. It never compiles.
+# UPDATE_SIGNING_KEY is the fork Ed25519 PEM; its public key is compiled into
+# the app. The reserve private key stays outside GitHub.
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  windows-android:
-    runs-on: windows-2025
-    timeout-minutes: 150
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      files-artifact-id: ${{ steps.files.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - id: version
-        shell: pwsh
-        run: |
-          $m = [regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^\s*version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)')
-          if (-not $m.Success) { throw 'no version in pubspec.yaml' }
-          "version=$($m.Groups[1].Value)" >> $env:GITHUB_OUTPUT
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: APK signing key and Firebase config
-        shell: pwsh
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          foreach ($n in 'ANDROID_KEYSTORE_BASE64', 'ANDROID_KEY_PROPERTIES', 'GOOGLE_SERVICES_JSON') {
-            if (-not [Environment]::GetEnvironmentVariable($n)) { throw "secret $n is not set" }
-          }
-          [IO.File]::WriteAllBytes("$PWD/android/app/upload-keystore.jks",
-            [Convert]::FromBase64String(($env:ANDROID_KEYSTORE_BASE64 -replace '\s', '')))
-          $props = @($env:ANDROID_KEY_PROPERTIES -split "`r?`n" |
-            Where-Object { $_ -and $_ -notmatch '^\s*storeFile\s*=' }) + 'storeFile=upload-keystore.jks'
-          [IO.File]::WriteAllText("$PWD/android/key.properties", ($props -join "`n") + "`n")
-          [IO.File]::WriteAllText("$PWD/android/app/google-services.json", $env:GOOGLE_SERVICES_JSON)
-
-      - id: inno
-        uses: ./.github/actions/inno-setup
-
-      # the installer waits for signed files, see the installer job
-      - name: Build Android and Windows
-        shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -SkipLinux -SkipInstaller
-
-      - name: Drop the partial SHA256SUMS
-        shell: pwsh
-        run: Remove-Item "release/${{ steps.version.outputs.version }}/SHA256SUMS*" -ErrorAction SilentlyContinue
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-android
-          path: release/${{ steps.version.outputs.version }}/
-          if-no-files-found: error
-
-      # the first SignPath request: keqdroid.exe inside the zip and the uninstaller that setup.exe will carry
-      - name: Files to sign
-        shell: powershell
-        env:
-          VER: ${{ steps.version.outputs.version }}
-        run: |
-          New-Item -ItemType Directory -Force windows-files | Out-Null
-          Copy-Item "release\$env:VER\keqdroid-windows-x64-$env:VER.zip" windows-files\keqdroid-windows-x64.zip
-          .\tool\build_windows_installer.ps1 -Version $env:VER -BuildDir build\windows\x64\runner\Release `
-            -ExportUninstaller windows-files\keqdroid-uninstaller.exe -Iscc '${{ steps.inno.outputs.iscc }}'
-
-      - id: files
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-files
-          path: windows-files/
-          if-no-files-found: error
-
-  linux:
-    # the oldest supported GLib: a build made on a newer one does not start on
-    # Ubuntu 22.04 or Debian 12 (tool/package_linux.sh refuses to package it)
+  publish:
+    if: github.repository == 'caocaocc/keqdroid'
     runs-on: ubuntu-24.04
-    container: ubuntu:22.04
-    timeout-minutes: 90
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Build tools
-        run: |
-          apt-get update -y
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            git curl ca-certificates unzip xz-utils zip file \
-            build-essential clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev \
-            patchelf rpm squashfs-tools
-
-      - uses: actions/checkout@v7
-
-      - name: Flutter
-        run: git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git /opt/flutter
-
-      - name: Build and package
-        env:
-          FLUTTER_HOME: /opt/flutter
-        run: |
-          bash tool/build_linux_wsl.sh
-          bash tool/package_linux.sh
-
-      - name: Collect
-        run: |
-          VER="$(grep -E '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')"
-          mkdir -p dist-linux
-          cp "release/$VER/keqdroid-$VER-x86_64.AppImage" \
-             "release/$VER/keqdroid_${VER}_amd64.deb" \
-             "release/$VER/keqdroid-$VER-1.x86_64.rpm" \
-             "release/$VER/keqdroid-$VER-linux-x64.tar.gz" \
-             "release/$VER/PKGBUILD" dist-linux/
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux
-          path: dist-linux/
-          if-no-files-found: error
-
-  sign-windows:
-    needs: windows-android
-    if: vars.SIGNPATH_ORGANIZATION_ID != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      # SignPath Foundation wants every signing approved by hand on signpath.io
-      - uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: win-files
-          github-artifact-id: ${{ needs.windows-android.outputs.files-artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 13800
-          output-artifact-directory: signed
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-signed
-          path: signed/
-          if-no-files-found: error
-
-  # SignPath cannot sign inside an Inno Setup installer, so it is built from the signed files and signed whole
-  installer:
-    needs: [windows-android, sign-windows]
-    if: >-
-      always() &&
-      needs.windows-android.result == 'success' &&
-      (needs.sign-windows.result == 'success' || needs.sign-windows.result == 'skipped')
-    runs-on: windows-2025
-    timeout-minutes: 30
-    outputs:
-      setup-artifact-id: ${{ steps.setup.outputs.artifact-id }}
+    timeout-minutes: 45
     env:
-      VER: ${{ needs.windows-android.outputs.version }}
-      SIGNED: ${{ needs.sign-windows.result == 'success' }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v7
-
-      - id: inno
-        uses: ./.github/actions/inno-setup
-
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@v4
         with:
-          name: ${{ needs.sign-windows.result == 'success' && 'windows-signed' || 'windows-files' }}
-          path: files
-
-      - name: Build the installer
-        shell: powershell
-        run: |
-          Expand-Archive -LiteralPath files\keqdroid-windows-x64.zip -DestinationPath bundle
-          $signedUninstaller = if ($env:SIGNED -eq 'true') { 'files\keqdroid-uninstaller.exe' } else { '' }
-          .\tool\build_windows_installer.ps1 -Version $env:VER -BuildDir bundle -OutputDir setup `
-            -Iscc '${{ steps.inno.outputs.iscc }}' -SignedUninstaller $signedUninstaller
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer
-          path: setup/
-          if-no-files-found: error
-
-      # a single file artifact, the form SignPath takes for a lone exe
-      - id: setup
-        uses: actions/upload-artifact@v7
-        with:
-          path: setup/keqdroid-windows-x64-${{ env.VER }}-setup.exe
-          archive: false
-          if-no-files-found: error
-
-  sign-installer:
-    needs: installer
-    if: vars.SIGNPATH_ORGANIZATION_ID != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: win-setup
-          github-artifact-id: ${{ needs.installer.outputs.setup-artifact-id }}
-          skip-decompress: true
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 13800
-          output-artifact-directory: signed
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer-signed
-          path: signed/
-          if-no-files-found: error
-
-  release:
-    needs: [windows-android, linux, sign-windows, installer, sign-installer]
-    # both Windows files signed or neither
-    if: >-
-      always() &&
-      needs.windows-android.result == 'success' &&
-      needs.linux.result == 'success' &&
-      needs.installer.result == 'success' &&
-      (needs.sign-installer.result == 'success' || needs.sign-installer.result == 'skipped') &&
-      needs.sign-windows.result == needs.sign-installer.result
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-    env:
-      VER: ${{ needs.windows-android.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: windows-android
-          path: dist
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: linux
-          path: dist
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.sign-installer.result == 'success' && 'windows-installer-signed' || 'windows-installer' }}
-          path: dist
-
-      - if: needs.sign-windows.result == 'success'
-        uses: actions/download-artifact@v8
-        with:
-          name: windows-signed
-          path: signed
-
-      - name: Take the signed Windows zip
-        if: needs.sign-windows.result == 'success'
-        run: |
-          [ -f signed/keqdroid-windows-x64.zip ] || { echo "SignPath returned no zip"; ls -la signed; exit 1; }
-          cp -f signed/keqdroid-windows-x64.zip "dist/keqdroid-windows-x64-$VER.zip"
-
-      - name: Both Windows files are here
-        run: |
-          for f in "keqdroid-windows-x64-$VER.zip" "keqdroid-windows-x64-$VER-setup.exe"; do
-            [ -f "dist/$f" ] || { echo "no $f"; ls -la dist; exit 1; }
-          done
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      # SignPath packs the zip anew after signing, so make_release's repack is redone here
-      - name: Repack the Windows zip
-        run: |
-          command -v 7z >/dev/null || command -v 7zz >/dev/null || { sudo apt-get update -y && sudo apt-get install -y 7zip; }
-          flutter pub get
-          dart run tool/repack_zip.dart --in "dist/keqdroid-windows-x64-$VER.zip" --out repacked.zip
-          mv -f repacked.zip "dist/keqdroid-windows-x64-$VER.zip"
-
-      - name: SHA256SUMS
-        shell: pwsh
-        run: ./tool/write_sha256sums.ps1 -Dir dist
-
-      - name: Sign SHA256SUMS
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Validate release assembly and immutable-publication rules
+        run: python3 -m unittest discover -s tool/tests -p 'test_release_ci.py' -v
+      - name: Collect, sign and publish verified exact-commit development artifacts
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
-        run: bash tool/sign_sums.sh dist/SHA256SUMS -
-
-      - uses: actions/attest@v4
-        with:
-          subject-checksums: dist/SHA256SUMS
-
-      - name: Draft release
-        if: inputs.draft
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          ls -la dist
-          gh release create "v$VER" dist/* \
-            --draft --target "$GITHUB_SHA" --title "v$VER" \
-            --notes "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from ${GITHUB_SHA}."
-
-      - name: Files of this run, without a release
-        if: ${{ !inputs.draft }}
-        uses: actions/upload-artifact@v7
+          mkdir -p build/release-logs
+          set -o pipefail
+          python3 tool/ci/publish_release.py --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --output build/verified-release --notes docs/RELEASE_NOTES.md --publish \
+            2>&1 | tee build/release-logs/publish.log
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: release-files
-          path: dist/
+          name: release-report-${{ github.sha }}-attempt${{ github.run_attempt }}
+          path: |
+            build/release-logs/
+            build/verified-release/*-build-report.json
+            build/verified-release/SHA256SUMS
+            build/verified-release/SHA256SUMS.sig
+          retention-days: 30
