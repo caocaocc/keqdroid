@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'linux_appimage_updater.dart';
 import 'linux_install.dart';
+import 'macos_desktop_service.dart';
 import 'windows_zip_updater.dart';
 import '../core/app_logger.dart';
 import '../utils/local_vpn_proxy.dart';
@@ -59,8 +60,18 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const _owner = 'Lemonochka';
-  static const _repo = 'keqdroid';
+  static const releaseOwner = 'caocaocc';
+  static const releaseRepository = 'keqdroid';
+  static const _owner = releaseOwner;
+  static const _repo = releaseRepository;
+
+  static String releaseOwnerForPlatform(String platform) => releaseOwner;
+
+  static String? get _macOSArchitecture => switch (Abi.current()) {
+    Abi.macosArm64 => 'arm64',
+    Abi.macosX64 => 'x64',
+    _ => null,
+  };
 
   // ведущая v необязательна: в репозитории есть теги обоих видов
   static final _releaseTagPattern = RegExp(
@@ -103,8 +114,7 @@ class UpdateService {
   }) async {
     if (!force) {
       final last = _lastAutoCheckAt;
-      if (last != null &&
-          DateTime.now().difference(last) < _minAutoCheckGap) {
+      if (last != null && DateTime.now().difference(last) < _minAutoCheckGap) {
         return _cachedResultRespectingSkip();
       }
       // отмечаем до сети, чтобы параллельные ре-раны не прошли гейт вдвоём
@@ -184,7 +194,7 @@ class UpdateService {
     final assets = latestRelease['assets'] as List?;
     final asset = linuxKind != null
         ? _findLinuxAsset(assets, linuxKind)
-        : _findAssetForCurrentPlatform(assets);
+        : _findAssetForCurrentPlatform(assets, latestTag);
     if (asset == null) return null;
 
     final assetName = (asset['name'] ?? '').toString();
@@ -322,14 +332,25 @@ class UpdateService {
     return null;
   }
 
-  static Map<String, dynamic>? _findAssetForCurrentPlatform(List? assets) {
+  static Map<String, dynamic>? _findAssetForCurrentPlatform(
+    List? assets,
+    String releaseVersion,
+  ) {
     if (Platform.isWindows) return _findWindowsAsset(assets);
-    return _findApkAsset(assets, arm32: Abi.current() == Abi.androidArm);
+    if (Platform.isMacOS) {
+      return _findMacOSAsset(assets, _macOSArchitecture, releaseVersion);
+    }
+    if (Platform.isAndroid) {
+      return _findApkAsset(assets, arm32: Abi.current() == Abi.androidArm);
+    }
+    return null;
   }
 
   static String? findAssetNameForPlatform(
     List? assets,
     String platform, {
+    String? architecture,
+    String? releaseVersion,
     LinuxInstallKind linuxKind = LinuxInstallKind.appImage,
   }) {
     final asset = switch (platform) {
@@ -337,9 +358,31 @@ class UpdateService {
       'linux' => _findLinuxAsset(assets, linuxKind),
       'android' => _findApkAsset(assets, arm32: false),
       'android-arm' => _findApkAsset(assets, arm32: true),
+      'macos' => _findMacOSAsset(assets, architecture, releaseVersion),
       _ => null,
     };
     return asset?['name']?.toString();
+  }
+
+  static Map<String, dynamic>? _findMacOSAsset(
+    List? assets,
+    String? architecture,
+    String? releaseVersion,
+  ) {
+    if (assets == null || !const {'arm64', 'x64'}.contains(architecture)) {
+      return null;
+    }
+    final version = releaseVersion?.replaceFirst(RegExp(r'^[vV]'), '');
+    if (version == null ||
+        !RegExp(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$').hasMatch(version)) {
+      return null;
+    }
+    final expected = 'keqdroid-$version-macos-$architecture.pkg';
+    for (final asset in assets) {
+      if (asset is! Map<String, dynamic>) continue;
+      if (asset['name'] == expected) return asset;
+    }
+    return null;
   }
 
   static Map<String, dynamic>? _findWindowsAsset(List? assets) {
@@ -381,8 +424,7 @@ class UpdateService {
   static Map<String, dynamic>? checksumAssetFor(
     List? assets,
     String assetName,
-  ) =>
-      _findChecksumAsset(assets, assetName);
+  ) => _findChecksumAsset(assets, assetName);
 
   // хеш либо в <имя>.sha256 рядом, либо в общем SHA256SUMS/checksums.txt, с 0.19.0 только общий
   static Map<String, dynamic>? _findChecksumAsset(
@@ -491,6 +533,7 @@ class UpdateService {
     await prefs.setString(_prefSkipVersion, version);
   }
 
+  /// Returns `true` when the app is exiting to apply a desktop update.
   static Future<bool> downloadAndInstall(
     UpdateInfo info, {
     bool viaLocalProxy = false,
@@ -498,6 +541,19 @@ class UpdateService {
     void Function(int received, int total)? onProgress,
     Future<void> Function()? beforeRestart,
   }) async {
+    if (Platform.isMacOS &&
+        (_findMacOSAsset(
+                  [
+                    {'name': info.assetName},
+                  ],
+                  _macOSArchitecture,
+                  info.latestVersion,
+                ) ==
+                null ||
+            Uri.parse(info.downloadUrl).pathSegments.lastOrNull !=
+                info.assetName)) {
+      throw StateError('macOS updates require the matching PKG installer.');
+    }
     final dio = _buildDio(viaLocalProxy: viaLocalProxy, httpPort: httpPort);
     if (info.openInBrowser) {
       await _openUrlInBrowser(info.downloadUrl);
@@ -579,8 +635,39 @@ class UpdateService {
       );
     }
 
+    if (Platform.isMacOS) {
+      return handOffMacOSInstaller(
+        restoreNetwork:
+            beforeRestart ??
+            () async => throw StateError(
+              'Network cleanup is required before updating macOS.',
+            ),
+        openInstaller: () async {
+          final opened = await Process.run('/usr/bin/open', [file.path]);
+          if (opened.exitCode != 0) {
+            throw StateError(
+              'Could not open the macOS installer: ${opened.stderr}',
+            );
+          }
+        },
+        quit: MacOSDesktopService.completeQuit,
+      );
+    }
     await OpenFilex.open(file.path);
     return false;
+  }
+
+  /// Run only after validating the downloaded package. A failed cleanup or
+  /// Installer launch leaves the GUI available to report the error.
+  static Future<bool> handOffMacOSInstaller({
+    required Future<void> Function() restoreNetwork,
+    required Future<void> Function() openInstaller,
+    required Future<void> Function() quit,
+  }) async {
+    await restoreNetwork();
+    await openInstaller();
+    await quit();
+    return true;
   }
 
   @visibleForTesting
@@ -596,6 +683,8 @@ class UpdateService {
       '.msi',
       '.exe',
       '.apk',
+      '.pkg',
+      '.dmg',
     ]) {
       if (path.endsWith(ext)) return ext;
     }
@@ -658,30 +747,54 @@ class UpdateService {
     try {
       final response = await dio.get<String>(url);
       if (response.statusCode != 200) return null;
-      return _parseSha256(response.data ?? '', assetName);
+      return _parseSha256(
+        response.data ?? '',
+        assetName,
+        allowBareHash:
+            Uri.tryParse(url)?.pathSegments.lastOrNull == '$assetName.sha256',
+      );
     } catch (_) {
       return null;
     }
   }
 
-  static String? extractSha256(String manifest, String assetName) =>
-      _parseSha256(manifest, assetName);
+  /// Test hook for [_parseSha256] (kept public like the other version helpers).
+  static String? extractSha256(
+    String manifest,
+    String assetName, {
+    bool allowBareHash = true,
+  }) => _parseSha256(manifest, assetName, allowBareHash: allowBareHash);
 
-  static String? _parseSha256(String text, String assetName) {
-    final hexPattern = RegExp(r'\b[a-fA-F0-9]{64}\b');
-    final lowerAsset = assetName.toLowerCase();
-
-    if (lowerAsset.isNotEmpty) {
-      for (final line in const LineSplitter().convert(text)) {
-        if (line.toLowerCase().contains(lowerAsset)) {
-          final m = hexPattern.firstMatch(line);
-          if (m != null) return m.group(0)!.toLowerCase();
-        }
-      }
+  /// Extracts the 64-hex-char SHA-256 for [assetName]. Handles a bare hash, a
+  /// `sha256sum`-style `<hash>  <file>` line, and multi-asset manifests.
+  static String? _parseSha256(
+    String text,
+    String assetName, {
+    bool allowBareHash = true,
+  }) {
+    final lines = const LineSplitter()
+        .convert(text)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    if (allowBareHash &&
+        lines.length == 1 &&
+        RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(lines.single)) {
+      return lines.single.toLowerCase();
     }
-
-    final m = hexPattern.firstMatch(text);
-    return m?.group(0)?.toLowerCase();
+    if (assetName.isEmpty) return null;
+    final entry = RegExp(r'^([a-fA-F0-9]{64})[ \t]+\*?(.+)$');
+    String? selected;
+    for (final line in lines) {
+      final match = entry.firstMatch(line);
+      if (match == null) return null;
+      // A release-wide manifest must identify this exact asset once. A hash
+      // for another architecture or a similarly named sidecar is not a fallback.
+      if (match.group(2) != assetName) continue;
+      if (selected != null) return null;
+      selected = match.group(1)!.toLowerCase();
+    }
+    return selected;
   }
 
   // только https и без метасимволов cmd: ссылка идёт в cmd /c start

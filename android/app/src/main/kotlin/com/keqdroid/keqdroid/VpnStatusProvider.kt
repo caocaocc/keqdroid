@@ -1,5 +1,6 @@
 ﻿package com.keqdroid.keqdroid
 
+import android.content.Context
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
@@ -9,8 +10,8 @@ import android.net.Uri
 class VpnStatusProvider : ContentProvider() {
 
     companion object {
-        const val AUTHORITY = "com.keqdroid.keqdroid.vpnstatus"
-        val STATUS_URI: Uri = Uri.parse("content://$AUTHORITY/status")
+        fun statusUri(context: Context): Uri =
+            Uri.parse("content://${context.packageName}.vpnstatus/status")
     }
 
     // журнал заводим тут: провайдер создаётся раньше службы и плитки

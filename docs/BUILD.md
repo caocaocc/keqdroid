@@ -2,13 +2,13 @@
 
 <strong>English</strong> · <a href="#русский">Русский</a>
 
-How to set up the project, build it for every platform, run the tests and make a release.
+How to set up the project, build it for every platform, run the tests and make a release. This fork uses component CI on `dev`; see [macOS and release checks](MACOS.md). It does not publish to AUR.
 
 ## 1. Prerequisites
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| **Flutter SDK** | stable, 3.44+ (Dart `^3.11.3`, see `pubspec.yaml`) | the main toolchain |
+| **Flutter SDK** | 3.44.4 (Dart `^3.11.3`, see `pubspec.yaml`) | the main toolchain |
 | **Android Studio** + Android SDK | compileSdk 36 | minSdk = 24 (the Flutter default; `android/app/build.gradle.kts` does not override it) |
 | **JDK** | 17+ | Gradle's jvmTarget is 17; the JDK shipped with Android Studio (21) works too |
 | **Visual Studio** + "Desktop development with C++" | 2022 or newer | VS 2026 (18.x) builds fine: `windows/CMakeLists.txt` already sets `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS` for the newer STL |
@@ -35,6 +35,8 @@ flutter run                       # debug on a device/emulator
 flutter build apk --release
 ```
 
+- The fork uses application ID `io.github.caocaocc.keqdroid`; the Kotlin/JNI namespace stays `com.keqdroid.keqdroid`. It installs alongside upstream. Migrate data using backup and restore.
+- Release and profile builds require the same persistent signing key. Keep local signing values in gitignored `android/key.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Alternatively set `ANDROID_KEYSTORE_FILE`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; CI decodes the `ANDROID_KEYSTORE_BASE64` secret to that temporary file. Missing signing values fail the build, never fall back to a debug key. Keep a protected backup of the key: future APK updates require it.
 - On the first connection the system asks for VPN permission.
 - Without a flag the APK is arm64-v8a; `--target-platform android-arm` builds the 32-bit
   one (armeabi-v7a).
@@ -174,16 +176,7 @@ Generation runs during `flutter pub get` / `flutter run` (or `flutter gen-l10n`)
 
 ## 7. Release
 
-```powershell
-# Android + Windows + Linux (that part in WSL) + SHA256SUMS → release\<version>\
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1
-
-# the same plus publishing a GitHub release (needs the gh CLI)
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -Publish -NotesFile notes.md
-
-# after the release is up: push PKGBUILD + .SRCINFO to the AUR
-wsl -e bash /mnt/c/Users/<you>/StudioProjects/keqdroid/tool/publish_aur.sh
-```
+Build and validate the exact `dev` commit with the component workflows, complete local acceptance, then publish the collected artifacts with the release workflow. Publishing retries reuse successful builds. Do not use the upstream AUR publication script for this fork.
 
 Rules:
 
@@ -243,6 +236,8 @@ flutter run                       # debug на устройстве/эмулят
 flutter build apk --release
 ```
 
+- У форка ID приложения `io.github.caocaocc.keqdroid`; пространство имён Kotlin/JNI остаётся `com.keqdroid.keqdroid`. Он устанавливается рядом с апстримом; данные переносятся через резервную копию.
+- Release и profile требуют одного постоянного ключа подписи. Локально значения хранятся в игнорируемом Git файле `android/key.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Можно вместо него задать `ANDROID_KEYSTORE_FILE`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` и `ANDROID_KEY_PASSWORD`; CI декодирует секрет `ANDROID_KEYSTORE_BASE64` во временный файл. Без ключа сборка завершается ошибкой, а не подставляет debug-подпись. Сохраните защищённую резервную копию ключа: без него дальнейшие обновления APK невозможны.
 - При первом подключении система спросит разрешение VPN.
 - Без флага APK собирается под arm64-v8a; `--target-platform android-arm` собирает
   32-битный (armeabi-v7a).
@@ -383,16 +378,7 @@ AmneziaWG работает на mihomo: amneziawg-go встроен, профи�
 
 ## 7. Релиз
 
-```powershell
-# Android + Windows + Linux (эта часть — в WSL) + SHA256SUMS → release\<версия>\
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1
-
-# то же + публикация GitHub-релиза (нужен gh CLI)
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -Publish -NotesFile notes.md
-
-# когда релиз уже опубликован: PKGBUILD + .SRCINFO уезжают на AUR
-wsl -e bash /mnt/c/Users/<ты>/StudioProjects/keqdroid/tool/publish_aur.sh
-```
+Соберите и проверьте точный коммит `dev` через workflow компонентов, завершите приёмку и опубликуйте готовые артефакты через workflow релиза. Повтор публикации не запускает сборку заново. Этот форк не публикуется в AUR.
 
 Правила:
 
