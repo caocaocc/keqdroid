@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keqdroid/l10n/app_localizations.dart';
 import 'package:keqdroid/shared/extensions/build_context_l10n.dart';
 import 'package:keqdroid/shared/ui/app_theme.dart';
+import 'package:keqdroid/shared/ui/desktop_connection_notice.dart';
 import 'package:keqdroid/shared/ui/expressive.dart';
 import 'package:keqdroid/shared/ui/expressive_group.dart';
 import 'package:keqdroid/shared/ui/haptics.dart';
@@ -20,6 +21,7 @@ import 'package:keqdroid/shared/ui/shape_morph.dart';
 import 'package:keqdroid/shared/ui/shape_loading_indicator.dart';
 import 'package:keqdroid/shared/ui/smooth_scroll.dart';
 import 'package:keqdroid/shared/ui/stat_strip.dart';
+import 'package:keqdroid/shared/ui/subscription_deep_link_confirmation.dart';
 import 'package:keqdroid/shared/ui/update_interval_sheet.dart';
 
 import '../core/app_logger.dart';
@@ -37,6 +39,8 @@ import '../services/file_dialog_service.dart';
 import '../services/ping_service.dart';
 import '../services/subscription_accent_service.dart';
 import '../services/vpn_engine.dart';
+import '../tunnel/desktop_recovery_status.dart';
+import '../tunnel/macos_recovery_controller.dart';
 import '../platform/platform_bootstrap.dart';
 import '../platform/vpn_native_bridge.dart';
 import '../ui/responsive/desktop_page_layout.dart';
@@ -243,7 +247,8 @@ class _ConnectHeader extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: AnimatedSwitcher(
                     duration: ExpressiveMotion.durationFast,
-                    child: _serversStatusText(context, onJumpToActive, 
+                    child: _statusText(
+                      context,
                       serverSwitchInProgress && vpnStatus == VpnStatus.error
                           ? VpnStatus.connecting
                           : vpnStatus,
@@ -256,16 +261,7 @@ class _ConnectHeader extends ConsumerWidget {
               if (vpnStatus == VpnStatus.error &&
                   vpnErrorMessage != null &&
                   !serverSwitchInProgress)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    friendlyError(vpnErrorMessage, context),
-                    textAlign: TextAlign.center,
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.red(context)),
-                  ),
-                ),
+                _errorText(context, vpnErrorMessage),
               // Скорость/трафик/время. Появление плавное: AnimatedSize
               // раздвигает место (контент ниже не прыгает), а чипы всплывают
               // снизу с фейдом; дефолтный клип AnimatedSize обрезает их на
@@ -307,6 +303,48 @@ class _ConnectHeader extends ConsumerWidget {
       ),
     );
   }
+
+  Widget _statusText(
+    BuildContext context,
+    VpnStatus status,
+    String? errorMessage,
+    ServerItem? activeServer,
+  ) {
+    final child = _serversStatusText(
+      context,
+      onJumpToActive,
+      status,
+      errorMessage,
+      activeServer,
+    );
+    return Platform.isMacOS
+        ? DesktopConnectionNotice(key: child.key, status: status, child: child)
+        : child;
+  }
+
+  Widget _errorText(BuildContext context, String errorMessage) {
+    final child = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Text(
+        friendlyError(errorMessage, context),
+        textAlign: TextAlign.center,
+        maxLines: 5,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppTheme.red(context),
+        ),
+      ),
+    );
+    if (!Platform.isMacOS) return child;
+    return ValueListenableBuilder<DesktopRecoveryStatus?>(
+      valueListenable: desktopRecoveryStatus,
+      child: child,
+      builder: (context, recovery, child) =>
+          recovery == null || recovery.phase == MacOSRecoveryPhase.idle
+              ? child!
+              : const SizedBox.shrink(),
+    );
+  }
 }
 
 class ServersTab extends ConsumerStatefulWidget {
@@ -323,6 +361,13 @@ class _ServersTabState extends ConsumerState<ServersTab>
 
   bool _handlingLaunchAction = false;
   bool _appInForeground = true;
+  late final _macOSDeepLinks = SubscriptionDeepLinkImportQueue(
+    isActive: () => mounted,
+    readPending: VpnNativeBridge.getPendingDeepLink,
+    confirmSubscription: (url) =>
+        showSubscriptionDeepLinkConfirmation(context, url),
+    importLink: _importDeepLink,
+  );
 
   @override
   void initState() {
@@ -461,7 +506,9 @@ class _ServersTabState extends ConsumerState<ServersTab>
     }
     if (call.method == 'onDeepLink') {
       final url = ((call.arguments as Map?)?['url'] as String?)?.trim();
-      if (url != null && url.isNotEmpty) {
+      if (Platform.isMacOS) {
+        await _checkPendingDeepLink(macOSRaw: url);
+      } else if (url != null && url.isNotEmpty) {
         await _importDeepLink(url);
       } else {
         // Windows шлёт пуш без ссылки: она лежит у натива и ждёт, пока её
@@ -492,9 +539,13 @@ class _ServersTabState extends ConsumerState<ServersTab>
   ///
   /// Зовётся и при (пере)монтировании вкладки: на Windows ссылка могла прийти,
   /// пока было открыто меню трея и вкладки не было в дереве.
-  Future<void> _checkPendingDeepLink() async {
+  Future<void> _checkPendingDeepLink({String? macOSRaw}) async {
     if (!VpnNativeBridge.supportsDeepLinks) return;
     try {
+      if (Platform.isMacOS) {
+        await _macOSDeepLinks.drain(raw: macOSRaw);
+        return;
+      }
       final url = (await VpnNativeBridge.getPendingDeepLink())?.trim();
       if (url == null || url.isEmpty || !mounted) return;
       await _importDeepLink(url);

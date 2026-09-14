@@ -14,6 +14,7 @@ import 'package:keqdroid/services/background_service.dart';
 import 'package:keqdroid/services/card_image_service.dart';
 import 'package:keqdroid/services/desktop_background_service.dart';
 import 'package:keqdroid/services/notification_service.dart';
+import 'package:keqdroid/services/macos_desktop_service.dart';
 import 'package:keqdroid/services/prefs_recovery.dart';
 import 'package:keqdroid/providers/providers.dart';
 import 'package:keqdroid/screens/servers_tab.dart';
@@ -57,6 +58,7 @@ Future<void> main() async {
       await PlatformBootstrap.initialize();
     } else if (Platform.isLinux || Platform.isMacOS) {
       await DesktopBackgroundService.init();
+      if (Platform.isMacOS) await MacOSDesktopService.initialize();
       if (Platform.isLinux) {
         // Single instance: a second launch just restores the running window.
         final primary =
@@ -98,7 +100,7 @@ Future<void> main() async {
     // известного каталога выбранная картинка не показалась бы вовсе.
     await CardImageService.warmUp();
 
-    final home = Platform.isWindows || Platform.isLinux
+    final home = PlatformBootstrap.isDesktop
         ? const DesktopHomeScreen()
         : const VpnHomeScreen();
 

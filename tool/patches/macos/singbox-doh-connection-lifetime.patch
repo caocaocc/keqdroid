@@ -1,0 +1,326 @@
+diff --git a/dns/transport/https.go b/dns/transport/https.go
+--- a/dns/transport/https.go
++++ b/dns/transport/https.go
+@@ -143,7 +143,7 @@
+ func (t *HTTPSTransport) Close() error {
+ 	t.transportAccess.Lock()
+ 	defer t.transportAccess.Unlock()
+-	t.transport.CloseIdleConnections()
++	t.transport.Close()
+ 	t.transport = t.transport.Clone()
+ 	return nil
+ }
+diff --git a/dns/transport/https_transport.go b/dns/transport/https_transport.go
+--- a/dns/transport/https_transport.go
++++ b/dns/transport/https_transport.go
+@@ -22,10 +22,20 @@
+ 	http2Transport *http2.Transport
+ 	httpTransport  *http.Transport
+ 	fallback       *atomic.Bool
++	lifetime       *httpsConnectionLifetime
+ }
+ 
+ func NewHTTPSTransportWrapper(dialer N.Dialer, serverAddr M.Socksaddr, destination *url.URL) *HTTPSTransportWrapper {
+ 	var fallback atomic.Bool
++	lifetime := newHTTPSConnectionLifetime()
++	dialConnection := func(ctx context.Context) (net.Conn, error) {
++		if destination.Scheme != "https" {
++			return dialer.DialContext(ctx, N.NetworkTCP, serverAddr)
++		}
++		return lifetime.dial(ctx, func(ctx context.Context) (net.Conn, error) {
++			return dialer.DialContext(ctx, N.NetworkTCP, serverAddr)
++		})
++	}
+ 	if destination.Scheme == "http" {
+ 		// plain HTTP DoH used by Tailscale
+ 		fallback.Store(true)
+@@ -33,7 +43,7 @@
+ 	return &HTTPSTransportWrapper{
+ 		http2Transport: &http2.Transport{
+ 			DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.STDConfig) (net.Conn, error) {
+-				resultConn, err := dialer.DialContext(ctx, N.NetworkTCP, serverAddr)
++				resultConn, err := dialConnection(ctx)
+ 				if err != nil {
+ 					return nil, err
+ 				}
+@@ -57,6 +67,7 @@
+ 			},
+ 		},
+ 		fallback: &fallback,
++		lifetime: lifetime,
+ 	}
+ }
+ 
+@@ -79,6 +90,11 @@
+ 	h.httpTransport.CloseIdleConnections()
+ }
+ 
++func (h *HTTPSTransportWrapper) Close() {
++	h.lifetime.close()
++	h.CloseIdleConnections()
++}
++
+ func (h *HTTPSTransportWrapper) Clone() *HTTPSTransportWrapper {
+ 	return &HTTPSTransportWrapper{
+ 		httpTransport: h.httpTransport,
+@@ -86,5 +102,6 @@
+ 			DialTLSContext: h.http2Transport.DialTLSContext,
+ 		},
+ 		fallback: h.fallback,
++		lifetime: h.lifetime,
+ 	}
+ }
+diff --git a/dns/transport/https_lifetime_darwin.go b/dns/transport/https_lifetime_darwin.go
+new file mode 100644
+--- /dev/null
++++ b/dns/transport/https_lifetime_darwin.go
+@@ -0,0 +1,136 @@
++package transport
++
++import (
++	"context"
++	"net"
++	"sync"
++
++	"github.com/sagernet/sing-box/common/tls"
++)
++
++// The embedded Xray dispatcher keeps its dialing context for the whole stream.
++// A completed DNS request must not close other requests sharing its HTTP/2 conn.
++type httpsConnectionLifetime struct {
++	mu     sync.Mutex
++	closed bool
++	leases map[*httpsConnectionLease]struct{}
++}
++
++type httpsConnectionLease struct {
++	owner  *httpsConnectionLifetime
++	ctx    context.Context
++	cancel context.CancelCauseFunc
++	closed bool     // protected by owner.mu
++	conn   net.Conn // protected by owner.mu
++}
++
++func newHTTPSConnectionLifetime() *httpsConnectionLifetime {
++	return &httpsConnectionLifetime{leases: make(map[*httpsConnectionLease]struct{})}
++}
++
++func (o *httpsConnectionLifetime) dial(ctx context.Context, dial func(context.Context) (net.Conn, error)) (net.Conn, error) {
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	lifetime, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
++	lease := &httpsConnectionLease{owner: o, ctx: lifetime, cancel: cancel}
++	o.mu.Lock()
++	if o.closed {
++		o.mu.Unlock()
++		cancel(net.ErrClosed)
++		return nil, net.ErrClosed
++	}
++	o.leases[lease] = struct{}{}
++	o.mu.Unlock()
++	stopCaller := context.AfterFunc(ctx, func() { lease.close(context.Cause(ctx)) })
++	defer stopCaller()
++	// NewHTTPSRaw has already installed the TLS dialer. Its return is the
++	// actual TLS handshake boundary; core.Dial alone returns too early.
++	conn, err := dial(lifetime)
++	if err != nil {
++		lease.close(err)
++		if conn != nil {
++			conn.Close()
++		}
++		if ctx.Err() != nil {
++			return nil, ctx.Err()
++		}
++		return nil, err
++	}
++	if !stopCaller() || ctx.Err() != nil {
++		lease.close(context.Cause(ctx))
++		conn.Close()
++		return nil, ctx.Err()
++	}
++	// Shutdown may race the successful handshake, so attach and close share
++	// a lock. A late connection must be closed instead of escaping ownership.
++	o.mu.Lock()
++	attached := !o.closed && !lease.closed
++	if attached {
++		lease.conn = conn
++	}
++	o.mu.Unlock()
++	if !attached {
++		conn.Close()
++		lease.close(net.ErrClosed)
++		cause := context.Cause(lifetime)
++		if cause == nil {
++			cause = net.ErrClosed
++		}
++		return nil, cause
++	}
++	owned := &httpsOwnedConn{Conn: conn, lease: lease}
++	if secured, ok := conn.(tls.Conn); ok {
++		return &httpsOwnedTLSConn{httpsOwnedConn: owned, secured: secured}, nil
++	}
++	return owned, nil
++}
++
++func (o *httpsConnectionLifetime) close() {
++	o.mu.Lock()
++	o.closed = true
++	leases := make([]*httpsConnectionLease, 0, len(o.leases))
++	for lease := range o.leases {
++		leases = append(leases, lease)
++	}
++	o.mu.Unlock()
++	for _, lease := range leases {
++		lease.close(net.ErrClosed)
++	}
++}
++
++func (l *httpsConnectionLease) close(cause error) error {
++	l.owner.mu.Lock()
++	if l.closed {
++		l.owner.mu.Unlock()
++		return nil
++	}
++	l.closed = true
++	conn := l.conn
++	l.conn = nil
++	delete(l.owner.leases, l)
++	l.owner.mu.Unlock()
++	l.cancel(cause)
++	if conn != nil {
++		return conn.Close()
++	}
++	return nil
++}
++
++type httpsOwnedConn struct {
++	net.Conn
++	lease *httpsConnectionLease
++}
++
++func (c *httpsOwnedConn) Close() error { return c.lease.close(context.Canceled) }
++
++type httpsOwnedTLSConn struct {
++	*httpsOwnedConn
++	secured tls.Conn
++}
++
++func (c *httpsOwnedTLSConn) NetConn() net.Conn { return c.secured.NetConn() }
++func (c *httpsOwnedTLSConn) HandshakeContext(ctx context.Context) error {
++	return c.secured.HandshakeContext(ctx)
++}
++func (c *httpsOwnedTLSConn) ConnectionState() tls.ConnectionState { return c.secured.ConnectionState() }
+diff --git a/dns/transport/https_lifetime_other.go b/dns/transport/https_lifetime_other.go
+new file mode 100644
+--- /dev/null
++++ b/dns/transport/https_lifetime_other.go
+@@ -0,0 +1,16 @@
++//go:build !darwin
++
++package transport
++
++import (
++	"context"
++	"net"
++)
++
++type httpsConnectionLifetime struct{}
++
++func newHTTPSConnectionLifetime() *httpsConnectionLifetime { return &httpsConnectionLifetime{} }
++func (*httpsConnectionLifetime) dial(ctx context.Context, dial func(context.Context) (net.Conn, error)) (net.Conn, error) {
++	return dial(ctx)
++}
++func (*httpsConnectionLifetime) close() {}
+diff --git a/dns/transport/https_lifetime_darwin_test.go b/dns/transport/https_lifetime_darwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/dns/transport/https_lifetime_darwin_test.go
+@@ -0,0 +1,87 @@
++package transport
++
++import (
++	"context"
++	"errors"
++	"net"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++type lifetimeCloseRecorder struct {
++	net.Conn
++	closes atomic.Int32
++}
++
++func (c *lifetimeCloseRecorder) Close() error { c.closes.Add(1); return nil }
++
++type lifetimeDialResult struct {
++	conn net.Conn
++	err  error
++}
++
++func TestHTTPSLifetimeLateAttachAfterShutdown(t *testing.T) {
++	owner := newHTTPSConnectionLifetime()
++	entered, release := make(chan struct{}), make(chan struct{})
++	var once sync.Once
++	unblock := func() { once.Do(func() { close(release) }) }
++	defer unblock()
++	raw := &lifetimeCloseRecorder{}
++	result := make(chan lifetimeDialResult, 1)
++	go func() {
++		conn, err := owner.dial(t.Context(), func(context.Context) (net.Conn, error) { close(entered); <-release; return raw, nil })
++		result <- lifetimeDialResult{conn, err}
++	}()
++	<-entered
++	owner.close()
++	unblock()
++	select {
++	case value := <-result:
++		if value.conn != nil || !errors.Is(value.err, net.ErrClosed) {
++			t.Fatalf("late attach: conn=%v err=%v", value.conn, value.err)
++		}
++	case <-time.After(2 * time.Second):
++		t.Fatal("late dial did not return")
++	}
++	if raw.closes.Load() != 1 {
++		t.Fatalf("late connection close count=%d", raw.closes.Load())
++	}
++}
++
++func TestHTTPSLifetimeClosedBeforeCancelHasNonNilError(t *testing.T) {
++	owner := newHTTPSConnectionLifetime()
++	cancelEntered, releaseCancel, closeDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
++	var once sync.Once
++	unblock := func() { once.Do(func() { close(releaseCancel) }) }
++	defer unblock()
++	raw := &lifetimeCloseRecorder{}
++	conn, err := owner.dial(t.Context(), func(context.Context) (net.Conn, error) {
++		owner.mu.Lock()
++		var lease *httpsConnectionLease
++		for item := range owner.leases {
++			lease = item
++		}
++		originalCancel := lease.cancel
++		lease.cancel = func(cause error) { close(cancelEntered); <-releaseCancel; originalCancel(cause) }
++		owner.mu.Unlock()
++		go func() { lease.close(net.ErrClosed); close(closeDone) }()
++		// close has set its flag and removed the lease, but cancellation has
++		// deliberately not run yet. A nil context cause cannot mean success.
++		<-cancelEntered
++		return raw, nil
++	})
++	if conn != nil || !errors.Is(err, net.ErrClosed) {
++		t.Fatalf("shutdown must never return nil,nil: conn=%v err=%v", conn, err)
++	}
++	if raw.closes.Load() != 1 {
++		t.Fatalf("late connection close count=%d", raw.closes.Load())
++	}
++	unblock()
++	select {
++	case <-closeDone:
++	case <-time.After(2 * time.Second):
++		t.Fatal("close did not finish")
++	}
++}
