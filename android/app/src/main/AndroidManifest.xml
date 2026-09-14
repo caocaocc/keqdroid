@@ -99,7 +99,7 @@
         <!-- ContentProvider для синхронизации статуса VPN с Quick Settings tile -->
         <provider
             android:name=".VpnStatusProvider"
-            android:authorities="com.keqdroid.keqdroid.vpnstatus"
+            android:authorities="${applicationId}.vpnstatus"
             android:exported="false" />
 
         <!-- Quick Settings tile (Android 7.0+) -->

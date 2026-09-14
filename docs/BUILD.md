@@ -2,9 +2,10 @@
 
 <strong>English</strong> · <a href="#русский">Русский</a>
 
-The only developer document: how to get the project running locally, build it for every
-platform, run the tests and cut a release. Everything else lives in the code and its
-comments.
+How to get the project running locally, build it, run tests and cut a release.
+The macOS implementation, pinned toolchain, PKG/DMG packaging and required device
+acceptance are documented separately in [MACOS.md](MACOS.md). macOS development
+builds must pass that acceptance matrix before being marked supported.
 
 ## 1. Prerequisites
 
@@ -38,6 +39,8 @@ flutter run                       # debug on a device/emulator
 flutter build apk --release
 ```
 
+- The fork uses application ID `io.github.caocaocc.keqdroid`; the Kotlin/JNI namespace stays `com.keqdroid.keqdroid`. It installs alongside upstream. Migrate data using backup and restore.
+- Release and profile builds require the same persistent signing key. Keep local signing values in gitignored `android/key.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Alternatively set `ANDROID_KEYSTORE_FILE`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; CI decodes the `ANDROID_KEYSTORE_BASE64` secret to that temporary file. Missing signing values fail the build, never fall back to a debug key. Keep a protected backup of the key: future APK updates require it.
 - On the first connection the system asks for VPN permission.
 - The native cores ship as `jniLibs` (`android/app/src/main/jniLibs/<abi>/*.so`), not as
   Flutter assets — otherwise the desktop binaries bloated the APK.
@@ -259,6 +262,8 @@ flutter run                       # debug на устройстве/эмулят
 flutter build apk --release
 ```
 
+- У форка ID приложения `io.github.caocaocc.keqdroid`; пространство имён Kotlin/JNI остаётся `com.keqdroid.keqdroid`. Он устанавливается рядом с апстримом; данные переносятся через резервную копию.
+- Release и profile требуют одного постоянного ключа подписи. Локально значения хранятся в игнорируемом Git файле `android/key.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Можно вместо него задать `ANDROID_KEYSTORE_FILE`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` и `ANDROID_KEY_PASSWORD`; CI декодирует секрет `ANDROID_KEYSTORE_BASE64` во временный файл. Без ключа сборка завершается ошибкой, а не подставляет debug-подпись. Сохраните защищённую резервную копию ключа: без него дальнейшие обновления APK невозможны.
 - При первом подключении система спросит разрешение VPN.
 - Нативные ядра лежат как `jniLibs` (`android/app/src/main/jniLibs/<abi>/*.so`), а не как
   Flutter-ассеты — иначе десктопные бинарники раздували APK.
