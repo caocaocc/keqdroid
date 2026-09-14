@@ -26,13 +26,39 @@ if (googleServicesJson.exists()) {
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(keystorePropertiesFile.inputStream())
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+// CI decodes the persistent keystore into a private temporary file. Local builds
+// can keep using the gitignored key.properties file.
+fun signingValue(property: String, environment: String): String? =
+    System.getenv(environment)?.takeIf { it.isNotBlank() }
+        ?: keystoreProperties.getProperty(property)?.takeIf { it.isNotBlank() }
+
+val releaseKeyAlias = signingValue("keyAlias", "ANDROID_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "ANDROID_KEY_PASSWORD")
+val releaseStorePath = signingValue("storeFile", "ANDROID_KEYSTORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "ANDROID_STORE_PASSWORD")
+
+// Do not silently use a debug key: it would make subsequent upgrades impossible.
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name in setOf("validateSigningRelease", "validateSigningProfile") }) {
+        check(listOf(releaseKeyAlias, releaseKeyPassword, releaseStorePath, releaseStorePassword).all { it != null }) {
+            "Release/profile signing requires key.properties or ANDROID_KEYSTORE_FILE, ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+        }
+        check(file(releaseStorePath!!).isFile) { "The configured release keystore is missing." }
+    }
 }
 
 android {
     namespace = "com.keqdroid.keqdroid"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    buildFeatures {
+        // AGP 9 disables generated resource values unless explicitly enabled.
+        resValues = true
+    }
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -41,7 +67,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.keqdroid.keqdroid"
+        applicationId = "io.github.caocaocc.keqdroid"
+        resValue("string", "application_id", applicationId!!)
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -79,10 +106,10 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"].toString()
-            keyPassword = keystoreProperties["keyPassword"].toString()
-            storeFile = file(keystoreProperties["storeFile"].toString())
-            storePassword = keystoreProperties["storePassword"].toString()
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+            storeFile = releaseStorePath?.let { file(it) }
+            storePassword = releaseStorePassword
         }
     }
 
