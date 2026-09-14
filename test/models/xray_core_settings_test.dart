@@ -17,7 +17,7 @@ void main() {
     test('buildDnsBlock resolves direct domains via the system resolver', () {
       // Direct-домены включают корпоративные/LAN-зоны сплит-DNS, которых
       // публичный DoH не знает — их резолвит 'localhost' со skipFallback.
-      final dns = const XrayCoreSettings()
+      final dns = const XrayCoreSettings(dnsUseCustom: false, dnsServers: XrayCoreSettings.legacyDnsServers)
           .buildDnsBlock(directDomains: ['domain:corp.example']);
       final servers = (dns['servers'] as List).cast<Map<String, dynamic>>();
 
@@ -36,8 +36,9 @@ void main() {
       final dns = core.buildDnsBlock(directDomains: ['domain:corp.example']);
       final servers = (dns['servers'] as List).cast<Map<String, dynamic>>();
 
-      expect(servers.first['address'], '192.168.1.1');
-      expect(servers.first['domains'], ['domain:corp.example']);
+      final direct = servers.singleWhere((server) =>
+          (server['domains'] as List?)?.contains('domain:corp.example') == true);
+      expect(direct['address'], '192.168.1.1');
     });
 
     // Единственный сервер уходил под Direct-домены со `skipFallback`, и всё
@@ -207,11 +208,13 @@ void main() {
     });
 
     test('buildXmuxMap returns null when disabled', () {
-      expect(const XrayCoreSettings().buildXmuxMap(), isNull);
+      expect(const XrayCoreSettings(dnsUseCustom: false, dnsServers: XrayCoreSettings.legacyDnsServers).buildXmuxMap(), isNull);
     });
 
     test('round-trips JSON', () {
       const core = XrayCoreSettings(
+        dnsUseCustom: false,
+        dnsServers: XrayCoreSettings.legacyDnsServers,
         xmuxEnabled: true,
         xmuxMaxConcurrency: '8-16',
         logLevel: 'info',

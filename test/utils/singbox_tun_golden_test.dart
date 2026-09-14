@@ -38,7 +38,7 @@ const _settings = AppSettings(
   proxyRules: 'proxy.example',
   blockedRules: 'ads.example',
   finalOutbound: AppSettings.finalOutboundProxy,
-  xrayCore: XrayCoreSettings(),
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
 );
 
 /// Общая часть вызова: меняем в кейсах только то, что кейс проверяет.

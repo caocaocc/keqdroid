@@ -94,6 +94,7 @@ class ServerNameUtils {
     'spain': 'ES',
     'portugal': 'PT',
     'britain': 'GB',
+    'united kingdom': 'GB',
     'england': 'GB',
     'ireland': 'IE',
     'iceland': 'IS',
@@ -276,6 +277,132 @@ class ServerNameUtils {
     'kwt': 'KW',
   };
 
+  // В китайских именах пробелы между страной, городом и номером необязательны.
+  // Только полные названия, без неоднозначных односимвольных сокращений.
+  static const Map<String, String> _chineseKeywords = {
+    '中国香港': 'HK',
+    '中國香港': 'HK',
+    '中国澳门': 'MO',
+    '中國澳門': 'MO',
+    '中国台湾': 'TW',
+    '中國台灣': 'TW',
+    '中國臺灣': 'TW',
+    '香港': 'HK',
+    '澳门': 'MO',
+    '澳門': 'MO',
+    '台湾': 'TW',
+    '台灣': 'TW',
+    '臺灣': 'TW',
+    '中国': 'CN',
+    '中國': 'CN',
+    '日本': 'JP',
+    '韩国': 'KR',
+    '韓國': 'KR',
+    '新加坡': 'SG',
+    '马来西亚': 'MY',
+    '馬來西亞': 'MY',
+    '印度尼西亚': 'ID',
+    '印度尼西亞': 'ID',
+    '印尼': 'ID',
+    '印度': 'IN',
+    '泰国': 'TH',
+    '泰國': 'TH',
+    '越南': 'VN',
+    '菲律宾': 'PH',
+    '菲律賓': 'PH',
+    '美国': 'US',
+    '美國': 'US',
+    '加拿大': 'CA',
+    '英国': 'GB',
+    '英國': 'GB',
+    '爱尔兰': 'IE',
+    '愛爾蘭': 'IE',
+    '德国': 'DE',
+    '德國': 'DE',
+    '法国': 'FR',
+    '法國': 'FR',
+    '荷兰': 'NL',
+    '荷蘭': 'NL',
+    '俄罗斯': 'RU',
+    '俄羅斯': 'RU',
+    '澳大利亚': 'AU',
+    '澳大利亞': 'AU',
+    '澳洲': 'AU',
+    '新西兰': 'NZ',
+    '新西蘭': 'NZ',
+    '紐西蘭': 'NZ',
+    '瑞士': 'CH',
+    '瑞典': 'SE',
+    '挪威': 'NO',
+    '丹麦': 'DK',
+    '丹麥': 'DK',
+    '芬兰': 'FI',
+    '芬蘭': 'FI',
+    '冰岛': 'IS',
+    '冰島': 'IS',
+    '意大利': 'IT',
+    '義大利': 'IT',
+    '西班牙': 'ES',
+    '葡萄牙': 'PT',
+    '奥地利': 'AT',
+    '奧地利': 'AT',
+    '比利时': 'BE',
+    '比利時': 'BE',
+    '波兰': 'PL',
+    '波蘭': 'PL',
+    '捷克': 'CZ',
+    '匈牙利': 'HU',
+    '罗马尼亚': 'RO',
+    '羅馬尼亞': 'RO',
+    '保加利亚': 'BG',
+    '保加利亞': 'BG',
+    '希腊': 'GR',
+    '希臘': 'GR',
+    '爱沙尼亚': 'EE',
+    '愛沙尼亞': 'EE',
+    '拉脱维亚': 'LV',
+    '拉脫維亞': 'LV',
+    '立陶宛': 'LT',
+    '乌克兰': 'UA',
+    '烏克蘭': 'UA',
+    '白俄罗斯': 'BY',
+    '白俄羅斯': 'BY',
+    '土耳其': 'TR',
+    '以色列': 'IL',
+    '阿联酋': 'AE',
+    '阿聯酋': 'AE',
+    '沙特阿拉伯': 'SA',
+    '沙烏地阿拉伯': 'SA',
+    '卡塔尔': 'QA',
+    '卡達': 'QA',
+    '巴基斯坦': 'PK',
+    '伊朗': 'IR',
+    '伊拉克': 'IQ',
+    '巴西': 'BR',
+    '阿根廷': 'AR',
+    '墨西哥': 'MX',
+    '智利': 'CL',
+    '哥伦比亚': 'CO',
+    '哥倫比亞': 'CO',
+    '秘鲁': 'PE',
+    '秘魯': 'PE',
+    '南非': 'ZA',
+    '埃及': 'EG',
+    '尼日利亚': 'NG',
+    '奈及利亞': 'NG',
+  };
+
+  static final _chineseCountryPattern = RegExp(
+    (_chineseKeywords.keys.toList()
+          ..sort((a, b) => b.length.compareTo(a.length)))
+        .map(RegExp.escape)
+        .join('|'),
+  );
+  // Точка внутри токена может быть частью адреса, а не границей страны.
+  static final _wordSeparator = RegExp(r'[^\p{L}\p{N}.]+', unicode: true);
+  static final _outerDots = RegExp(r'^\.+|\.+$');
+  static final _nodeNumber = RegExp(r'\d+$');
+
   /// Флажок сервера: сначала настоящий флаг-эмодзи из имени (любого вида —
   /// см. [ServerFlag]), и только если его нет — догадка по названию страны.
   static ServerFlag? extractFlag(String displayName) {
@@ -296,25 +423,35 @@ class ServerNameUtils {
   static String? _countryCodeFromKeywords(String displayName) {
     final lower = displayName.toLowerCase();
 
-    // Многословные названия ("hong kong", "united states", "южная африка")
-    // достаточно уникальны, чтобы безопасно искать их как подстроку.
+    final chinese = _chineseCountryPattern.firstMatch(lower);
+    if (chinese != null) return _chineseKeywords[chinese.group(0)];
+
+    // Разделяем слова, не склеивая буквы через пунктуацию или цифры.
+    // Номер после метки (HK01, Japan2) допустим; CN2 — название сети, не страны.
+    final tokens = lower
+        .split(_wordSeparator)
+        .map((s) => s.replaceAll(_outerDots, ''))
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
+    final words = ' ${tokens.join(' ')} ';
+
+    // Полное название надёжнее короткого кода. Составные названия также
+    // требуют границ слов: "new zealander" не означает New Zealand.
     for (final entry in _keywords.entries) {
-      if (entry.key.contains(' ') && lower.contains(entry.key)) {
+      if (entry.key.contains(' ') && words.contains(' ${entry.key} ')) {
         return entry.value;
       }
     }
+    final labels = tokens.map(
+      (s) => s == 'cn2' ? s : s.replaceFirst(_nodeNumber, ''),
+    );
+    for (final tok in labels) {
+      if (tok.length <= 3) continue;
+      final code = _keywords[tok];
+      if (code != null) return code;
+    }
 
-    // Одиночные названия и 2–3-буквенные коды матчим только как целое слово.
-    // Раньше здесь был поиск подстроки по всем ключам, из-за чего произвольные
-    // имена без страны получали чужой флаг: "cloudflare" → "are" (ARE=ОАЭ),
-    // "southampton" → "pt" (PT), "united kingdom" → "ng" (NG) и т.п.
-    final tokens = lower
-        .replaceAll(RegExp(r'[|,\-_/\\]'), ' ')
-        .split(RegExp(r'\s+'))
-        .map((s) => s.replaceAll(RegExp(r'[^a-zа-яё]'), ''))
-        .where((s) => s.isNotEmpty);
-
-    for (final tok in tokens) {
+    for (final tok in labels) {
       final code = _keywords[tok];
       if (code != null) return code;
     }

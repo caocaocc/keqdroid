@@ -72,7 +72,10 @@ enum VpnCoreSkip {
 /// одного места правды: раньше «только Android» было записано в трёх файлах
 /// подряд, и снятие ограничения означало найти их все.
 bool get mihomoShipsHere =>
-    Platform.isAndroid || Platform.isWindows || Platform.isLinux;
+    Platform.isAndroid ||
+    Platform.isWindows ||
+    Platform.isLinux ||
+    Platform.isMacOS;
 
 /// Формат сервера по его конфигу. Порядок проверок — от дешёвых и однозначных
 /// к разбору.

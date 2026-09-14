@@ -5,6 +5,9 @@ import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/models/tun_settings.dart';
 import 'package:keqdroid/utils/singbox_tun_config.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 /// Ядро без `-tags with_gvisor` на `stack: gvisor` не ругается в конфиге, а
 /// падает при СТАРТЕ («gVisor is not included in this build»): TUN не
 /// поднимается вовсе. Умолчание у нас теперь gvisor, поэтому чужая сборка
@@ -16,7 +19,7 @@ String _config(String stack, {bool ein = false}) =>
       socksUsername: 'u',
       socksPassword: 'p',
       serverIpToExclude: '198.51.100.10',
-      settings: AppSettings(
+      settings: _legacySettings.copyWith(
         tun: TunSettings(stack: stack, endpointIndependentNat: ein),
       ),
       windows: true,

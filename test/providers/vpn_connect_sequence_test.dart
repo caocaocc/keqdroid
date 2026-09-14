@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/models/server_item.dart';
 import 'package:keqdroid/providers/providers.dart';
 import 'package:keqdroid/services/vpn_engine.dart';
@@ -68,6 +69,8 @@ final _server = ServerItem(
 Future<(ProviderContainer, _RecordingBackend)> _container() async {
   final backend = _RecordingBackend();
   final storage = await buildStorageService();
+  // Exercise connection ordering with saved settings, independent of Geo assets.
+  await storage.saveSettings(AppSettings.fromJson({}));
   await storage.saveServers([_server]);
   await storage.setActiveServerId(_server.id);
 

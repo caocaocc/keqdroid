@@ -4,6 +4,17 @@ import 'package:keqdroid/services/tunnel_session_builder.dart';
 import 'package:keqdroid/tunnel/connection_mode.dart';
 
 void main() {
+  test('physical bootstrap is selected only for macOS TUN', () {
+    for (final isMacOS in [false, true]) {
+      for (final mode in ConnectionMode.values) {
+        expect(
+          TunnelSessionBuilder.usePhysicalBootstrapDns(mode, isMacOS: isMacOS),
+          isMacOS && mode == ConnectionMode.tun,
+        );
+      }
+    }
+  });
+
   group('режим подключения', () {
     const proxy = AppSettings(
       connectionMode: 'proxy',

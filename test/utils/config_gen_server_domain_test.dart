@@ -20,6 +20,12 @@ const _ipServer =
     'vless://uuid@198.51.100.10:443?security=tls&sni=nl.example.com&type=tcp#IP';
 const _secondHop = 'trojan://pass@de.example.com:8443?sni=de.example.com#DE';
 
+// Existing behavior fixtures use the pre-China DNS/routing defaults.
+const _legacySettings = AppSettings(
+  directRules: 'ru, yandex.ru, vk.com',
+  xrayCore: XrayCoreSettings(dnsUseCustom: false),
+);
+
 Map<String, dynamic> _outboundByTag(Map<String, dynamic> config, String tag) =>
     (config['outbounds'] as List)
         .cast<Map<String, dynamic>>()
@@ -32,7 +38,7 @@ Map<String, dynamic>? _sockoptOf(Map<String, dynamic> outbound) {
 
 Map<String, dynamic> _generate(String link, [AppSettings? settings]) =>
     jsonDecode(
-      ConfigGeneratorV2.generateConfig(link, settings ?? const AppSettings()),
+      ConfigGeneratorV2.generateConfig(link, settings ?? _legacySettings),
     ) as Map<String, dynamic>;
 
 void main() {
@@ -54,7 +60,7 @@ void main() {
     final config = _generate(
       _domainServer,
       const AppSettings(
-        xrayCore: XrayCoreSettings(dnsQueryStrategy: 'UseIP'),
+        xrayCore: XrayCoreSettings(dnsUseCustom: false, dnsQueryStrategy: 'UseIP'),
       ),
     );
     expect(
@@ -151,7 +157,7 @@ void main() {
     final ping = jsonDecode(
       ConfigGeneratorV2.generatePingConfig(
         _domainServer,
-        const AppSettings(),
+        _legacySettings,
         socksPort: 10800,
       ),
     ) as Map<String, dynamic>;

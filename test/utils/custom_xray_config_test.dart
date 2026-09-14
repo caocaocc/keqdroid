@@ -330,7 +330,7 @@ void main() {
     const settings = AppSettings(
       localPort: 2080,
       httpPort: 2081,
-      xrayCore: XrayCoreSettings(logLevel: 'info'),
+      xrayCore: XrayCoreSettings(dnsUseCustom: false, logLevel: 'info'),
     );
 
     test('keeps the author routing and dns, replaces the inbounds', () {

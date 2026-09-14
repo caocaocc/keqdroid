@@ -8,6 +8,9 @@ import 'package:keqdroid/utils/singbox_tun_config.dart';
 
 import '../helpers/singbox_route.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 /// IPv6 мимо туннеля.
 ///
 /// TUN-интерфейс с одним IPv4-адресом не получает IPv6-маршрутов: на
@@ -30,7 +33,7 @@ Map<String, dynamic> _config({
             socksUsername: 'u',
             socksPassword: 'p',
             serverIpToExclude: '203.0.113.10',
-            settings: AppSettings(tun: tun),
+            settings: _legacySettings.copyWith(tun: tun),
             windows: true,
             hostHasIpv6: hostHasIpv6,
           ),
@@ -100,7 +103,7 @@ void main() {
               socksUsername: 'u',
               socksPassword: 'p',
               serverIpToExclude: '203.0.113.10',
-              settings: const AppSettings(proxyRules: '2001:db8::/32'),
+              settings: _legacySettings.copyWith(proxyRules: '2001:db8::/32'),
               windows: true,
               hostHasIpv6: true,
             ),
@@ -159,7 +162,7 @@ void main() {
                 socksUsername: 'u',
                 socksPassword: 'p',
                 serverIpToExclude: '2a03:90c0:9992::1',
-                settings: const AppSettings(),
+                settings: _legacySettings,
                 windows: true,
               ),
             )

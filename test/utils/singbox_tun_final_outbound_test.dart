@@ -5,6 +5,9 @@ import 'package:keqdroid/utils/singbox_tun_config.dart';
 
 import '../helpers/singbox_route.dart';
 
+// Preserve the saved-settings baseline; this suite does not test China DNS.
+final _legacySettings = AppSettings.fromJson({});
+
 String _routeFinal(String json) => effectiveRouteFinal(json);
 
 String _gen(AppSettings settings,
@@ -21,13 +24,13 @@ String _gen(AppSettings settings,
 void main() {
   group('SingBoxTunConfigGen route.final', () {
     test('allProxy + proxy → final proxy', () {
-      expect(_routeFinal(_gen(const AppSettings())), 'proxy');
+      expect(_routeFinal(_gen(_legacySettings)), 'proxy');
     });
 
     test('allProxy + direct → final direct (bypass)', () {
       expect(
         _routeFinal(_gen(
-            const AppSettings(finalOutbound: AppSettings.finalOutboundDirect))),
+            _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundDirect))),
         'direct',
       );
     });
@@ -35,7 +38,7 @@ void main() {
     test('allProxy + block → final block', () {
       expect(
         _routeFinal(_gen(
-            const AppSettings(finalOutbound: AppSettings.finalOutboundBlock))),
+            _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundBlock))),
         'block',
       );
     });
@@ -43,7 +46,7 @@ void main() {
     test('onlySelected split keeps final direct regardless of finalOutbound',
         () {
       final json = _gen(
-        const AppSettings(finalOutbound: AppSettings.finalOutboundProxy),
+        _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundProxy),
         routingMode: AppRoutingMode.onlySelected,
       );
       expect(_routeFinal(json), 'direct');
@@ -51,7 +54,7 @@ void main() {
 
     test('allExceptSelected split keeps final proxy (per-app mode governs)', () {
       final json = _gen(
-        const AppSettings(finalOutbound: AppSettings.finalOutboundDirect),
+        _legacySettings.copyWith(finalOutbound: AppSettings.finalOutboundDirect),
         routingMode: AppRoutingMode.allExceptSelected,
       );
       expect(_routeFinal(json), 'proxy');

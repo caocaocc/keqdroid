@@ -94,10 +94,11 @@ void main() {
       expect(policy['+.work.example.com'], ['https://9.9.9.9/dns-query']);
     });
 
-    test('пустое поле ничего не добавляет', () {
+    test('пустое поле ничего не добавляет без раздельного DNS', () {
+      final legacy = AppSettings.fromJson({});
       final config = MihomoConfigGen.build(
         _vless,
-        const AppSettings(),
+        legacy,
         socksPort: 2080,
       );
 
@@ -106,7 +107,7 @@ void main() {
         isFalse,
       );
       expect(
-        _xrayServers(const AppSettings()).any((s) => s['skipFallback'] == true &&
+        _xrayServers(legacy).any((s) => s['skipFallback'] == true &&
             (s['domains'] as List?)?.contains('full:home.lan') == true),
         isFalse,
       );
