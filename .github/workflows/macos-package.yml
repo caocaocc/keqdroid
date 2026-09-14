@@ -1,0 +1,116 @@
+name: macOS reusable packaging
+
+on:
+  workflow_call:
+    inputs:
+      arch: {type: string, required: true}
+      runner: {type: string, required: true}
+      keqrnel_artifact: {type: string, required: true}
+      mihomo_artifact: {type: string, required: true}
+      helper_artifact: {type: string, required: true}
+      app_artifact: {type: string, required: true}
+      session_contract_artifact: {type: string, required: true}
+      fault_injection: {type: string, default: none}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    name: package-${{ inputs.arch }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      ARCH: ${{ inputs.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p build/ci-logs build/macos-cores/"$ARCH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.keqrnel_artifact }}
+          path: build/ci-archives/keqrnel
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.mihomo_artifact }}
+          path: build/ci-archives/mihomo
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.helper_artifact }}
+          path: build/ci-archives/helper
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.app_artifact }}
+          path: build/ci-archives/app
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.session_contract_artifact }}
+          path: build/macos-session-contract
+      - name: Verify and restore all precompiled inputs
+        run: |
+          for component in keqrnel mihomo helper app; do
+            python3 tool/macos/ci_artifacts.py restore --component "$component" --arch "$ARCH" \
+              --archive "build/ci-archives/$component/$component-$ARCH.tar" --destination "build/ci-components/$component"
+          done 2>&1 | tee build/ci-logs/restore.log
+          for component in keqrnel mihomo; do
+            cp "build/ci-components/$component/$component" "build/macos-cores/$ARCH/"
+            cp "build/ci-components/$component/$component-provenance.json" "build/macos-cores/$ARCH/"
+          done
+          bash tool/build_macos_cores.sh --arch "$ARCH" --output-dir "build/macos-cores/$ARCH" --assemble-only \
+            2>&1 | tee build/ci-logs/provenance.log
+      - name: Validate live Dart sessions with the verified Swift checker
+        env:
+          KEQDIS_MACOS_FIXTURE_DIR: build/macos-session-contract
+          KEQDIS_MACOS_CONTRACT_CHECKER: build/ci-components/helper/keqdis-network-tests
+          KEQDIS_MACOS_CONTRACT_REQUIRED: '1'
+        run: python3 -m unittest discover -s tool/tests -p test_macos_session_contract.py -v 2>&1 | tee build/ci-logs/session-contract.log
+      - name: Exercise failed packaging retry without losing components
+        if: inputs.fault_injection == inputs.arch && github.run_attempt == 1
+        run: |
+          echo 'Deliberate attempt-1 packaging failure after verifying all reusable components.' | tee build/ci-logs/fault-injection.log
+          exit 1
+      - name: Packaging and installer regression tests (no installation)
+        run: python3 -m unittest discover -s tool/tests -v 2>&1 | tee build/ci-logs/python-tests.log
+      - name: Package verified binaries without recompiling
+        run: >-
+          python3 tool/package_macos.py --arch "$ARCH"
+          --app build/ci-components/app/KEQDIS.app --cores "build/macos-cores/$ARCH"
+          --helper build/ci-components/helper/keqdis-network-service
+          2>&1 | tee build/ci-logs/package.log
+      - name: Verify expanded PKG payload, scripts and nested signatures
+        run: |
+          VERSION=$(python3 -c "import sys; sys.path.insert(0, 'tool/ci'); from package_platform import version; print(version())")
+          python3 tool/macos/verify_download.py \
+            --pkg "build/macos-release/keqdroid-$VERSION-macos-$ARCH.pkg" \
+            --uninstall-pkg "build/macos-release/keqdroid-$VERSION-macos-$ARCH-uninstall.pkg" \
+            --sha256 build/macos-release/SHA256SUMS \
+            --report "build/macos-release/keqdroid-$VERSION-macos-$ARCH-verification.json" \
+            --arch "$ARCH" --commit "${{ github.sha }}" --inspect-payload \
+            2>&1 | tee build/ci-logs/pkg-verification.log
+      - name: Bind verified PKG payloads to this commit
+        run: >-
+          python3 tool/ci/checkpoint.py seal-release --platform "macos-$ARCH"
+          --source build/macos-release --archive "build/release-archives/macos-$ARCH.tar"
+      - name: Save development installation packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ inputs.arch }}-${{ github.sha }}-attempt${{ github.run_attempt }}
+          path: build/release-archives/macos-${{ inputs.arch }}.tar*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Preserve packaging diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-package-${{ inputs.arch }}-attempt${{ github.run_attempt }}
+          path: |
+            build/ci-logs/
+            build/macos-release/*-verification.json
+          retention-days: 30
+      # The release report distinguishes CI checks from actual device coverage.
