@@ -12,20 +12,20 @@
 
 <p align="center">
   Proxy and VPN client: subscriptions, standalone configs, routing.<br>
-  Android · Windows · Linux
+  Android · Windows · Linux · macOS
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><img src="https://img.shields.io/github/v/release/Lemonochka/keqdroid?label=release&style=flat-square&color=f5a9b8" alt="release"></a>
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><img src="https://img.shields.io/github/downloads/Lemonochka/keqdroid/total?label=downloads&style=flat-square&logo=github&color=b5e8d5" alt="downloads"></a>
-  <a href="https://github.com/Lemonochka/keqdroid/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Lemonochka/keqdroid/ci.yml?branch=master&label=build&style=flat-square" alt="build"></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><img src="https://img.shields.io/github/v/release/caocaocc/keqdroid?label=release&style=flat-square&color=f5a9b8" alt="release"></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><img src="https://img.shields.io/github/downloads/caocaocc/keqdroid/total?label=downloads&style=flat-square&logo=github&color=b5e8d5" alt="downloads"></a>
+  <a href="https://github.com/caocaocc/keqdroid/actions/workflows/macos.yml"><img src="https://img.shields.io/github/actions/workflow/status/caocaocc/keqdroid/macos.yml?branch=dev&label=build&style=flat-square" alt="build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-c9b8f5?style=flat-square" alt="license"></a>
   <img src="https://img.shields.io/badge/made%20with-Flutter-9bc7f0?style=flat-square" alt="flutter">
   <a href="https://t.me/keqdroid"><img src="https://img.shields.io/badge/Telegram-chat-8ec5e6?style=flat-square&logo=telegram&logoColor=white" alt="Telegram chat"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><strong>Download</strong></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><strong>Download</strong></a>
   &nbsp;·&nbsp;
   <a href="https://t.me/keqdroid">Telegram chat</a>
   &nbsp;·&nbsp;
@@ -44,14 +44,17 @@
 
 ## Download
 
-Pre-built binaries are on [Releases](https://github.com/Lemonochka/keqdroid/releases).  
+This fork follows [Lemonochka/keqdroid](https://github.com/Lemonochka/keqdroid), retaining the upstream KEQDIS name. App updates and Geo downloads come from this repository.
+
+Pre-built binaries are on [Releases](https://github.com/caocaocc/keqdroid/releases).
 One `SHA256SUMS` holds the hash of every file in the release. The built-in updater looks its own asset up there and refuses to install when the line is missing or the hash does not match.
 
 | Platform | Files in release |
 |----------|------------------|
 | **Android** 7.0+ | `keqdroid-<version>-android.apk` |
 | **Windows** x64 | `keqdroid-windows-x64-<version>.zip` (portable) |
-| **Linux** x64 | `keqdroid-<version>-x86_64.AppImage` · `keqdroid_<version>_amd64.deb` · `keqdroid-<version>-1.x86_64.rpm` · `keqdroid-<version>-linux-x64.tar.gz` · Arch: `keqdroid-bin` on the AUR |
+| **Linux** x64 | `keqdroid-<version>-x86_64.AppImage` · `keqdroid_<version>_amd64.deb` · `keqdroid-<version>-1.x86_64.rpm` · `keqdroid-<version>-linux-x64.tar.gz` · `PKGBUILD` for a manual Arch build |
+| **macOS** arm64 / x64 | `keqdroid-<version>-macos-arm64.pkg` · `keqdroid-<version>-macos-x64.pkg` |
 
 The app **does not provide servers**. Bring your own subscription or configs. Comply with the laws of your country.
 
@@ -68,7 +71,7 @@ The app **does not provide servers**. Bring your own subscription or configs. Co
 
 **Routing and tunnel**
 - three lists — direct, through the VPN, blocked — plus ready-made presets to start from
-- split tunnel: per-app on Android, per-program on Windows and Linux (TUN mode)
+- split tunnel: per-app on Android, per-program on Windows, Linux and macOS (TUN mode)
 - **Connections** — a live list of where traffic is going and which rule sent it there
 
 **Appearance and data**
@@ -76,7 +79,7 @@ The app **does not provide servers**. Bring your own subscription or configs. Co
 - interface size, on top of the system text size
 - backup and restore: settings, servers, subscriptions with their images, split-tunnel lists
 - share the local proxy over LAN
-- hotkeys for connect/disconnect, TUN mode, best-ping server, show/hide window — system-wide on Windows, while the window is focused on Linux
+- hotkeys for connect/disconnect, TUN mode, best-ping server, show/hide window — system-wide on Windows and macOS, while the window is focused on Linux
 - English, Русский, Deutsch, 中文, فارسی
 - updates from GitHub Releases
 
@@ -128,6 +131,8 @@ A ready-made config runs as its author wrote it — routing, DNS and outbound ch
 
 Per-app routing and DNS interception belong to VPN mode. Notification shade icon and a Quick Settings tile; subscriptions update in the background.
 
+This fork uses its own application ID (`io.github.caocaocc.keqdroid`) and persistent release signing key. It installs alongside the upstream app. Export a backup from the old app and import it here when migrating; later updates keep this installation and its data.
+
 ### Windows
 
 | Mode | What it does |
@@ -141,7 +146,7 @@ The window minimizes to the tray and remembers its size and position. Launch at 
 
 ### Linux
 
-Debian/Fedora/Arch, x86_64. Releases ship AppImage, deb, rpm and tar.gz. On Arch the package lives on the AUR — `yay -S keqdroid-bin` — and the same `PKGBUILD` is among the release assets, for a manual `makepkg -si`.
+Debian/Fedora/Arch, x86_64. Releases ship AppImage, deb, rpm and tar.gz. The release includes `PKGBUILD` for a manual Arch build with `makepkg -si`; this fork does not publish to the AUR.
 
 | Mode | What it does |
 |------|--------------|
@@ -149,6 +154,14 @@ Debian/Fedora/Arch, x86_64. Releases ship AppImage, deb, rpm and tar.gz. On Arch
 | **TUN** | Root via `pkexec` (polkit) on connect |
 
 The window remembers its size and position; hotkeys work while the app window is focused.
+
+### macOS
+
+Install the PKG matching your Mac: arm64 for Apple Silicon, x64 for Intel. The installer places the app and protected network components in their managed locations and asks for administrator authorization. Proxy mode runs its core as the current user and switches the system proxy; TUN uses the installed network service. Closing the window keeps the connection and menu bar item running. Quit disconnects and restores network settings.
+
+The app uses ad-hoc signing, without Developer ID signing or Apple notarization. Allow installation in the system UI when prompted. Each architecture also has a `keqdroid-<version>-macos-<arch>-uninstall.pkg`; it restores the network, removes system components and keeps user settings by default.
+
+Clients that only recognize DMG updates need one manual PKG upgrade. Build targets start at macOS 12; the release acceptance report lists the systems and architectures actually tested. Build success alone does not establish macOS 12 or Intel runtime support.
 
 ---
 
@@ -186,21 +199,9 @@ Place the required core binaries in `assets/bin/windows/` before a Windows build
 
 ### Releases
 
-```powershell
-# Android + Windows + Linux (that part runs in WSL), SHA256SUMS, output to release\<version>\
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1
+The `dev` workflows build Android, Windows, Linux and both macOS architectures independently, retaining completed components for reuse. The release workflow publishes the verified artifacts for the exact tagged commit; it does not rebuild them. The tag `vX.Y.Z` and version come from `pubspec.yaml`.
 
-# same + publish GitHub Release (requires gh CLI)
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -Publish -NotesFile notes.md
-```
-
-The AUR package goes out separately, once the GitHub release exists — its `PKGBUILD` downloads the tarball from there:
-
-```bash
-wsl -e bash /mnt/c/.../keqdroid/tool/publish_aur.sh
-```
-
-Version and tag `vX.Y.Z` come from `pubspec.yaml`. When uploading manually, upload `SHA256SUMS` along with the assets — a hash the updater cannot find is a reason to refuse.
+Release files share one `SHA256SUMS`; `geoip.dat.sha256` is also included for older clients. When retrying a failed build or upload, retain successful artifacts. This fork publishes GitHub Releases only, not AUR packages.
 
 ---
 
@@ -220,20 +221,20 @@ Version and tag `vX.Y.Z` come from `pubspec.yaml`. When uploading manually, uplo
 
 <p align="center">
   Клиент прокси и VPN: подписки, отдельные конфиги, маршрутизация.<br>
-  Android · Windows · Linux
+  Android · Windows · Linux · macOS
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><img src="https://img.shields.io/github/v/release/Lemonochka/keqdroid?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&style=flat-square&color=f5a9b8" alt="релиз"></a>
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><img src="https://img.shields.io/github/downloads/Lemonochka/keqdroid/total?label=%D1%81%D0%BA%D0%B0%D1%87%D0%B8%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F&style=flat-square&logo=github&color=b5e8d5" alt="скачивания"></a>
-  <a href="https://github.com/Lemonochka/keqdroid/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Lemonochka/keqdroid/ci.yml?branch=master&label=%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0&style=flat-square" alt="сборка"></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><img src="https://img.shields.io/github/v/release/caocaocc/keqdroid?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&style=flat-square&color=f5a9b8" alt="релиз"></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><img src="https://img.shields.io/github/downloads/caocaocc/keqdroid/total?label=%D1%81%D0%BA%D0%B0%D1%87%D0%B8%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F&style=flat-square&logo=github&color=b5e8d5" alt="скачивания"></a>
+  <a href="https://github.com/caocaocc/keqdroid/actions/workflows/macos.yml"><img src="https://img.shields.io/github/actions/workflow/status/caocaocc/keqdroid/macos.yml?branch=dev&label=%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0&style=flat-square" alt="сборка"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F-GPL--3.0-c9b8f5?style=flat-square" alt="лицензия"></a>
   <img src="https://img.shields.io/badge/сделано%20на-Flutter-9bc7f0?style=flat-square" alt="flutter">
   <a href="https://t.me/keqdroid"><img src="https://img.shields.io/badge/Telegram-%D1%87%D0%B0%D1%82-8ec5e6?style=flat-square&logo=telegram&logoColor=white" alt="Чат в Telegram"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lemonochka/keqdroid/releases"><strong>Скачать</strong></a>
+  <a href="https://github.com/caocaocc/keqdroid/releases"><strong>Скачать</strong></a>
   &nbsp;·&nbsp;
   <a href="https://t.me/keqdroid">Чат в Telegram</a>
   &nbsp;·&nbsp;
@@ -244,16 +245,19 @@ Version and tag `vX.Y.Z` come from `pubspec.yaml`. When uploading manually, uplo
 
 ## Скачать
 
+Этот форк следует за [Lemonochka/keqdroid](https://github.com/Lemonochka/keqdroid) и сохраняет имя KEQDIS. Обновления приложения и загрузка Geo-баз идут из этого репозитория.
+
 Скриншоты — [выше](#screenshots).
 
-Готовые сборки — в [Releases](https://github.com/Lemonochka/keqdroid/releases).  
+Готовые сборки — в [Releases](https://github.com/caocaocc/keqdroid/releases).
 Хеши всего релиза лежат в одном `SHA256SUMS`: встроенный апдейтер находит там свой файл и не ставит обновление, если строки нет или хеш не сошёлся.
 
 | Платформа | Файлы в релизе |
 |-----------|----------------|
 | **Android** 7.0+ | `keqdroid-<версия>-android.apk` |
 | **Windows** x64 | `keqdroid-windows-x64-<версия>.zip` (portable) |
-| **Linux** x64 | `keqdroid-<версия>-x86_64.AppImage` · `keqdroid_<версия>_amd64.deb` · `keqdroid-<версия>-1.x86_64.rpm` · `keqdroid-<версия>-linux-x64.tar.gz` · Arch: `keqdroid-bin` на AUR |
+| **Linux** x64 | `keqdroid-<версия>-x86_64.AppImage` · `keqdroid_<версия>_amd64.deb` · `keqdroid-<версия>-1.x86_64.rpm` · `keqdroid-<версия>-linux-x64.tar.gz` · `PKGBUILD` для ручной сборки Arch |
+| **macOS** arm64 / x64 | `keqdroid-<версия>-macos-arm64.pkg` · `keqdroid-<версия>-macos-x64.pkg` |
 
 Приложение **не раздаёт серверы** — нужна своя подписка или конфиги. Соблюдайте законы вашей страны.
 
@@ -270,7 +274,7 @@ Version and tag `vX.Y.Z` come from `pubspec.yaml`. When uploading manually, uplo
 
 **Маршрутизация и туннель**
 - три списка — напрямую, через VPN, блокировать — и готовые пресеты, чтобы начать
-- split tunnel: на Android по приложениям, на Windows и Linux по программам (режим TUN)
+- split tunnel: на Android по приложениям, на Windows, Linux и macOS по программам (режим TUN)
 - **Соединения** — живой список того, куда идёт трафик и какое правило его туда отправило
 
 **Оформление и данные**
@@ -278,7 +282,7 @@ Version and tag `vX.Y.Z` come from `pubspec.yaml`. When uploading manually, uplo
 - размер интерфейса, поверх системного размера текста
 - резервная копия и восстановление: настройки, серверы, подписки вместе с их картинками, списки split tunnel
 - раздача локального прокси в локальную сеть
-- хоткеи на подключение, режим TUN, сервер с лучшим пингом, показать/скрыть окно — глобальные на Windows, в фокусе окна на Linux
+- хоткеи на подключение, режим TUN, сервер с лучшим пингом, показать/скрыть окно — глобальные на Windows и macOS, в фокусе окна на Linux
 - English, Русский, Deutsch, 中文, فارسی
 - обновление из GitHub Releases
 
@@ -330,6 +334,8 @@ Hysteria v1 не поддерживается.
 
 Маршрутизация по приложениям и перехват DNS живут в режиме VPN. Значок в шторке и плитка в быстрых настройках; подписки обновляются в фоне.
 
+У форка свой ID приложения (`io.github.caocaocc.keqdroid`) и постоянный ключ подписи релизов. Он устанавливается рядом с апстримом. Для перехода экспортируйте резервную копию из старого приложения и импортируйте здесь; дальнейшие обновления сохраняют эту установку и её данные.
+
 ### Windows
 
 | Режим | Что делает |
@@ -343,7 +349,7 @@ Hysteria v1 не поддерживается.
 
 ### Linux
 
-Debian/Fedora/Arch, x86_64. В релизе — AppImage, deb, rpm и tar.gz. Для Arch пакет лежит на AUR — `yay -S keqdroid-bin`; тот же `PKGBUILD` есть и среди файлов релиза — для ручного `makepkg -si`.
+Debian/Fedora/Arch, x86_64. В релизе — AppImage, deb, rpm и tar.gz. Для Arch среди файлов релиза есть `PKGBUILD` для ручного `makepkg -si`; этот форк не публикуется в AUR.
 
 | Режим | Что делает |
 |-------|------------|
@@ -351,6 +357,14 @@ Debian/Fedora/Arch, x86_64. В релизе — AppImage, deb, rpm и tar.gz. Д
 | **TUN** | Root через `pkexec` (polkit) при подключении |
 
 Окно запоминает размер и позицию; хоткеи работают, пока окно приложения в фокусе.
+
+### macOS
+
+Установите PKG для своего Mac: arm64 для Apple Silicon, x64 для Intel. Установщик размещает приложение и защищённые сетевые компоненты и запрашивает права администратора. В Proxy ядро работает от текущего пользователя и переключает системный прокси; TUN использует установленную сетевую службу. Закрытие окна оставляет соединение и значок в строке меню; выход восстанавливает сетевые настройки.
+
+Используется ad-hoc подпись, без Developer ID и нотариализации Apple. При необходимости разрешите установку в системном интерфейсе. Для каждой архитектуры есть `keqdroid-<версия>-macos-<архитектура>-uninstall.pkg`: он восстанавливает сеть и удаляет системные компоненты, по умолчанию сохраняя пользовательские настройки.
+
+Клиентам, распознающим только DMG, нужен один ручной переход на PKG. Минимальная цель сборки — macOS 12; реально проверенные системы и архитектуры перечислены в отчёте приёмки релиза. Успешная сборка сама по себе не подтверждает работу на macOS 12 или Intel.
 
 ---
 
@@ -388,21 +402,9 @@ wsl -e bash /mnt/c/.../keqdroid/tool/build_linux_wsl.sh
 
 ### Релизы
 
-```powershell
-# Android + Windows + Linux (эта часть — в WSL), SHA256SUMS, папка release\<версия>\
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1
+Workflow ветки `dev` независимо собирают Android, Windows, Linux и обе архитектуры macOS, сохраняя готовые компоненты для повторного использования. Workflow релиза публикует проверенные артефакты точного коммита тега, без повторной сборки. Тег `vX.Y.Z` и версия берутся из `pubspec.yaml`.
 
-# то же + GitHub Release (нужен gh CLI)
-powershell -ExecutionPolicy Bypass -File tool\make_release.ps1 -Publish -NotesFile notes.md
-```
-
-Пакет для AUR уезжает отдельно и после того, как релиз на GitHub уже есть: его `PKGBUILD` качает архив оттуда.
-
-```bash
-wsl -e bash /mnt/c/.../keqdroid/tool/publish_aur.sh
-```
-
-Версия и тег `vX.Y.Z` берутся из `pubspec.yaml`. При ручной заливке рядом с файлами нужен `SHA256SUMS` — хеш, которого апдейтер не нашёл, для него повод отказаться.
+Общий `SHA256SUMS` содержит хеши файлов релиза; `geoip.dat.sha256` сохраняется для старых клиентов. При повторе неудачной сборки или загрузки уже готовые артефакты используются повторно. Форк публикуется только в GitHub Releases, не в AUR.
 
 ---
 
