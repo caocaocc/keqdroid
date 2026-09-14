@@ -243,7 +243,7 @@ class MacOSTunnelBackend extends TunnelBackend with DesktopTrafficStats {
       }
       if (service['installed'] != true) {
         throw const VpnPermissionDeniedException(
-          'Install the macOS network service using the package inside the DMG.',
+          'Install the macOS network service using the PKG installer.',
         );
       }
       if (service['protocolVersion'] != 1) {
