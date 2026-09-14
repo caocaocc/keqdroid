@@ -189,7 +189,7 @@ class _XrayCoreSettingsScreenState extends ConsumerState<_XrayCoreSettingsScreen
         // TUN есть только на десктопе: на Android интерфейс поднимает
         // VpnService, и эти поля туда не едут. Ядру при этом всё равно —
         // стек, MTU и маршруты читают оба.
-        if (Platform.isWindows || Platform.isLinux) const _XrayTunSection(),
+        if (PlatformBootstrap.isDesktop) const _XrayTunSection(),
         if (!xray) const _XrayMihomoSection(),
         const SizedBox(height: 8),
         OutlinedButton.icon(
@@ -1444,7 +1444,7 @@ class _XrayTunSection extends ConsumerWidget {
                 l10n.settingsTunAutoRouteHint,
               ),
             ),
-            if (xray)
+            if (xray || Platform.isMacOS)
               SwitchListTile(
                 value: tun.blockIpv6Leak,
                 onChanged: (v) =>

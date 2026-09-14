@@ -132,7 +132,7 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
     _directRules.text = RoutingPresets.defaultDirectRules;
     _proxyRules.text = RoutingPresets.defaultProxyRules;
     _blockedRules.text = RoutingPresets.defaultBlockedRules;
-    await _persist();
+    await _saveFinalOutbound(AppSettings.finalOutboundProxy);
     if (!mounted) return;
     setState(() {});
     final l10n = AppLocalizations.of(context)!;
@@ -142,6 +142,7 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
   }
 
   String _presetTitle(AppLocalizations l10n, String id) => switch (id) {
+        'china' => l10n.settingsRoutingPresetChinaTitle,
         'ru' => l10n.settingsRoutingPresetRuTitle,
         'ru_geoip' => l10n.settingsRoutingPresetRuGeoipTitle,
         'ru_geosite' => l10n.settingsRoutingPresetRuGeositeTitle,
@@ -157,6 +158,7 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
       };
 
   String _presetDesc(AppLocalizations l10n, String id) => switch (id) {
+        'china' => l10n.settingsRoutingPresetChinaDesc,
         'ru' => l10n.settingsRoutingPresetRuDesc,
         'ru_geoip' => l10n.settingsRoutingPresetRuGeoipDesc,
         'ru_geosite' => l10n.settingsRoutingPresetRuGeositeDesc,
@@ -172,6 +174,7 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
       };
 
   IconData _presetIcon(String id) => switch (id) {
+        'china' => Icons.public_rounded,
         'ru' => Icons.flag_rounded,
         'ru_geoip' => Icons.public_rounded,
         'ru_geosite' => Icons.travel_explore_rounded,
