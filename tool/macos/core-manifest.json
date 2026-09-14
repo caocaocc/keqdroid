@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "minimumMacOS": "12.0",
+  "go": {
+    "version": "1.26.8",
+    "hosts": {
+      "arm64": {
+        "url": "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.26.8.darwin-arm64.zip",
+        "sha256": "0aad5fb52b88498885290178adc0bcfe429bc63012621af9f83282eb640bd9c7",
+        "prefix": "golang.org/toolchain@v0.0.1-go1.26.8.darwin-arm64"
+      },
+      "x64": {
+        "url": "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.26.8.darwin-amd64.zip",
+        "sha256": "fe99a2009e5bb51e06d7784f1a486478673512041c2671157bd382806e2aedcf",
+        "prefix": "golang.org/toolchain@v0.0.1-go1.26.8.darwin-amd64"
+      }
+    }
+  },
+  "sources": {
+    "keqrnel": {
+      "module": "github.com/Lemonochka/keqrnel",
+      "version": "38155c34606f77299a62902da11372ff1c1921d7",
+      "url": "https://codeload.github.com/Lemonochka/keqrnel/tar.gz/38155c34606f77299a62902da11372ff1c1921d7",
+      "sha256": "e1e0529aa48d5c934b95ca767245620fbefc4c6d83dc4726c5e45c041a2b3c77",
+      "prefix": "keqrnel-38155c34606f77299a62902da11372ff1c1921d7",
+      "format": "tar.gz",
+      "target": "./cmd/keqrnel",
+      "tags": [
+        "with_gvisor"
+      ],
+      "patches": [
+        "macos/keqrnel-bootstrap-dns.patch",
+        "macos/keqrnel-doh-lifetime-tests.patch"
+      ]
+    },
+    "mihomo": {
+      "module": "github.com/metacubex/mihomo",
+      "version": "v1.19.30",
+      "commit": "ac017cdd246ce8bd547653d927e7bf77d7ee73d5",
+      "url": "https://proxy.golang.org/github.com/metacubex/mihomo/@v/v1.19.30.zip",
+      "sha256": "25b4a80263da40fecf71b1e458c8a8f19add219e82dcaeeef830192479a7e881",
+      "prefix": "github.com/metacubex/mihomo@v1.19.30",
+      "format": "zip",
+      "target": ".",
+      "tags": [
+        "with_gvisor",
+        "no_tailscale",
+        "no_zerotier"
+      ],
+      "ldflags": "-checklinkname=0 -X github.com/metacubex/mihomo/constant.Version=v1.19.30",
+      "patches": [
+        "mihomo-android-package-manager.patch",
+        "mihomo-reality-client-version.patch",
+        "macos/mihomo-bootstrap-dns.patch",
+        "macos/mihomo-privileged-api.patch"
+      ]
+    },
+    "xray": {
+      "module": "github.com/xtls/xray-core",
+      "version": "v1.260327.1-0.20260728075948-5ca6f4b7d4dc",
+      "url": "https://proxy.golang.org/github.com/xtls/xray-core/@v/v1.260327.1-0.20260728075948-5ca6f4b7d4dc.zip",
+      "sha256": "8cf470bc09e02ba277dc3896cd178dc9165c49c31c775bd5c02ad9e39f6e2c53",
+      "prefix": "github.com/xtls/xray-core@v1.260327.1-0.20260728075948-5ca6f4b7d4dc",
+      "format": "zip",
+      "patches": [
+        "macos/xray-bootstrap-dns.patch"
+      ]
+    },
+    "singtun": {
+      "module": "github.com/sagernet/sing-tun",
+      "version": "v0.8.12-0.20260810140523-7c73233bd0fb",
+      "commit": "7c73233bd0fb0dae02e76505af888ef729319be9",
+      "url": "https://proxy.golang.org/github.com/sagernet/sing-tun/@v/v0.8.12-0.20260810140523-7c73233bd0fb.zip",
+      "sha256": "4b91c01b839643f9caa4b445b2dc274bf5f608a99c1e016ffbe8ade681ae62fa",
+      "prefix": "github.com/sagernet/sing-tun@v0.8.12-0.20260810140523-7c73233bd0fb",
+      "format": "zip",
+      "patches": [
+        "macos/singtun-route-ownership.patch"
+      ]
+    },
+    "singbox": {
+      "module": "github.com/sagernet/sing-box",
+      "version": "v1.13.19",
+      "commit": "b5ebaa1fc0f2b94256180b95468e73ef53caa27d",
+      "url": "https://proxy.golang.org/github.com/sagernet/sing-box/@v/v1.13.19.zip",
+      "sha256": "057f27b853ce38fb64c2b90817f478bb1355885ae2f1bcffafc5ecfecb4e9bf5",
+      "prefix": "github.com/sagernet/sing-box@v1.13.19",
+      "format": "zip",
+      "patches": [
+        "macos/singbox-privileged-api.patch",
+        "macos/singbox-doh-connection-lifetime.patch"
+      ]
+    }
+  }
+}
