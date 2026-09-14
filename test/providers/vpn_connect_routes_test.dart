@@ -44,6 +44,39 @@ List<Map<String, dynamic>> _rules(String xray) => [
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('global protocol route retains network and ports during preparation', () async {
+    final backend = _Backend();
+    final storage = await buildStorageService();
+    await storage.saveServers([_server]);
+    await storage.setActiveServerId(_server.id);
+    await storage.saveSettings(AppSettings.fromJson({
+      'connectionMode': 'proxy',
+    }));
+    await storage.saveRoutes(const [
+      TrafficRoute(
+        id: 'udp-only',
+        sites: 'video.example',
+        target: RouteTarget.direct,
+        network: RouteNetwork.udp,
+        ports: '443,8000-8010',
+      ),
+    ]);
+    final container = ProviderContainer(overrides: [
+      storageProvider.overrideWithValue(storage),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(backend)),
+    ]);
+    addTearDown(container.dispose);
+    container.read(serversProvider);
+    await container.read(vpnStateProvider.future);
+    await container.read(vpnStateProvider.notifier).connect();
+    final rule = _rules(backend.session!.xrayConfig).singleWhere(
+      (rule) => rule['network'] == 'udp' && rule['port'] == '443,8000-8010',
+    );
+    expect(rule['domain'], ['domain:video.example']);
+    expect(rule['outboundTag'], 'direct');
+    expect(rule.containsKey('process'), isFalse);
+  });
+
   test('в сессию едут маршруты, а не прежние поля списков', () async {
     final backend = _Backend();
     final storage = await buildStorageService();

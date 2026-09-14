@@ -30,6 +30,7 @@ String _finalOutboundOf(RouteTarget target) => switch (target) {
     };
 
 String _presetName(AppLocalizations l10n, String id) => switch (id) {
+      'china' => l10n.settingsRoutingPresetChinaTitle,
       'ru' => l10n.settingsRoutingPresetRuTitle,
       'ir' => l10n.settingsRoutingPresetIrTitle,
       'ads' => l10n.settingsRoutingPresetAdsTitle,
@@ -39,6 +40,7 @@ String _presetName(AppLocalizations l10n, String id) => switch (id) {
     };
 
 IconData _presetIcon(String id) => switch (id) {
+      'china' => Icons.public_rounded,
       'ru' || 'ir' => Icons.flag_rounded,
       'ads' => Icons.block_rounded,
       'refilter' => Icons.shield_rounded,
@@ -91,6 +93,7 @@ String? _routeIssue(
   List<ServerItem> servers,
   SplitTunnelingState split,
   List<AppInfo> installed,
+  MacOSAppRoutingSettings? macSplit,
 ) {
   if (routePortRanges(route.ports) == null) return l10n.routePortsInvalid;
   if (route.allApps &&
@@ -103,11 +106,13 @@ String? _routeIssue(
       if (!caps.appsNeedTun) return l10n.routeAppsUnsupported;
       return Platform.isAndroid ? l10n.routeAppsNeedVpn : l10n.routeAppsNeedTun;
     }
-    final outside = appsOutsideSplit(
-      route.apps,
-      include: split.includePackages,
-      exclude: split.excludePackages,
-    );
+    final outside = Platform.isMacOS
+        ? macSplit == null ? const <String>[] : macOSAppsOutsideSplit(route.apps, macSplit)
+        : appsOutsideSplit(
+            route.apps,
+            include: split.includePackages,
+            exclude: split.excludePackages,
+          );
     if (outside.isNotEmpty) {
       return l10n.routeSplitExcluded(
         ltrIsolate(outside.map((a) => _appLabel(a, installed)).join(', ')),
@@ -283,6 +288,8 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
     final caps = ref.watch(routeCapabilitiesProvider);
     final servers = ref.watch(serversProvider.select((s) => s.servers));
     final split = ref.watch(splitTunnelingProvider);
+    final macSplit = Platform.isMacOS
+        ? ref.watch(macOSAppRoutingScopeProvider).value : null;
     final iconCache = ref.read(appIconCacheProvider);
     final installed = _installedForLabels(
       ref,
@@ -331,7 +338,7 @@ class _RoutingScreenState extends ConsumerState<_RoutingScreen> {
             iconCache: iconCache,
             installed: installed,
             background: rowColor,
-            issue: _routeIssue(l10n, route, caps, servers, split, installed),
+            issue: _routeIssue(l10n, route, caps, servers, split, installed, macSplit),
             onTap: locked
                 ? () => _showRouteEntries(context, route)
                 : () => _openRouteEditor(context, route, profileId),

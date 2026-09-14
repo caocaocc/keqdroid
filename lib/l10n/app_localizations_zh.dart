@@ -688,7 +688,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsXrayDnsCustom => '自定义 DNS 服务器';
 
   @override
-  String get settingsXrayDnsCustomHint => '每行一个地址。+local 直接访问 DNS，其余地址按代理规则连接。';
+  String get settingsXrayDnsCustomHint => '每行一个地址（DoH、DoT 或普通）';
 
   @override
   String get settingsXrayDnsCustomHintXray => '每行一个地址（DoH 或普通），Xray 不支持 DoT';

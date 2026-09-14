@@ -702,7 +702,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settingsXrayDnsCustom => 'Свои DNS-серверы';
 
   @override
-  String get settingsXrayDnsCustomHint => 'Один адрес на строку. +local — напрямую; остальные следуют правилам прокси.';
+  String get settingsXrayDnsCustomHint => 'Один адрес на строку (DoH, DoT или обычный)';
 
   @override
   String get settingsXrayDnsCustomHintXray => 'Один адрес на строку (DoH или обычный), DoT в Xray нет';

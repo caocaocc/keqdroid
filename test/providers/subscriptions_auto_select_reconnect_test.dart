@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/models/server_item.dart';
+import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/models/subscription.dart';
 import 'package:keqdroid/providers/providers.dart';
 import 'package:keqdroid/services/auto_select_home.dart';
@@ -63,6 +64,7 @@ Future<(ProviderContainer, _Backend)> _connected({
     subscriptionId: 'a',
   );
   final storage = await buildStorageService();
+  await storage.saveSettings(AppSettings.fromJson({}));
   await storage.saveSubscriptions([sub]);
   await storage.saveServers([gone]);
   await storage.setActiveServerId(gone.id);
@@ -136,6 +138,7 @@ void main() {
         subscriptionId: 'a',
       );
       final storage = await buildStorageService();
+  await storage.saveSettings(AppSettings.fromJson({}));
       await storage.saveSubscriptions([
         const Subscription(
           id: 'a',

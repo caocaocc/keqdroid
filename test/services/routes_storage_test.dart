@@ -10,9 +10,18 @@ void main() {
   test('свежая установка: один маршрут по умолчанию и без подсказки', () async {
     final storage = await buildStorageService();
     final routes = await storage.getRoutes();
-    expect(routes.single.sites, 'ru, yandex.ru, vk.com');
+    expect(routes.single.sites, 'geosite:cn, geoip:cn');
     expect(routes.single.target, RouteTarget.direct);
     expect(storage.routesHintPending, isFalse);
+  });
+
+  test('legacy missing fields and saved routes survive migration', () async {
+    final storage = await buildStorageService();
+    await storage.saveSettings(AppSettings.fromJson({}));
+    final migrated = await storage.getRoutes();
+    expect(migrated.single.sites, 'ru, yandex.ru, vk.com');
+    await storage.saveSettings(const AppSettings());
+    expect((await storage.getRoutes()).single.sites, migrated.single.sites);
   });
 
   test('обновление: списки и свои правила стали маршрутами, подсказка ждёт',

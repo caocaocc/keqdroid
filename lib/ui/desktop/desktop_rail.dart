@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../../platform/platform_bootstrap.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -117,7 +117,7 @@ class _DesktopRailState extends ConsumerState<DesktopRail> with TickerProviderSt
     _sync(_menu, _roomy, roomy);
     _expanded = expanded;
     _roomy = roomy;
-    final hasMode = Platform.isWindows || Platform.isLinux;
+    final hasMode = PlatformBootstrap.isDesktop;
     final destinations = [
       (Icons.dns_outlined, Icons.dns_rounded, l10n.navServers),
       (Icons.subscriptions_outlined, Icons.subscriptions_rounded, l10n.navSubscriptions),

@@ -7,11 +7,13 @@ import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/platform/platform_bootstrap.dart';
 import 'package:keqdroid/providers/providers.dart';
 import 'package:keqdroid/screens/settings_tab.dart';
+import 'package:keqdroid/services/vpn_engine.dart';
 import 'package:keqdroid/services/storage_service.dart';
 import 'package:keqdroid/shared/ui/update_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../helpers/test_storage.dart';
+import '../helpers/fake_tunnel_backend.dart';
 
 final _ru = AppLocalizationsRu();
 
@@ -24,7 +26,10 @@ Future<StorageService> _pump(WidgetTester tester, Widget home,
         initialValues: {'keqdis_settings': settings.toJsonString()},
       ));
   await tester.pumpWidget(ProviderScope(
-    overrides: [storageProvider.overrideWithValue(storage!)],
+    overrides: [
+      storageProvider.overrideWithValue(storage!),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(FakeTunnelBackend())),
+    ],
     child: KeqdroidApp(home: Scaffold(body: home)),
   ));
   await tester.pumpAndSettle();
@@ -102,7 +107,10 @@ void main() {
           },
         ));
     await tester.pumpWidget(ProviderScope(
-      overrides: [storageProvider.overrideWithValue(storage!)],
+      overrides: [
+      storageProvider.overrideWithValue(storage!),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(FakeTunnelBackend())),
+    ],
       child: KeqdroidApp(home: Scaffold(body: behaviourSettingsScreenForTest())),
     ));
     await tester.pumpAndSettle();

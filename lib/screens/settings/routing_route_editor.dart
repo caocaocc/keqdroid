@@ -110,6 +110,7 @@ class _RouteEditorScreenState extends ConsumerState<_RouteEditorScreen> {
       servers,
       split,
       _installedForLabels(ref, [_route]),
+      Platform.isMacOS ? ref.watch(macOSAppRoutingScopeProvider).value : null,
     );
     return PopScope(
       // здесь, а не в dispose: там ref уже нельзя трогать

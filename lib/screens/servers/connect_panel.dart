@@ -57,7 +57,8 @@ class _ModernConnectPanel extends ConsumerWidget {
 
     // connecting тапабелен: это отмена попытки
     final VoidCallback? onTap =
-        vpnStatus == VpnStatus.disconnecting ? null : () => onToggle(vpnStatus);
+        vpnStatus == VpnStatus.disconnecting && !serverSwitchInProgress
+            ? null : () => onToggle(isConnecting ? VpnStatus.connecting : vpnStatus);
 
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -110,7 +111,9 @@ class _ModernConnectPanel extends ConsumerWidget {
                 children: [
                   LayoutBuilder(
                     builder: (context, box) {
-                      final server = activeServer != null
+                      final server = _macOSConnectionNotice(
+                        status: serverSwitchInProgress ? VpnStatus.connecting : vpnStatus,
+                        child: activeServer != null
                           ? _ServerPingPlaque(
                               server: activeServer,
                               connected: isConnected,
@@ -122,7 +125,8 @@ class _ModernConnectPanel extends ConsumerWidget {
                               style: textTheme.bodyMedium?.copyWith(
                                 color: AppTheme.textLight(context),
                               ),
-                            );
+                            ),
+                      );
                       final uptime = _StatsReveal(
                         shown: isConnected && !timeInStats && showTime,
                         alignment: AlignmentDirectional.bottomStart,
@@ -172,17 +176,15 @@ class _ModernConnectPanel extends ConsumerWidget {
                     },
                   ),
                   if (isError && vpnErrorMessage != null)
-                    Padding(
+                    _macOSConnectionError(context, vpnErrorMessage, child: Padding(
                       padding: const EdgeInsets.only(top: ExpressiveSpacing.small),
                       child: Text(
                         friendlyError(vpnErrorMessage, context),
                         maxLines: 5,
                         overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodySmall?.copyWith(
-                          color: AppTheme.red(context),
-                        ),
+                        style: textTheme.bodySmall?.copyWith(color: AppTheme.red(context)),
                       ),
-                    ),
+                    )),
                   _StatsBud(
                     shown: isConnected && hasStats,
                     source: halloween ? null : buttonKey,

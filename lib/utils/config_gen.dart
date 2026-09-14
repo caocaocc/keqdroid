@@ -31,6 +31,7 @@ class ConfigGeneratorV2 {
     String? resolvedServerIp,
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
+    bool macosTunRouting = false,
     DesktopTunOptions? desktopTun,
 
     /// macOS TUN installs a protected physical resolver for generated nodes.
@@ -48,6 +49,7 @@ class ConfigGeneratorV2 {
         resolvedServerIp: resolvedServerIp,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: nativeTunInbound,
+        macosTunRouting: macosTunRouting,
         desktopTun: desktopTun,
         physicalBootstrapDns: physicalBootstrapDns,
         geoIndex: geoIndex,
@@ -251,6 +253,7 @@ class ConfigGeneratorV2 {
     bool pingHttpInbound = false,
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
+    bool macosTunRouting = false,
     DesktopTunOptions? desktopTun,
     bool physicalBootstrapDns = false,
     GeoAssetIndex? geoIndex,
@@ -280,6 +283,7 @@ class ConfigGeneratorV2 {
         pingHttpInbound: pingHttpInbound,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: tunInbound,
+        macosTunRouting: macosTunRouting,
         desktopTun: pc,
         routeServers: routeServers,
         appRoutes: appRoutes,
@@ -295,6 +299,7 @@ class ConfigGeneratorV2 {
         pingHttpInbound: pingHttpInbound,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: tunInbound,
+        macosTunRouting: macosTunRouting,
         desktopTun: pc,
         geoIndex: geoIndex,
         routeServers: routeServers,
@@ -316,6 +321,7 @@ class ConfigGeneratorV2 {
         pingHttpInbound: pingHttpInbound,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: tunInbound,
+        macosTunRouting: macosTunRouting,
         desktopTun: pc,
         routeServers: routeServers,
         appRoutes: appRoutes,
@@ -482,6 +488,7 @@ class ConfigGeneratorV2 {
     bool pingHttpInbound = false,
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
+    bool macosTunRouting = false,
     DesktopTunOptions? desktopTun,
     List<RouteServerOutbound> routeServers = const [],
     List<RouteAppRules> appRoutes = const [],
@@ -528,6 +535,7 @@ class ConfigGeneratorV2 {
       pingHttpInbound: pingHttpInbound,
       localInboundsNoAuth: localInboundsNoAuth,
       nativeTunInbound: nativeTunInbound,
+      macosTunRouting: macosTunRouting,
       desktopTun: desktopTun,
       routeServers: routeServers,
       appRoutes: appRoutes,
@@ -972,6 +980,7 @@ class ConfigGeneratorV2 {
     bool pingHttpInbound = false,
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
+    bool macosTunRouting = false,
     DesktopTunOptions? desktopTun,
     GeoAssetIndex? geoIndex,
     List<RouteServerOutbound> routeServers = const [],
@@ -1048,7 +1057,7 @@ class ConfigGeneratorV2 {
       routeServers: routeServers,
       appRoutes: _appRoutesForInbound(
         appRoutes,
-        nativeTunInbound: nativeTunInbound,
+        nativeTunInbound: nativeTunInbound || macosTunRouting,
       ),
     );
     final placedDns = _placedDnsDomains(_placedRoutes(appRoutes));
@@ -2027,6 +2036,7 @@ class ConfigGeneratorV2 {
     bool pingHttpInbound = false,
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
+    bool macosTunRouting = false,
     DesktopTunOptions? desktopTun,
     bool physicalBootstrapDns = false,
     List<RouteServerOutbound> routeServers = const [],
@@ -2039,7 +2049,7 @@ class ConfigGeneratorV2 {
     final routes = isPingMode ? const <RouteServerOutbound>[] : routeServers;
     final apps = isPingMode
         ? const <RouteAppRules>[]
-        : _appRoutesForInbound(appRoutes, nativeTunInbound: nativeTunInbound);
+        : _appRoutesForInbound(appRoutes, nativeTunInbound: nativeTunInbound || macosTunRouting);
     final appBlock = [
       for (final r in apps)
         if (!r.forAllApps && r.target == RouteTarget.block) r,
@@ -2642,9 +2652,9 @@ class ConfigGeneratorV2 {
       },
       if (settings.lanSharing) ...[
         {
-          'tag': 'socks-in',
-          'port': socksPort,
-          'listen': '127.0.0.1',
+          'tag': 'socks-lan',
+          'port': settings.lanSocksPort,
+          'listen': '0.0.0.0',
           'protocol': 'socks',
           'settings': _lanAuthEnabled(settings)
               ? {
@@ -2652,10 +2662,14 @@ class ConfigGeneratorV2 {
                   'udp': true,
                   'accounts': [
                     {
-                      'user': Socks5Credentials().username,
-                      'pass': Socks5Credentials().password,
-                    },
+                      'user': settings.lanUsername.trim(),
+                      'pass': settings.lanPassword,
+                    }
                   ],
+                }
+              : {
+                  'auth': 'noauth',
+                  'udp': true,
                 },
           'sniffing': core.buildSniffing(),
         },
@@ -2669,9 +2683,9 @@ class ConfigGeneratorV2 {
                   'allowTransparent': false,
                   'accounts': [
                     {
-                      'user': Socks5Credentials().username,
-                      'pass': Socks5Credentials().password,
-                    },
+                      'user': settings.lanUsername.trim(),
+                      'pass': settings.lanPassword,
+                    }
                   ],
                 }
               : {'allowTransparent': false},

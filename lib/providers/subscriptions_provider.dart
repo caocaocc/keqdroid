@@ -7,6 +7,18 @@ class SubscriptionsNotifier extends AsyncNotifier<List<Subscription>> {
 
   @override
   Future<List<Subscription>> build() async {
+    // Ownership changes invalidate pending Auto measurements without making
+    // the VPN provider depend on this notifier, which also follows the VPN.
+    listenSelf((previous, next) {
+      String owners(AsyncValue<List<Subscription>>? value) =>
+          (value?.value ?? const <Subscription>[])
+              .where((subscription) => subscription.autoSelect)
+              .map((subscription) => subscription.id)
+              .join(',');
+      if (owners(previous) != owners(next) && ref.exists(vpnStateProvider)) {
+        ref.read(vpnStateProvider.notifier)._invalidateAutoSelect();
+      }
+    });
     // WorkManager пишет в SharedPreferences из другого изолята, без reloadFromDisk кэш устаревший
     final listener = AppLifecycleListener(
       onResume: () {
