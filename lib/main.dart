@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keqdroid/app/app.dart';
 import 'package:keqdroid/core/app_logger.dart';
+import 'package:keqdroid/tunnel/core_capabilities.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:keqdroid/platform/platform_bootstrap.dart';
 import 'package:keqdroid/platform/windows_cert_trust.dart';
@@ -15,6 +16,7 @@ import 'package:keqdroid/services/background_service.dart';
 import 'package:keqdroid/services/card_image_service.dart';
 import 'package:keqdroid/services/desktop_background_service.dart';
 import 'package:keqdroid/services/notification_service.dart';
+import 'package:keqdroid/services/macos_desktop_service.dart';
 import 'package:keqdroid/services/prefs_recovery.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/providers/providers.dart';
@@ -27,6 +29,7 @@ import 'package:keqdroid/services/memory_watch.dart';
 import 'package:keqdroid/services/storage_service.dart';
 import 'package:keqdroid/services/update_service.dart';
 import 'package:keqdroid/tunnel/linux_tunnel_backend.dart';
+import 'package:keqdroid/tunnel/macos_core_paths.dart';
 import 'package:keqdroid/shared/ui/app_theme.dart';
 import 'package:keqdroid/shared/ui/bottom_nav.dart';
 import 'package:keqdroid/shared/ui/floating_bar.dart';
@@ -74,6 +77,7 @@ Future<void> main() async {
       await PlatformBootstrap.initialize();
     } else if (Platform.isLinux || Platform.isMacOS) {
       await DesktopBackgroundService.init();
+      if (Platform.isMacOS) await MacOSDesktopService.initialize();
       if (Platform.isLinux) {
         final primary =
             await LinuxBackgroundService.instance.ensureSingleInstance();
@@ -114,7 +118,7 @@ Future<void> main() async {
     await LiquidWave.loadShaders();
     await LiquidBud.load();
 
-    final home = Platform.isWindows || Platform.isLinux
+    final home = PlatformBootstrap.isDesktop
         ? const DesktopHomeScreen()
         : const VpnHomeScreen();
 
@@ -126,6 +130,10 @@ Future<void> main() async {
     );
 
     MemoryWatch.instance.start();
+
+    if (Platform.isMacOS) {
+      unawaited(CoreCapabilities.warmUp(MacOSCorePaths.keqrnelExecutable()));
+    }
   }, (error, stack) async {
     await AppLogger.instance.recordError(
       error,

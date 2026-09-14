@@ -5,15 +5,17 @@ import 'package:flutter/widgets.dart';
 
 import '../core/app_logger.dart';
 import '../models/hotkey_config.dart';
+import '../platform/desktop_capabilities.dart';
 
 class HotkeyService {
   HotkeyService._();
 
   static const _channel = MethodChannel('keqdis_vpn_channel');
 
-  static bool get isSupported => Platform.isWindows || Platform.isLinux;
+  static bool get isSupported => DesktopCapabilities.current.isDesktop;
 
-  static bool get isGlobal => Platform.isWindows;
+  /// true — хоткеи системные (работают при скрытом окне).
+  static bool get isGlobal => DesktopCapabilities.current.globalHotkeys;
 
   static void Function(HotkeyAction action)? onPressed;
 
@@ -41,6 +43,23 @@ class HotkeyService {
     Map<HotkeyAction, HotkeyBinding> bindings,
   ) async {
     _bindings = Map.of(bindings);
+
+    if (Platform.isMacOS) {
+      try {
+        return await _channel.invokeListMethod<String>('setGlobalHotkeys', [
+              for (final entry in bindings.entries)
+                {'action': entry.key.id, 'binding': entry.value.toToken()},
+            ]) ??
+            const [];
+      } on PlatformException catch (e, st) {
+        AppLogger.instance.warn(
+          'Failed to register macOS hotkeys',
+          error: e,
+          stackTrace: st,
+        );
+        return bindings.keys.map((action) => action.id).toList();
+      }
+    }
 
     if (Platform.isWindows) {
       final payload = <Map<String, Object>>[];

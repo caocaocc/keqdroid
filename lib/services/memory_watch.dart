@@ -20,7 +20,10 @@ class MemoryWatch {
   Timer? _timer;
 
   void start() {
-    if (_timer != null || !(Platform.isWindows || Platform.isLinux)) return;
+    if (_timer != null ||
+        !(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return;
+    }
     _timer = Timer.periodic(MemoryWatchSchedule.beat, (_) => _onBeat());
     unawaited(_snapshot('start'));
   }
@@ -85,6 +88,18 @@ class MemoryWatch {
             if (entry.value case final Map core when core['ok'] == true)
               entry.key: core['privateBytes'] as int,
         },
+      );
+    }
+    // На macOS доступны общие счётчики процесса; /proc и Windows-канал там
+    // не работают. Память ядер не измерена — не выдаём это за их отсутствие.
+    if (Platform.isMacOS) {
+      return MemorySample(
+        rss: common.rss,
+        peakRss: common.peakRss,
+        liveImages: common.liveImages,
+        imageBytes: common.imageBytes,
+        polls: common.polls,
+        cores: null,
       );
     }
     final status = _procStatus('self');
@@ -234,7 +249,9 @@ class MemorySample {
   final int imageBytes;
   final String polls;
 
-  final Map<String, int> cores;
+  /// Ядро → его память: выделенная на Windows, резидентная на Linux.
+  /// null — на платформе эти счётчики недоступны.
+  final Map<String, int>? cores;
 
   int get size => privateBytes ?? rss;
 
@@ -250,9 +267,10 @@ class MemorySample {
       ].join(', '),
       'images $liveImages live, ${mb(imageBytes)} cached',
       if (polls.isNotEmpty) '/connections: $polls',
-      cores.isEmpty
-          ? 'no core running'
-          : 'cores ${cores.entries.map((e) => '${e.key} ${mb(e.value)}').join(', ')}',
+      if (cores case final cores?)
+        cores.isEmpty
+            ? 'no core running'
+            : 'cores ${cores.entries.map((e) => '${e.key} ${mb(e.value)}').join(', ')}',
     ];
     return parts.join('; ');
   }

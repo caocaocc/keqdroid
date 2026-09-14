@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'desktop_capabilities.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -28,7 +29,7 @@ class PlatformBootstrap {
 
   static bool get isDesktop =>
       debugIsDesktopOverride ??
-      (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+      DesktopCapabilities.current.isDesktop;
 
   static bool _isTelevision = false;
 

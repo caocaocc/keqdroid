@@ -82,6 +82,9 @@ class AppSettings {
 
   final bool waveLatencyColor;
   final bool showSpeedInNotification;
+  /// macOS: показывать скорость трафика KEQDIS в строке меню.
+  final bool showMenuBarSpeed;
+  /// Показывать время подключения (аптайм) в системном уведомлении VPN.
   final bool showUptimeInNotification;
   final bool notifySubscriptionUpdates;
   final bool linuxTunRememberDismissed;
@@ -155,6 +158,7 @@ class AppSettings {
     this.showTrafficSplit = false,
     this.waveLatencyColor = true,
     this.showSpeedInNotification = true,
+    this.showMenuBarSpeed = true,
     this.showUptimeInNotification = true,
     this.notifySubscriptionUpdates = true,
     this.linuxTunRememberDismissed = false,
@@ -220,6 +224,7 @@ class AppSettings {
     'showTrafficSplit': showTrafficSplit,
     'waveLatencyColor': waveLatencyColor,
     'showSpeedInNotification': showSpeedInNotification,
+    'showMenuBarSpeed': showMenuBarSpeed,
     'showUptimeInNotification': showUptimeInNotification,
     'notifySubscriptionUpdates': notifySubscriptionUpdates,
     'linuxTunRememberDismissed': linuxTunRememberDismissed,
@@ -318,6 +323,7 @@ class AppSettings {
       showTrafficSplit: json['showTrafficSplit'] as bool? ?? false,
       waveLatencyColor: json['waveLatencyColor'] as bool? ?? true,
       showSpeedInNotification: json['showSpeedInNotification'] as bool? ?? true,
+      showMenuBarSpeed: json['showMenuBarSpeed'] as bool? ?? true,
       showUptimeInNotification:
           json['showUptimeInNotification'] as bool? ?? true,
       notifySubscriptionUpdates:
@@ -484,6 +490,7 @@ class AppSettings {
     bool? showTrafficSplit,
     bool? waveLatencyColor,
     bool? showSpeedInNotification,
+    bool? showMenuBarSpeed,
     bool? showUptimeInNotification,
     bool? notifySubscriptionUpdates,
     bool? linuxTunRememberDismissed,
@@ -552,6 +559,7 @@ class AppSettings {
         waveLatencyColor: waveLatencyColor ?? this.waveLatencyColor,
         showSpeedInNotification:
             showSpeedInNotification ?? this.showSpeedInNotification,
+        showMenuBarSpeed: showMenuBarSpeed ?? this.showMenuBarSpeed,
         showUptimeInNotification:
             showUptimeInNotification ?? this.showUptimeInNotification,
         notifySubscriptionUpdates:
@@ -633,6 +641,7 @@ class AppSettings {
               showTrafficSplit == other.showTrafficSplit &&
               waveLatencyColor == other.waveLatencyColor &&
               showSpeedInNotification == other.showSpeedInNotification &&
+              showMenuBarSpeed == other.showMenuBarSpeed &&
               showUptimeInNotification == other.showUptimeInNotification &&
               notifySubscriptionUpdates == other.notifySubscriptionUpdates &&
               linuxTunRememberDismissed == other.linuxTunRememberDismissed &&
@@ -707,6 +716,7 @@ class AppSettings {
     showTrafficSplit,
     waveLatencyColor,
     showSpeedInNotification,
+    showMenuBarSpeed,
     showUptimeInNotification,
     notifySubscriptionUpdates,
     linuxTunRememberDismissed,

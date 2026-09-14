@@ -1,0 +1,227 @@
+diff --git a/tun_darwin.go b/tun_darwin.go
+--- a/tun_darwin.go
++++ b/tun_darwin.go
+@@ -1,7 +1,6 @@
+ package tun
+ 
+ import (
+-	"errors"
+ 	"fmt"
+ 	"net"
+ 	"net/netip"
+@@ -18,7 +17,6 @@
+ 	E "github.com/sagernet/sing/common/exceptions"
+ 	"github.com/sagernet/sing/common/shell"
+ 
+-	"golang.org/x/net/route"
+ 	"golang.org/x/sys/unix"
+ )
+ 
+@@ -42,7 +40,9 @@
+ 	options             Options
+ 	inet4Address        [4]byte
+ 	inet6Address        [16]byte
+-	routeSet            bool
++	closed              bool
++	closeErr            error
++	routeMu             sync.Mutex
+ 	sendMsgX            bool
+ }
+ 
+@@ -154,23 +154,25 @@
+ 		return nil
+ 	}
+ 	t.options.InterfaceMonitor.RegisterMyInterface(t.options.Name)
+-	return t.setRoutes()
++	return keqdisStartRouteSession(t.setRoutes, t.Close)
+ }
+ 
+ func (t *NativeTun) Close() error {
+-	if t.options.EXP_ExternalConfiguration {
+-		t.stopFd.Stop()
+-		err := t.tunFile.Close()
+-		t.closePollers()
+-		t.stopFd.Close()
+-		return err
+-	}
+-	defer flushDNSCache()
++	t.routeMu.Lock()
++	defer t.routeMu.Unlock()
++	if t.closed {
++		return t.closeErr
++	}
++	t.closed = true
++	if !t.options.EXP_ExternalConfiguration {
++		defer flushDNSCache()
++	}
+ 	t.stopFd.Stop()
+-	err := E.Errors(t.unsetRoutes(), t.tunFile.Close())
++	// Darwin detaches only this utun and removes routes still bound to its ifnet.
++	t.closeErr = t.tunFile.Close()
+ 	t.closePollers()
+ 	t.stopFd.Close()
+-	return err
++	return t.closeErr
+ }
+ 
+ func (t *NativeTun) closePollers() {
+@@ -443,85 +445,48 @@
+ }
+ 
+ func (t *NativeTun) UpdateRouteOptions(tunOptions Options) error {
+-	t.options = tunOptions
+-	if t.options.EXP_ExternalConfiguration {
++	return errKeqdisRouteSessionRebuild
++}
++
++func (t *NativeTun) setRoutes() error {
++	t.routeMu.Lock()
++	defer t.routeMu.Unlock()
++	return t.setRoutesLocked()
++}
++
++func (t *NativeTun) setRoutesLocked() error {
++	if t.closed {
++		return os.ErrClosed
++	}
++	if t.options.FileDescriptor != 0 {
+ 		return nil
+ 	}
+-	err := t.unsetRoutes()
+-	if err != nil {
++	routeRanges, err := t.options.BuildAutoRouteRanges(false)
++	if err != nil || len(routeRanges) == 0 {
+ 		return err
+ 	}
+-	return t.setRoutes()
+-}
+-
+-func (t *NativeTun) setRoutes() error {
+-	if t.options.FileDescriptor == 0 {
+-		routeRanges, err := t.options.BuildAutoRouteRanges(false)
+-		if err != nil {
+-			return err
+-		}
+-		if len(routeRanges) > 0 {
+-			gateway4, gateway6 := t.options.Inet4GatewayAddr(), t.options.Inet6GatewayAddr()
+-			for _, destination := range routeRanges {
+-				var gateway netip.Addr
+-				if destination.Addr().Is4() {
+-					gateway = gateway4
+-				} else {
+-					gateway = gateway6
+-				}
+-				var interfaceIndex int
+-				if t.options.InterfaceScope {
+-					iff, err := t.options.InterfaceFinder.ByName(t.options.Name)
+-					if err != nil {
+-						return err
+-					}
+-					interfaceIndex = iff.Index
+-				}
+-				err = execRoute(unix.RTM_ADD, t.options.InterfaceScope, interfaceIndex, destination, gateway)
+-				if err != nil {
+-					if errors.Is(err, unix.EEXIST) {
+-						err = execRoute(unix.RTM_DELETE, false, 0, destination, gateway)
+-						if err != nil {
+-							return E.Cause(err, "remove existing route: ", destination)
+-						}
+-						err = execRoute(unix.RTM_ADD, t.options.InterfaceScope, interfaceIndex, destination, gateway)
+-						if err != nil {
+-							return E.Cause(err, "re-add route: ", destination)
+-						}
+-					} else {
+-						return E.Cause(err, "add route: ", destination)
+-					}
+-				}
+-			}
+-			flushDNSCache()
+-			t.routeSet = true
+-		}
+-	}
+-	return nil
+-}
+-
+-func (t *NativeTun) unsetRoutes() error {
+-	if !t.routeSet {
+-		return nil
+-	}
+-	routeRanges, err := t.options.BuildAutoRouteRanges(false)
++	name, err := t.Name()
++	if err != nil {
++		return err
++	}
++	iff, err := net.InterfaceByName(name)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	gateway4, gateway6 := t.options.Inet4GatewayAddr(), t.options.Inet6GatewayAddr()
+ 	for _, destination := range routeRanges {
+-		var gateway netip.Addr
+-		if destination.Addr().Is4() {
+-			gateway = gateway4
+-		} else {
++		gateway := gateway4
++		if destination.Addr().Is6() {
+ 			gateway = gateway6
+ 		}
+-		err = execRoute(unix.RTM_DELETE, false, 0, destination, gateway)
+-		if err != nil {
+-			err = E.Errors(err, E.Cause(err, "delete route: ", destination))
+-		}
+-	}
+-	return err
++		candidate := keqdisOwnedRoute{destination: destination, gateway: gateway,
++			interfaceIndex: iff.Index, interfaceScope: t.options.InterfaceScope}
++		if err = keqdisAddRoute(candidate, keqdisExecuteRoute, keqdisRouteSnapshot); err != nil {
++			return E.Cause(err, "add route without replacing existing routes: ", destination)
++		}
++	}
++	flushDNSCache()
++	return nil
+ }
+ 
+ func useSocket(domain, typ, proto int, block func(socketFd int) error) error {
+@@ -533,42 +498,6 @@
+ 	return block(socketFd)
+ }
+ 
+-func execRoute(rtmType int, interfaceScope bool, interfaceIndex int, destination netip.Prefix, gateway netip.Addr) error {
+-	routeMessage := route.RouteMessage{
+-		Type:    rtmType,
+-		Version: unix.RTM_VERSION,
+-		Flags:   unix.RTF_STATIC | unix.RTF_GATEWAY,
+-		Seq:     1,
+-	}
+-	if rtmType == unix.RTM_ADD {
+-		routeMessage.Flags |= unix.RTF_UP
+-		if interfaceScope {
+-			routeMessage.Flags |= unix.RTF_IFSCOPE
+-			routeMessage.Index = interfaceIndex
+-		}
+-	}
+-	if gateway.Is4() {
+-		routeMessage.Addrs = []route.Addr{
+-			syscall.RTAX_DST:     &route.Inet4Addr{IP: destination.Addr().As4()},
+-			syscall.RTAX_NETMASK: &route.Inet4Addr{IP: netip.MustParseAddr(net.IP(net.CIDRMask(destination.Bits(), 32)).String()).As4()},
+-			syscall.RTAX_GATEWAY: &route.Inet4Addr{IP: gateway.As4()},
+-		}
+-	} else {
+-		routeMessage.Addrs = []route.Addr{
+-			syscall.RTAX_DST:     &route.Inet6Addr{IP: destination.Addr().As16()},
+-			syscall.RTAX_NETMASK: &route.Inet6Addr{IP: netip.MustParseAddr(net.IP(net.CIDRMask(destination.Bits(), 128)).String()).As16()},
+-			syscall.RTAX_GATEWAY: &route.Inet6Addr{IP: gateway.As16()},
+-		}
+-	}
+-	request, err := routeMessage.Marshal()
+-	if err != nil {
+-		return err
+-	}
+-	return useSocket(unix.AF_ROUTE, unix.SOCK_RAW, 0, func(socketFd int) error {
+-		return common.Error(unix.Write(socketFd, request))
+-	})
+-}
+-
+ func flushDNSCache() {
+ 	go shell.Exec("dscacheutil", "-flushcache").Run()
+ }

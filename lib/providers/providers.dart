@@ -11,6 +11,7 @@ import '../core/exceptions.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_info.dart';
 import '../models/app_settings.dart';
+import '../models/macos_app_routing.dart';
 import '../models/ping_test_config.dart';
 import '../models/routing_profile.dart';
 import '../models/server_group.dart';
@@ -29,6 +30,8 @@ import '../services/card_image_service.dart';
 import '../services/core_dial_failures.dart';
 import '../services/exit_ip_service.dart';
 import '../services/geo_asset_service.dart';
+import '../services/macos_app_routing_store.dart';
+import '../services/macos_status_item.dart';
 import '../services/notification_service.dart';
 import '../services/ping_service.dart';
 import '../services/rule_list_service.dart';
@@ -40,9 +43,14 @@ import '../services/vpn_engine.dart';
 import '../platform/vpn_native_bridge.dart';
 import '../tunnel/app_routing_mode.dart';
 import '../tunnel/local_port_plan.dart';
+import '../tunnel/macos_tunnel_backend.dart';
+import '../tunnel/macos_recovery_controller.dart';
+import '../tunnel/macos_service_observation.dart';
+import '../tunnel/desktop_recovery_status.dart';
 import '../tunnel/vpn_backend.dart';
 import '../utils/app_locale.dart';
 import '../utils/app_routes.dart';
+import '../utils/macos_route_apps.dart';
 import '../utils/awg_profile.dart';
 import '../utils/awg_uri.dart';
 import '../utils/config_gen.dart';
@@ -178,8 +186,23 @@ final vpnEngineProvider = Provider<VpnEngine>((ref) {
   // поэтому видимость берём ещё и из натива
   var lifecycleForeground = true;
   var uiVisible = true;
-  void applyPolling() =>
-      engine.setTrafficStatsPollingEnabled(lifecycleForeground && uiVisible);
+  var menuBarSpeed = Platform.isMacOS &&
+      (ref.read(settingsNotifierProvider).value?.showMenuBarSpeed ?? true);
+  void applyPolling() => engine.setTrafficStatsPollingEnabled(
+    desktopTrafficPollingNeeded(
+      visible: uiVisible,
+      foreground: lifecycleForeground,
+      macOS: Platform.isMacOS,
+      showMenuBarSpeed: menuBarSpeed,
+    ),
+  );
+  if (Platform.isMacOS) {
+    ref.listen(settingsNotifierProvider.select((s) => s.value?.showMenuBarSpeed ?? true),
+        (_, next) {
+      menuBarSpeed = next;
+      applyPolling();
+    });
+  }
   final lifecycle = AppLifecycleListener(
     onStateChange: (state) {
       final hidden = state == AppLifecycleState.hidden ||
@@ -254,4 +277,3 @@ final updateInfoProvider = FutureProvider<UpdateInfo?>((ref) async {
     httpPort: ActiveLocalPorts().httpPortOr(settings.httpPort),
   );
 });
-

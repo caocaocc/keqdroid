@@ -112,7 +112,16 @@ class RuleListsNotifier extends Notifier<Map<String, RuleListStatus>> {
       state = {...state, url: current.copyWith(loading: true)};
       final result = await ref.read(ruleListServiceProvider).refresh(url);
       if (!ref.mounted) return;
-      if (state.containsKey(url)) state = {...state, url: result};
+      if (state.containsKey(url)) {
+        state = {...state, url: result};
+        // An in-flight macOS preparation may already have read the old cache.
+        // Loading/failure metadata leaves that cache intact. Keep this one-way:
+        // this provider already listens to VPN state to refresh after connect.
+        if (result.failure == null && result.updatedAt != null &&
+            result.updatedAt != current.updatedAt) {
+          ref.read(vpnStateProvider.notifier)._macRuleListUpdated(url);
+        }
+      }
     }
   }
 }

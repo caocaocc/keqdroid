@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/app/app.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/providers/providers.dart';
+import 'package:keqdroid/services/vpn_engine.dart';
 
 import '../helpers/test_storage.dart';
+import '../helpers/fake_tunnel_backend.dart';
 
 // на HyperOS панель навигации без явного стиля красилась по теме системы и в тёмной теме
 // приложения оставалась белой
@@ -16,7 +18,10 @@ Future<SystemUiOverlayStyle?> _styleFor(WidgetTester tester, {required bool dark
         initialValues: {'keqdis_settings': settings.toJsonString()},
       ));
   await tester.pumpWidget(ProviderScope(
-    overrides: [storageProvider.overrideWithValue(storage!)],
+    overrides: [
+      storageProvider.overrideWithValue(storage!),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(FakeTunnelBackend())),
+    ],
     child: const KeqdisApp(home: Scaffold(body: SizedBox.expand())),
   ));
   await tester.pumpAndSettle();

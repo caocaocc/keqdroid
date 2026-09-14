@@ -1521,13 +1521,21 @@ void main() {
           windows: false,
         );
         final rules = _rules(config);
-        final selectedTarget = mode == AppRoutingMode.onlySelected
-            ? MihomoConfigGen.proxyName
-            : 'DIRECT';
-        final selectedRule = 'PROCESS-PATH,$selectedPath,$selectedTarget';
+        final selectedRule = rules.singleWhere(
+          (rule) => rule.contains(r'Browser\x2eapp'),
+        );
         expect(config['find-process-mode'], 'strict');
-        expect(rules.first, 'PROCESS-PATH,$appPath,DIRECT');
-        expect(rules, contains(selectedRule));
+        expect(rules.first, contains('NOT,((IN-TYPE,TUN))'));
+        expect(
+          rules[1],
+          r'AND,((IN-TYPE,TUN),(PROCESS-PATH-REGEX,^\x2fApplications\x2fKEQDIS\x2eapp\x2fContents\x2fMacOS\x2fKEQDIS$)),DIRECT',
+        );
+        expect(selectedRule, startsWith('AND,((IN-TYPE,TUN),'));
+        expect(selectedRule, endsWith(')),DIRECT'));
+        expect(
+          selectedRule.contains('(?!'),
+          mode == AppRoutingMode.onlySelected,
+        );
         for (final core in ['keqrnel', 'mihomo', 'xray', 'sing-box']) {
           final bypass = 'PROCESS-NAME,$core,DIRECT';
           expect(rules.where((rule) => rule == bypass), hasLength(1));

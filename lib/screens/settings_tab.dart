@@ -1,4 +1,6 @@
-﻿import 'dart:async';
+import 'package:keqdroid/shared/ui/desktop_dns_notice.dart';
+import 'package:keqdroid/shared/ui/desktop_recovery_notice.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -39,6 +41,9 @@ import 'package:keqdroid/services/linux_firewall.dart';
 import 'package:keqdroid/services/settings_backup_service.dart';
 import 'package:keqdroid/services/vpn_engine.dart';
 import 'package:keqdroid/services/windows_desktop_service.dart';
+import 'package:keqdroid/services/macos_desktop_service.dart';
+import 'package:keqdroid/services/macos_app_routing_store.dart';
+import 'package:keqdroid/models/macos_app_routing.dart';
 import 'package:keqdroid/app/app.dart';
 import 'package:keqdroid/screens/settings/connection_tile.dart';
 import 'package:keqdroid/shared/ui/add_process_dialog.dart';
@@ -64,6 +69,7 @@ import 'package:keqdroid/services/update_service.dart';
 import 'package:keqdroid/shared/ui/update_dialog.dart';
 import 'package:keqdroid/utils/app_locale.dart';
 import 'package:keqdroid/utils/app_routes.dart';
+import 'package:keqdroid/utils/macos_route_apps.dart';
 import 'package:keqdroid/utils/error_messages.dart';
 import 'package:keqdroid/utils/bidi.dart';
 import 'package:keqdroid/utils/byte_format.dart';
@@ -84,6 +90,8 @@ import 'package:keqdroid/utils/time_ago.dart';
 import 'package:keqdroid/services/rule_list_service.dart';
 import 'package:keqdroid/utils/vpn_core_support.dart';
 import 'package:keqdroid/platform/platform_bootstrap.dart';
+import 'package:keqdroid/platform/desktop_capabilities.dart';
+import 'package:keqdroid/platform/desktop_lan_state.dart';
 import 'package:keqdroid/screens/split_tunneling_screen.dart';
 import 'package:keqdroid/tunnel/linux_tunnel_backend.dart';
 import 'package:keqdroid/tunnel/vpn_backend.dart';
@@ -161,15 +169,21 @@ class SettingsTab extends ConsumerWidget {
                       const SizedBox(height: 16),
                       ExpressiveGroup(
                         children: [
-                          _LanSharingCard(settingsAsync: settingsAsync),
+                          if (!PlatformBootstrap.isDesktop ||
+                              DesktopCapabilities.current.lanSharing)
+                            _LanSharingCard(settingsAsync: settingsAsync),
                           const _SplitTunnelingSettingsCard(),
-                          if (Platform.isWindows || Platform.isLinux)
+                          if (DesktopCapabilities.current.loginStartup)
                             _SettingsCard(
-                              title: Platform.isLinux
-                                  ? l10n.settingsDesktopTitleLinux
+                              title: Platform.isMacOS
+                                  ? 'macOS'
+                                  : Platform.isLinux
+                                      ? l10n.settingsDesktopTitleLinux
                                   : l10n.settingsDesktopTitle,
                               subtitle: l10n.settingsDesktopSubtitle,
-                              icon: Icons.desktop_windows_rounded,
+                              icon: Platform.isMacOS
+                                  ? Icons.desktop_mac_rounded
+                                  : Icons.desktop_windows_rounded,
                               accent: ExpressiveAccent.secondary,
                               onTap: () => Navigator.push(
                                 context,
@@ -402,6 +416,23 @@ class _SplitTunnelingSettingsCard extends ConsumerWidget {
       ),
     );
 
+    if (Platform.isMacOS) {
+      return FutureBuilder<MacOSAppRoutingSettings>(
+        future: MacOSAppRoutingStore.load(),
+        builder: (context, snapshot) => _SettingsCard(
+          title: l10n.settingsSplitTitle,
+          subtitle: l10n.settingsSplitConfigured(
+            snapshot.data?.apps.length ?? 0,
+          ),
+          icon: Icons.alt_route_rounded,
+          accent: ExpressiveAccent.tertiary,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => SplitTunnelingScreen()),
+          ),
+        ),
+      );
+    }
     return _SettingsCard(
       title: l10n.settingsSplitTitle,
       subtitle: l10n.settingsSplitConfigured(packageCount),

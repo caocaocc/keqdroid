@@ -129,6 +129,7 @@ class SingBoxTunConfigGen {
     required String serverIpToExclude,
     required AppSettings settings,
     List<GeoDomain> chinaDnsDomains = const [],
+    bool delegateRoutingToXray = false,
     List<String> managedProcessNames = const [],
     List<String> managedProcessPaths = const [],
     AppRoutingMode routingMode = AppRoutingMode.allProxy,
@@ -394,7 +395,7 @@ class SingBoxTunConfigGen {
       });
     }
 
-    if (blockedDomains.isNotEmpty) {
+    if (!delegateRoutingToXray && blockedDomains.isNotEmpty) {
       addDomainRule(
         targetRules: rules,
         sourceDomains: blockedDomains,
@@ -406,13 +407,13 @@ class SingBoxTunConfigGen {
     // есть: иначе каждое соединение снова ждало бы DNS, ради отмены которого
     // fake-ip и включают. Назначением домен при этом остаётся — серверу уходит
     // имя, а не адрес.
-    if (fakeIp &&
+    if (!delegateRoutingToXray && fakeIp &&
         (blockedIpsForSingBox.isNotEmpty ||
             directIpsForSingBox.isNotEmpty ||
             proxyIpsForSingBox.isNotEmpty)) {
       rules.add({'action': 'resolve', 'server': 'proxy-dns'});
     }
-    if (blockedIpsForSingBox.isNotEmpty) {
+    if (!delegateRoutingToXray && blockedIpsForSingBox.isNotEmpty) {
       rules.add({'ip_cidr': blockedIpsForSingBox, ...kSingboxBlockAction});
     }
 
@@ -436,7 +437,7 @@ class SingBoxTunConfigGen {
       rules.add({'ip_cidr': cidrs, 'outbound': 'direct'});
     }
 
-    if (directDomains.isNotEmpty) {
+    if (!delegateRoutingToXray && directDomains.isNotEmpty) {
       addDomainRule(
         targetRules: rules,
         sourceDomains: directDomains,
@@ -444,31 +445,32 @@ class SingBoxTunConfigGen {
       );
     }
 
-    if (directIpsForSingBox.isNotEmpty) {
+    if (!delegateRoutingToXray && directIpsForSingBox.isNotEmpty) {
       rules.add({'ip_cidr': directIpsForSingBox, 'outbound': 'direct'});
     }
 
-    rules.add({
+    if (!delegateRoutingToXray || captureIpv6) {
+      rules.add({
       'ip_cidr': [
-        '10.0.0.0/8',
-        '172.16.0.0/12',
-        '192.168.0.0/16',
-        '127.0.0.0/8',
+        if (!delegateRoutingToXray) ...[
+          '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8',
+        ],
         // Локальный IPv6 — только когда мы его вообще забираем: иначе это
         // мёртвые строки в конфиге у всех.
         if (captureIpv6) ...kLocalIpv6Cidrs,
       ],
       'outbound': 'direct',
     });
+    }
 
-    if (proxyDomains.isNotEmpty) {
+    if (!delegateRoutingToXray && proxyDomains.isNotEmpty) {
       addDomainRule(
         targetRules: rules,
         sourceDomains: proxyDomains,
         outbound: 'proxy',
       );
     }
-    if (proxyIpsForSingBox.isNotEmpty) {
+    if (!delegateRoutingToXray && proxyIpsForSingBox.isNotEmpty) {
       rules.add({'ip_cidr': proxyIpsForSingBox, 'outbound': 'proxy'});
     }
 
@@ -500,7 +502,7 @@ class SingBoxTunConfigGen {
     var routeFinal = switch (routingMode) {
       AppRoutingMode.onlySelected => 'direct',
       AppRoutingMode.allExceptSelected => 'proxy',
-      AppRoutingMode.allProxy => finalOutbound,
+      AppRoutingMode.allProxy => delegateRoutingToXray ? 'proxy' : finalOutbound,
     };
 
     // Финал ≠ proxy + geo-правила: не совпавшее с правилами sing-box уходило

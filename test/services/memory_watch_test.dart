@@ -92,6 +92,22 @@ void main() {
       expect(sample.describe(), contains('no core running'));
       expect(sample.describe(), isNot(contains('private')));
     });
+
+    test('macOS: общие счётчики без неподдерживаемой памяти ядер', () {
+      const sample = MemorySample(
+        rss: 200 * _mb,
+        peakRss: 250 * _mb,
+        liveImages: 3,
+        imageBytes: _mb,
+        polls: '4 requests, in flight 0 (max 1)',
+        cores: null,
+      );
+      expect(sample.size, 200 * _mb);
+      expect(sample.describe(),
+          'resident 200 MB (peak 250 MB); images 3 live, 1 MB cached; '
+          '/connections: 4 requests, in flight 0 (max 1)');
+      expect(sample.describe(), isNot(contains('no core running')));
+    });
   });
 
   test('сводка опросов /connections: максимумы за период, висящие — как есть', () {

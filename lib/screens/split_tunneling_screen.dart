@@ -24,6 +24,7 @@ import '../utils/process_name_utils.dart';
 import '../utils/russian_apps.dart';
 import '../utils/split_tunneling_entries.dart';
 import 'package:keqdroid/shared/ui/liquid_toast.dart';
+import 'macos_split_tunneling_screen.dart';
 
 enum TunnelMode { all, includeOnly, excludeOnly }
 
@@ -278,6 +279,9 @@ class _SplitTunnelingScreenState extends ConsumerState<SplitTunnelingScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (Theme.of(context).platform == TargetPlatform.macOS) {
+      return const MacOSSplitTunnelingScreen();
+    }
     final appsAsync = ref.watch(installedAppsProvider(_showSystem));
     final includePackages = ref.watch(
       splitTunnelingProvider.select((s) => s.includePackages),

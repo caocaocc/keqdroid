@@ -325,7 +325,7 @@ class WindowsTrayMenu with TrayListener {
         final notifier = _ref.read(vpnStateProvider.notifier);
         if (status == VpnStatus.connected) {
           await notifier.disconnect();
-        } else if (status == VpnStatus.connecting) {
+        } else if (status == VpnStatus.connecting || notifier.hasConnectionIntent) {
           await notifier.cancelConnect();
         } else if (_ref.read(serversProvider).activeServer != null) {
           await notifier.connect();
@@ -342,23 +342,20 @@ class WindowsTrayMenu with TrayListener {
           }
         }
         if (server == null) return;
-        final status =
-            _ref.read(vpnStateProvider).value?.status ?? VpnStatus.disconnected;
-        final tunnelActive = status == VpnStatus.connected ||
-            status == VpnStatus.connecting;
-        if (tunnelActive && server.id == serversState.activeServer?.id) return;
-        await _ref.read(serversProvider.notifier).setActive(server);
-        if (tunnelActive) {
-          await _ref.read(vpnStateProvider.notifier).reconnectToActiveServer();
-        }
+        await _ref.read(vpnStateProvider.notifier).selectServerManually(
+          server, reconnectIfActive: true,
+        );
       }, 'server select');
 
   Future<void> _setMode(ConnectionMode next) => _guard(() async {
         final settings =
             _ref.read(settingsNotifierProvider).value ?? const AppSettings();
         if (next == settings.connectionModeEnum) return;
+        final vpn = _ref.read(vpnStateProvider.notifier);
+        final generation = vpn.connectionGeneration;
         // окно сперва разворачиваем: переход в TUN может спросить про UAC, диалогу нужен экран
         await WindowsDesktopService.restoreMainWindow();
+        if (!vpn.isConnectionChangeCurrent(generation)) return;
         final context = rootNavigatorKey.currentContext;
         if (context == null || !context.mounted) return;
         await applyDesktopConnectionMode(

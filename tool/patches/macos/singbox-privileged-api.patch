@@ -1,0 +1,11 @@
+diff --git a/experimental/clashapi/server.go b/experimental/clashapi/server.go
+--- a/experimental/clashapi/server.go
++++ b/experimental/clashapi/server.go
+@@ -73,6 +73,7 @@
+ 		return nil, E.New("missing clash mode manager")
+ 	}
+ 	chiRouter := chi.NewRouter()
++	chiRouter.Use(privilegedRuntimeAPI)
+ 	s := &Server{
+ 		ctx:       ctx,
+ 		network:   service.FromContext[adapter.NetworkManager](ctx),

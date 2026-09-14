@@ -110,6 +110,20 @@ final routeCapabilitiesProvider = Provider<RouteCapabilities>((ref) {
   );
 });
 
+// Reload when the route page is opened; macOS selection is stored separately
+// from Android package names and Windows/Linux process entries.
+final macOSAppRoutingScopeProvider =
+    FutureProvider.autoDispose<MacOSAppRoutingSettings>((ref) async {
+  final engine = ref.read(vpnEngineProvider);
+  final settings = await MacOSAppRoutingStore.load();
+  if (settings.mode == AppRoutingMode.allProxy) return settings;
+  final installed = await engine.getInstalledApps(includeSystem: true);
+  return MacOSAppRoutingSettings(
+    mode: settings.mode,
+    apps: MacOSAppRoutingStore.currentEntries(settings, installed),
+  );
+});
+
 class RoutesHintNotifier extends Notifier<bool> {
   @override
   bool build() => ref.read(storageProvider).routesHintPending;

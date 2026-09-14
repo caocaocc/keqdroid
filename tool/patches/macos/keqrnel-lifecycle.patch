@@ -1,0 +1,32 @@
+diff --git a/bridge/xray/outbound.go b/bridge/xray/outbound.go
+--- a/bridge/xray/outbound.go
++++ b/bridge/xray/outbound.go
+@@ -61,7 +61,7 @@
+ }
+ 
+ // Start boots the embedded xray engine when the Box reaches the start stage.
+-func (o *Outbound) Start(stage adapter.StartStage) error {
++func (o *Outbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+ 	if stage != adapter.StartStateStart {
+ 		return nil
+ 	}
+@@ -72,6 +72,7 @@
+ 	o.mu.Lock()
+ 	o.engine = engine
+ 	o.mu.Unlock()
++	scope.Add(o.Close)
+ 	return nil
+ }
+ 
+diff --git a/core/localdns/local.go b/core/localdns/local.go
+--- a/core/localdns/local.go
++++ b/core/localdns/local.go
+@@ -43,7 +43,7 @@
+ 	}, nil
+ }
+ 
+-func (t *Transport) Start(stage adapter.StartStage) error { return nil }
++func (t *Transport) Start(stage adapter.StartStage, _ *adapter.Scope) error { return nil }
+ 
+ func (t *Transport) Close() error { return nil }
+ 

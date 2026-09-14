@@ -7,8 +7,10 @@ import 'package:keqdroid/app/app.dart';
 import 'package:keqdroid/models/app_settings.dart';
 import 'package:keqdroid/platform/platform_bootstrap.dart';
 import 'package:keqdroid/providers/providers.dart';
+import 'package:keqdroid/services/vpn_engine.dart';
 
 import '../helpers/test_storage.dart';
+import '../helpers/fake_tunnel_backend.dart';
 
 const _box = Key('box');
 
@@ -56,7 +58,10 @@ Future<void> _pumpApp(
         initialValues: {'keqdis_settings': settings.toJsonString()},
       ));
   await tester.pumpWidget(ProviderScope(
-    overrides: [storageProvider.overrideWithValue(storage!)],
+    overrides: [
+      storageProvider.overrideWithValue(storage!),
+      vpnEngineProvider.overrideWithValue(VpnEngine.withBackend(FakeTunnelBackend())),
+    ],
     child: KeqdisApp(home: home),
   ));
   await tester.pumpAndSettle();

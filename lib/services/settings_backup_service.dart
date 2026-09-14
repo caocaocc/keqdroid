@@ -9,6 +9,8 @@ import '../models/traffic_route.dart';
 import '../utils/traffic_routes.dart';
 import 'card_image_service.dart';
 import 'storage_service.dart';
+import '../models/macos_app_routing.dart';
+import 'macos_app_routing_store.dart';
 
 enum BackupSection {
   splitTunneling,
@@ -30,11 +32,11 @@ class KeqdisBackup {
   });
 
   Map<String, dynamic> toJson() => {
-        'format': 'keqdis_backup',
-        'version': version,
-        'exportedAt': exportedAt.toIso8601String(),
-        'data': data,
-      };
+    'format': 'keqdis_backup',
+    'version': version,
+    'exportedAt': exportedAt.toIso8601String(),
+    'data': data,
+  };
 
   String toJsonString({bool pretty = true}) {
     final obj = toJson();
@@ -164,6 +166,7 @@ class SettingsBackupService {
     'showTrafficSplit',
     'waveLatencyColor',
     'showSpeedInNotification',
+    'showMenuBarSpeed',
     'showUptimeInNotification',
     'appLanguageCode',
   };
@@ -178,6 +181,7 @@ class SettingsBackupService {
       data['splitTunneling'] = {
         'excludePackages': storage.getExcludePackages(),
         'includePackages': storage.getIncludePackages(),
+        'macos': (await MacOSAppRoutingStore.load()).toJson(),
       };
     }
 
@@ -219,8 +223,12 @@ class SettingsBackupService {
 
   static Set<BackupSection> detectSections(KeqdisBackup backup) {
     final s = <BackupSection>{};
-    if (backup.data['splitTunneling'] is Map) s.add(BackupSection.splitTunneling);
-    if (backup.data['subscriptions'] is List) s.add(BackupSection.subscriptions);
+    if (backup.data['splitTunneling'] is Map) {
+      s.add(BackupSection.splitTunneling);
+    }
+    if (backup.data['subscriptions'] is List) {
+      s.add(BackupSection.subscriptions);
+    }
     if (backup.data['servers'] is Map) s.add(BackupSection.servers);
     if (backup.data['appSettings'] is Map) s.add(BackupSection.appSettings);
     return s;
@@ -234,10 +242,21 @@ class SettingsBackupService {
     if (sections.contains(BackupSection.splitTunneling)) {
       final raw = backup.data['splitTunneling'];
       if (raw is! Map) throw FormatException('Invalid splitTunneling section');
-      final exclude = (raw['excludePackages'] as List?)?.whereType<String>().toList() ?? <String>[];
-      final include = (raw['includePackages'] as List?)?.whereType<String>().toList() ?? <String>[];
+      final macos = raw['macos'];
+      final macosSettings = macos == null
+          ? const MacOSAppRoutingSettings()
+          : MacOSAppRoutingSettings.fromJson(
+              Map<String, dynamic>.from(macos as Map),
+            );
+      final exclude =
+          (raw['excludePackages'] as List?)?.whereType<String>().toList() ??
+          <String>[];
+      final include =
+          (raw['includePackages'] as List?)?.whereType<String>().toList() ??
+          <String>[];
       await storage.setExcludePackages(exclude);
       await storage.setIncludePackages(include);
+      await MacOSAppRoutingStore.save(macosSettings);
     }
 
     if (sections.contains(BackupSection.subscriptions)) {
@@ -263,7 +282,9 @@ class SettingsBackupService {
       final raw = backup.data['servers'];
       if (raw is! Map) throw FormatException('Invalid servers section');
       final items = raw['items'];
-      if (items is! List) throw FormatException('Invalid servers.items section');
+      if (items is! List) {
+        throw FormatException('Invalid servers.items section');
+      }
 
       final servers = items
           .whereType<Map>()

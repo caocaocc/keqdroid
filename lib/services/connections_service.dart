@@ -6,8 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../core/connections_poll_stats.dart';
 import '../models/connection_entry.dart';
 import '../platform/vpn_native_bridge.dart';
-import '../tunnel/linux_tunnel_backend.dart';
-import '../tunnel/windows_tunnel_backend.dart';
+import '../tunnel/desktop_runtime.dart';
 import '../utils/mihomo_api_session.dart';
 import '../utils/mihomo_config_gen.dart';
 import 'connections_tracker.dart';
@@ -32,7 +31,7 @@ class ConnectionsService {
   }
 
   static Future<ConnectionsSnapshot> _rawSnapshot() async {
-    if (Platform.isWindows || Platform.isLinux) {
+    if (DesktopRuntime.supported) {
       final api = await _fromClashApi();
       if (api.source == ConnectionsSource.coreApi) return api;
       final log = await _fromAccessLog();
@@ -59,17 +58,20 @@ class ConnectionsService {
       '${snapshot.source.name}:${_activeClashPort() ?? ''}';
 
   static bool get supportsProcessNames =>
-      Platform.isWindows || Platform.isLinux || Platform.isAndroid;
+      DesktopRuntime.supported || Platform.isAndroid;
 
   static int? _activeClashPort() {
-    if (Platform.isWindows) return WindowsTunnelBackend.activeInstance?.clashApiPort;
-    if (Platform.isLinux) return LinuxTunnelBackend.activeInstance?.clashApiPort;
+    if (DesktopRuntime.supported) return DesktopRuntime.clashApiPort;
     if (Platform.isAndroid) return MihomoApiSession().port;
     return null;
   }
 
-  static String _activeClashSecret() => Platform.isLinux
-      ? LinuxTunnelBackend.activeInstance?.clashApiSecret ?? ''
+  /// Токен API. У keqrnel его нет (API слушает петлю), у mihomo он есть всегда:
+  /// на Android петля общая для всех приложений, а разные правила для разных ОС
+  /// означали бы 401 ровно на одной из них. Пустая строка — значит активной
+  /// сессии mihomo нет, и заголовок не нужен.
+  static String _activeClashSecret() => DesktopRuntime.supported
+      ? DesktopRuntime.clashApiSecret
       : MihomoApiSession().secret;
 
   static Future<ConnectionsSnapshot> _fromClashApi() async {
@@ -233,7 +235,8 @@ class ConnectionsService {
       _ => rulePayload.isEmpty ? ruleType : '$ruleType($rulePayload)',
     };
 
-    final id = json['id']?.toString() ??
+    final id =
+        json['id']?.toString() ??
         '${str('sourceIP')}:${str('sourcePort')}>$host:${str('destinationPort')}';
 
     return ConnectionEntry(
@@ -272,12 +275,11 @@ class ConnectionsService {
 
   static Future<ConnectionsSnapshot> _withAndroidAppNamesFromSource(
     ConnectionsSnapshot snapshot,
-  ) async =>
-      withAppNamesFromSource(
-        snapshot,
-        resolve: VpnNativeBridge.resolveConnectionOwners,
-        cache: _appNames,
-      );
+  ) async => withAppNamesFromSource(
+    snapshot,
+    resolve: VpnNativeBridge.resolveConnectionOwners,
+    cache: _appNames,
+  );
 
   @visibleForTesting
   static Future<ConnectionsSnapshot> withAppNamesFromSource(
@@ -314,9 +316,7 @@ class ConnectionsService {
     if (requests.isEmpty && !fromCache) {
       return entries.isEmpty ? snapshot : _withoutAppNames(snapshot);
     }
-    final names = requests.isEmpty
-        ? const <String>[]
-        : await resolve(requests);
+    final names = requests.isEmpty ? const <String>[] : await resolve(requests);
     for (var i = 0; i < indexes.length && i < names.length; i++) {
       final name = names[i];
       if (name.isEmpty) continue;
@@ -357,7 +357,6 @@ class ConnectionsService {
 
   static final Map<String, String> _appNames = {};
   static const _appNamesLimit = 300;
-
 }
 
 class XrayAccessLogParser {
@@ -426,8 +425,11 @@ class XrayAccessLogParser {
     for (final line in log.split('\n')) {
       final detour = _detour.firstMatch(line);
       if (detour != null) {
-        final target =
-            _targetKey(detour.group(3), detour.group(4), detour.group(5));
+        final target = _targetKey(
+          detour.group(3),
+          detour.group(4),
+          detour.group(5),
+        );
         byTarget[target] = XrayRouteDecision(
           rule: detour.group(1)?.trim() ?? '',
           outbound: detour.group(2)?.trim() ?? '',
@@ -455,10 +457,7 @@ class XrayAccessLogParser {
     for (final raw in log.split('\n')) {
       final match = _sessionLine.firstMatch(raw.trimRight());
       if (match == null) continue;
-      final trace = sessions.putIfAbsent(
-        match.group(1)!,
-        XraySessionTrace.new,
-      );
+      final trace = sessions.putIfAbsent(match.group(1)!, XraySessionTrace.new);
       final rest = match.group(2)!;
 
       if (_sessionEnded.hasMatch(rest)) {
@@ -483,8 +482,7 @@ class XrayAccessLogParser {
       }
       final dest = _sessionDest.firstMatch(rest);
       if (dest != null) {
-        trace.destKey =
-            _targetKey(dest.group(1), dest.group(2), dest.group(3));
+        trace.destKey = _targetKey(dest.group(1), dest.group(2), dest.group(3));
         continue;
       }
       final detour = _detour.firstMatch(rest);
@@ -539,7 +537,8 @@ class XrayAccessLogParser {
       final detourField = m.group(6)?.trim() ?? '';
       final (inbound, outbound) = _splitDetour(detourField);
       final target = _targetKey(network, host, '$port');
-      final trace = byClient[source.toLowerCase()] ??
+      final trace =
+          byClient[source.toLowerCase()] ??
           _nextTraceForDest(byDest[target], target, destCursor);
 
       final domain = trace?.domain ?? '';
@@ -556,8 +555,8 @@ class XrayAccessLogParser {
         outbound: outbound.isNotEmpty
             ? outbound
             : (trace?.outbound.isNotEmpty ?? false)
-                ? trace!.outbound
-                : (outboundByTarget[target] ?? ''),
+            ? trace!.outbound
+            : (outboundByTarget[target] ?? ''),
         rule: (trace?.rule.isNotEmpty ?? false)
             ? trace!.rule
             : (rulesByTarget[target] ?? ''),
