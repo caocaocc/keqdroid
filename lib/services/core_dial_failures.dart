@@ -21,6 +21,11 @@ abstract final class CoreDialFailures {
   /// важна только разница между двумя чтениями.
   static int get count => _count;
 
+  /// Native session readers report only new failures, never the rolling log.
+  static void add(int failures) {
+    if (failures > 0) _count += failures;
+  }
+
   /// Строка вывода ядра сессии: если это отказ дозвона до сервера — считаем.
   static void observe(String line) {
     if (isServerDialFailure(line)) _count++;

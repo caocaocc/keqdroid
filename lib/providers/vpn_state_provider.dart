@@ -1,5 +1,10 @@
 part of 'providers.dart';
 
+/// Tests can advance recovery time without sleeping or changing system clocks.
+final macOSRecoveryClockProvider = Provider<DateTime Function()?>(
+  (ref) => null,
+);
+
 /// Что делать с состоянием из натива, пока идёт наша попытка подключения.
 enum ConnectInFlightAction {
   /// Не трогать состояние: сообщение ничего не говорит об исходе попытки.
@@ -28,8 +33,7 @@ ConnectInFlightAction connectInFlightAction(
   }
   return switch (status) {
     VpnStatus.connected ||
-    VpnStatus.disconnected =>
-      ConnectInFlightAction.applyAndFinish,
+    VpnStatus.disconnected => ConnectInFlightAction.applyAndFinish,
     VpnStatus.error => ConnectInFlightAction.apply,
     _ => ConnectInFlightAction.ignore,
   };
@@ -37,12 +41,96 @@ ConnectInFlightAction connectInFlightAction(
 
 class VpnStateNotifier extends AsyncNotifier<VpnState> {
   StreamSubscription<VpnState>? _sub;
+  StreamSubscription<MacOSServiceObservation>? _macObservations;
+  MacOSRecoveryController? _recovery;
+  int _connectGeneration = 0;
+  Completer<void>? _connectFinished;
+  bool _inputRestartPending = false;
+
+  void _macInputsChanged() {
+    final recovery = _recovery;
+    if (recovery?.waiting != true || _serverSwitchInProgress) return;
+    ConnectionMode latestMode() =>
+        (ref.read(settingsNotifierProvider).value ??
+                ref.read(storageProvider).cachedSettings ??
+                const AppSettings())
+            .connectionModeEnum;
+    if (_inputRestartPending) {
+      // Coalesce changes while the same cleanup is still running. Readiness
+      // must follow the latest mode, without issuing a second stop request.
+      recovery!.mode = latestMode();
+      _showRecovery();
+      return;
+    }
+    _inputRestartPending = true;
+    ++_connectGeneration;
+    _cancelRequested = true;
+    recovery!.begin(latestMode());
+    final ticket = recovery.generation;
+    unawaited(() async {
+      try {
+        await ref.read(vpnEngineProvider).stopVpn();
+        await _connectFinished?.future;
+        if (ref.mounted && recovery.wanted && ticket == recovery.generation) {
+          recovery.mode = latestMode();
+          recovery.failed('network_changed');
+        }
+      } catch (error) {
+        if (ref.mounted && ticket == recovery.generation) {
+          recovery.failed(macOSFailureCode(error), text: error.toString());
+        }
+      } finally {
+        _inputRestartPending = false;
+      }
+    }());
+  }
+
+  void _showRecovery() {
+    final recovery = _recovery;
+    if (recovery == null || !ref.mounted) return;
+    desktopRecoveryStatus.value = recovery.phase == MacOSRecoveryPhase.idle
+        ? null
+        : DesktopRecoveryStatus(
+            recovery.phase,
+            recovery.reason,
+            recovery.message,
+            recovery.retries,
+          );
+    if (recovery.waiting) {
+      ActiveLocalPorts().clear();
+      state = AsyncData(
+        VpnState(status: VpnStatus.connecting, activeMode: recovery.mode),
+      );
+      _persistActiveLocalHttpPort(VpnStatus.connecting);
+    } else if (recovery.phase == MacOSRecoveryPhase.paused) {
+      state = AsyncData(
+        VpnState(
+          status: VpnStatus.error,
+          errorMessage: recovery.message ?? recovery.reason,
+          activeMode: recovery.mode,
+        ),
+      );
+    }
+  }
+
+  void _observeMac(MacOSServiceObservation observation) {
+    if (!ref.mounted) return;
+    _recovery?.observe(
+      service: observation.service,
+      session: observation.session,
+    );
+    if (_recovery?.waiting == true) _showRecovery();
+  }
+
   bool _connectInFlight = false;
   // Окно от тапа до фактического старта сессии. Всё это время нативный сервис
   // ещё не поднят и честно отвечает `disconnected` — принимать этот ответ за
   // исход нашей попытки нельзя.
   bool _awaitingSessionStart = false;
   bool _serverSwitchInProgress = false;
+  Completer<void>? _serverSwitchFinished;
+  // Selecting the current node can still supersede an earlier async choice.
+  int? _pendingManualSelection;
   // Пользователь отменил попытку подключения (тап по кругу в connecting) —
   // connect-in-flight сворачивается в disconnected вместо error/connected.
   bool _cancelRequested = false;
@@ -64,13 +152,102 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   final _autoSelectSwitches = <DateTime>[];
   DateTime? _autoSelectQuietUntil;
   bool _autoSelectBusy = false;
+  bool _autoSelectListening = false;
+  int _autoSelectRevision = 0;
+  String? _autoSelectSampleSession;
+
+  void _invalidateAutoSelect() {
+    ++_autoSelectRevision;
+    _autoSelectSeenFailures = null;
+    _autoSelectSilence = const SilenceStreak();
+    _autoSelectCounters = null;
+  }
+
+  /// A UI action carries this ticket across its asynchronous saves. A later
+  /// disconnect, connect or selection invalidates it before it can start a core.
+  int get connectionGeneration => _connectGeneration;
+
+  bool get hasConnectionIntent =>
+      _connectInFlight ||
+      _serverSwitchInProgress ||
+      state.value?.status == VpnStatus.connected ||
+      state.value?.status == VpnStatus.connecting;
+
+  int beginConnectionChange() {
+    ++_connectGeneration;
+    _cancelRequested = true;
+    _recovery?.cancel();
+    _invalidateAutoSelect();
+    return _connectGeneration;
+  }
+
+  bool isConnectionChangeCurrent(int generation) =>
+      ref.mounted && generation == _connectGeneration;
+
+  /// A manual choice hands Auto back to the user. Selecting the current node
+  /// does not tear down its session or cancel its recovery intent.
+  Future<void> selectServerManually(
+    ServerItem server, {
+    bool reconnectIfActive = false,
+  }) async {
+    if (_pendingManualSelection == null &&
+        ref.read(serversProvider).activeServerId == server.id) {
+      _invalidateAutoSelect();
+      await ref.read(subscriptionsProvider.notifier).handAutoSelectTo(null);
+      return;
+    }
+    final status = state.value?.status;
+    final reconnect =
+        reconnectIfActive &&
+        (status == VpnStatus.connected ||
+            status == VpnStatus.connecting ||
+            _connectInFlight ||
+            _serverSwitchInProgress);
+    final generation = beginConnectionChange();
+    _pendingManualSelection = generation;
+    try {
+      await ref.read(subscriptionsProvider.notifier).handAutoSelectTo(null);
+      if (!isConnectionChangeCurrent(generation)) return;
+      await ref.read(serversProvider.notifier).setActive(server);
+      if (!isConnectionChangeCurrent(generation)) return;
+      if (reconnect) {
+        await reconnectToActiveServer(expectedGeneration: generation);
+      }
+    } finally {
+      if (_pendingManualSelection == generation) {
+        _pendingManualSelection = null;
+      }
+    }
+  }
+
   AppLifecycleListener? _androidLifecycle;
 
   void _applyNativeState(VpnState s) {
+    if (state.value?.status != s.status) _invalidateAutoSelect();
     _restoreSocksCredentialsIfNeeded(s);
     _syncMihomoApiSession(s);
     _persistActiveLocalHttpPort(s.status);
     if (_serverSwitchInProgress && s.status == VpnStatus.error) return;
+    final recovery = _recovery;
+    if (!_connectInFlight && recovery?.wanted == true) {
+      if (s.status == VpnStatus.connected) {
+        recovery!.connected();
+      } else if (s.status == VpnStatus.error) {
+        final backend = ref.read(vpnEngineProvider).macOSBackend;
+        final snapshot = backend?.lastSnapshot;
+        if (snapshot?['errorCode'] is String) {
+          recovery!.failed(
+            snapshot!['errorCode'] as String,
+            text: s.errorMessage,
+            occurrence: backend!.failureOccurrence,
+          );
+        }
+      }
+      if (recovery!.waiting) {
+        _showRecovery();
+        return;
+      }
+    }
     if (_connectInFlight) {
       // Реальный неуспех попытки ловит _awaitNativeConnectOutcome, поэтому
       // отсечка ничего не теряет.
@@ -147,8 +324,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     _credsRestoreInFlight = true;
     unawaited(() async {
       try {
-        final creds =
-            await ref.read(vpnEngineProvider).fetchActiveSocksCredentials();
+        final creds = await ref
+            .read(vpnEngineProvider)
+            .fetchActiveSocksCredentials();
         if (creds != null) {
           Socks5Credentials().init(creds.username, creds.password);
           AppLogger.instance.info(
@@ -227,6 +405,41 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   @override
   Future<VpnState> build() async {
     final engine = ref.read(vpnEngineProvider);
+    final macBackend = engine.macOSBackend;
+    if (macBackend != null) {
+      _recovery ??= MacOSRecoveryController(
+        attempt: (generation) async {
+          if (!ref.mounted ||
+              generation != _recovery?.generation ||
+              _connectInFlight) {
+            return;
+          }
+          await _connectOnce(
+            automaticRecovery: true,
+            recoveryGeneration: generation,
+          );
+        },
+        onChanged: _showRecovery,
+        now: ref.read(macOSRecoveryClockProvider),
+      );
+      unawaited(_macObservations?.cancel());
+      _macObservations = macBackend.observations.listen(_observeMac);
+      ref.listen(settingsNotifierProvider, (previous, next) {
+        if (previous?.value != null &&
+            next.value != null &&
+            previous!.value != next.value) {
+          _macInputsChanged();
+        }
+      });
+      ref.listen(serversProvider.select((value) => value.activeServer), (
+        previous,
+        next,
+      ) {
+        if (previous != null && next != null && previous != next) {
+          _macInputsChanged();
+        }
+      });
+    }
     unawaited(_sub?.cancel());
     _sub = engine.stateStream.listen((s) {
       if (s.status == VpnStatus.disconnected) {
@@ -234,6 +447,17 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         if (waiter != null && !waiter.isCompleted) waiter.complete();
       }
       _applyNativeState(s);
+    });
+    ref.listen(subscriptionsProvider, (previous, next) {
+      String owners(AsyncValue<List<Subscription>>? value) =>
+          (value?.value ?? const <Subscription>[])
+              .where((subscription) => subscription.autoSelect)
+              .map((subscription) => subscription.id)
+              .join(',');
+      if (owners(previous) != owners(next)) _invalidateAutoSelect();
+    });
+    ref.listen(settingsNotifierProvider, (previous, next) {
+      if (previous?.value != next.value) _invalidateAutoSelect();
     });
     _autoSelectTimer?.cancel();
     _autoSelectTimer = Timer.periodic(
@@ -248,6 +472,10 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     ref.onDispose(() {
       _autoSelectTimer?.cancel();
       _autoSelectListenTimer?.cancel();
+      ++_connectGeneration;
+      _recovery?.dispose();
+      desktopRecoveryStatus.value = null;
+      _macObservations?.cancel();
       _sub?.cancel();
       _stopAndroidPolling();
       _androidLifecycle?.dispose();
@@ -303,21 +531,51 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   }
 
   Future<void> connect({bool autostartTunFallback = false}) async {
+    if (_connectInFlight) return;
+    final settings =
+        ref.read(settingsNotifierProvider).value ??
+        ref.read(storageProvider).cachedSettings ??
+        const AppSettings();
+    final generation = _recovery?.begin(settings.connectionModeEnum);
+    await _connectOnce(
+      autostartTunFallback: autostartTunFallback,
+      recoveryGeneration: generation,
+    );
+  }
+
+  Future<void> _connectOnce({
+    bool autostartTunFallback = false,
+    bool automaticRecovery = false,
+    int? recoveryGeneration,
+  }) async {
     if (_connectInFlight) {
-      AppLogger.instance.debug('VPN connect() ignored: connect already in progress');
+      AppLogger.instance.debug(
+        'VPN connect() ignored: connect already in progress',
+      );
       return;
     }
 
     final server = ref.read(serversProvider).activeServer;
     if (server == null) {
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: 'No active server selected',
-      ));
+      _recovery?.failed('noActiveServer', text: 'No active server selected');
+      state = AsyncData(
+        VpnState(
+          status: VpnStatus.error,
+          errorMessage: 'No active server selected',
+        ),
+      );
       return;
     }
 
     _connectInFlight = true;
+    final finished = _connectFinished = Completer<void>();
+    final operation = ++_connectGeneration;
+    bool cancelled() =>
+        !ref.mounted ||
+        operation != _connectGeneration ||
+        _cancelRequested ||
+        recoveryGeneration != null &&
+            recoveryGeneration != _recovery?.generation;
     _cancelRequested = false;
     _awaitingSessionStart = true;
 
@@ -328,7 +586,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 
       // Плитка QS / уведомление могли уже поднять VPN, пока Flutter готовил конфиг.
       final native = await engine.getCurrentState();
+      if (cancelled()) return;
       if (native.status == VpnStatus.connected) {
+        _recovery?.connected();
         state = AsyncData(native);
         return;
       }
@@ -352,19 +612,19 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Затем выкидываем geoip:/geosite:-коды, которых нет в поставляемых базах:
       // xray на неизвестном коде не игнорирует правило, а падает на разборе
       // всего конфига, и подключение умирает с «SOCKS port not ready».
-      var settings = await GeoAssetService.sanitizeRules(
-        applyRoutingRules(
-          await ref.read(storageProvider).getSettings(),
-          await ref.read(storageProvider).getRules(),
-        ),
+      final requestedSettings = applyRoutingRules(
+        await ref.read(storageProvider).getSettings(),
+        await ref.read(storageProvider).getRules(),
       );
+      var settings = await GeoAssetService.sanitizeRules(requestedSettings);
+      if (cancelled()) return;
       // Свои DNS-адреса, которых ядро не исполнит, генератор выбрасывает молча
       // (иначе они не «не сработают», а не дадут ядру подняться). Пользователю
       // это видно только по тому, что его DNS «не применился» — говорим прямо.
       if (settings.xrayCore.dnsUseCustom) {
-        final dropped =
-            XrayCoreSettings.xrayDnsServers(settings.xrayCore.dnsServers)
-                .dropped;
+        final dropped = XrayCoreSettings.xrayDnsServers(
+          settings.xrayCore.dnsServers,
+        ).dropped;
         if (dropped.isNotEmpty) {
           AppLogger.instance.warn(
             'Custom DNS: ${dropped.length} address(es) dropped — the core '
@@ -378,7 +638,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       final split = ref.read(splitTunnelingProvider);
       final excludePkgs = split.excludePackages.toList();
       final includePkgs = split.includePackages.toList();
-      final routingMode = routingModeFromSplit(
+      var routingMode = routingModeFromSplit(
         includePackages: split.includePackages,
         excludePackages: split.excludePackages,
       );
@@ -389,7 +649,26 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             )
           : const <String>[];
 
+      final macRouting = Platform.isMacOS
+          ? await MacOSAppRoutingStore.load()
+          : null;
+      if (macRouting != null) routingMode = macRouting.mode;
       var connectionMode = TunnelSessionBuilder.resolveMode(settings);
+      if (_recovery != null) _recovery!.mode = connectionMode;
+
+      if (Platform.isMacOS &&
+          (autostartTunFallback || automaticRecovery) &&
+          engine.usesMacOSNetworkService) {
+        final service = await engine.macOSBackend!.fetchServiceStatus();
+        if (!MacOSTunnelBackend.canConnectWithoutPrompt(
+          service,
+          connectionMode,
+        )) {
+          throw const VpnPermissionDeniedException(
+            'Automatic connection requires a matching macOS network service. TUN also requires prior account authorization.',
+          );
+        }
+      }
 
       // Разрешение на VPN — только если сессия и правда поднимет интерфейс.
       // В режиме «прокси» на Android establish() не вызывается, и системный
@@ -398,7 +677,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         final permitted = await engine.requestVpnPermission();
         if (!permitted) throw const VpnPermissionDeniedException();
       }
-      if ((Platform.isWindows || Platform.isLinux) &&
+      if ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
           connectionMode == ConnectionMode.proxy &&
           routingMode != AppRoutingMode.allProxy) {
         // Не «сплит не сработал», а «сессия идёт как весь-трафик»: без туннеля
@@ -422,7 +701,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             // Персистим фактический режим, чтобы sidebar/tray показывали Proxy,
             // а не TUN. Иначе UI остаётся в TUN, и повторный выбор TUN не
             // срабатывает (next == current), вынуждая делать proxy→tun вручную.
-            await ref.read(settingsNotifierProvider.notifier).save(
+            await ref
+                .read(settingsNotifierProvider.notifier)
+                .save(
                   settings.copyWith(
                     connectionMode: ConnectionMode.proxy.storageValue,
                   ),
@@ -446,7 +727,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Ставить это раньше нельзя: выше есть ветка, которая сохраняет
       // `settings` в хранилище (автостарт без прав → Proxy), и подменённые
       // порты уехали бы в постоянные настройки.
-      if (Platform.isWindows || Platform.isLinux) {
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         final portPlan = await LocalPortResolver.resolve(settings);
         for (final change in portPlan.changes) {
           AppLogger.instance.warn(change.describe());
@@ -455,11 +736,24 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         ActiveLocalPorts().set(
           socksPort: portPlan.socksPort,
           httpPort: portPlan.httpPort,
+          lanSocksPort: settings.lanSharing ? portPlan.lanSocksPort : null,
+          lanHttpPort: settings.lanSharing ? portPlan.lanHttpPort : null,
         );
       }
 
+      final processPaths =
+          macRouting != null && connectionMode == ConnectionMode.tun
+          ? await MacOSAppRoutingStore.resolvePaths(
+              macRouting,
+              routingMode == AppRoutingMode.allProxy
+                  ? const []
+                  : await engine.getInstalledApps(includeSystem: true),
+            )
+          : const <String>[];
+
       // 1. забираем SOCKS5-креды у нативного сервиса
       final creds = await engine.fetchSocksCredentials();
+      if (cancelled()) return;
       // В режиме прокси креды вписывают руками в чужое приложение, поэтому там
       // нужны постоянные, а не сессионные: нативные генерируются заново на
       // каждое подключение, и настройка в стороннем приложении протухала бы
@@ -472,10 +766,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         if (user.isEmpty || pass.isEmpty) {
           user = randomProxyToken(12);
           pass = randomProxyToken(20);
-          settings = settings.copyWith(proxyModeUser: user, proxyModePass: pass);
-          await ref
-              .read(settingsNotifierProvider.notifier)
-              .save(settings);
+          settings = settings.copyWith(
+            proxyModeUser: user,
+            proxyModePass: pass,
+          );
+          await ref.read(settingsNotifierProvider.notifier).save(settings);
         }
         Socks5Credentials().init(user, pass);
       } else {
@@ -484,8 +779,11 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 
       // 2. резолвим домен сервера заранее, чтобы direct-правило роутинга
       //    шло по IP, а не по домену (важно когда DNS сам идёт через прокси)
-      final serverIp =
-          await _resolveFirstAddress(server.address) ?? server.address;
+      // Darwin core bootstrap uses the physical DNS snapshot. Keep endpoint
+      // domains intact rather than consulting the already redirected OS DNS.
+      final serverIp = Platform.isMacOS
+          ? server.address
+          : await _resolveFirstAddress(server.address) ?? server.address;
 
       // Desktop system/Firefox proxy config — Windows wininet, GNOME gsettings,
       // Firefox user.js — has no field for SOCKS/HTTP credentials, so password
@@ -502,7 +800,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // password` на каждое соединение.
       // На десктопе auth в прокси-режиме невозможен всегда (системный прокси и
       // Firefox кред не шлют), на Android — настройка.
-      final proxyModeNoAuth = connectionMode == ConnectionMode.proxy &&
+      final proxyModeNoAuth =
+          connectionMode == ConnectionMode.proxy &&
           (!Platform.isAndroid || !settings.proxyModeAuth);
 
       // Ядро выбирает формат сервера, а настройка — только там, где формат
@@ -553,11 +852,12 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         );
       } else if (connectionMode == ConnectionMode.tun) {
         mihomoTun = MihomoTunOptions(
-          device: kTunInterfaceName,
+          device: Platform.isMacOS ? null : kTunInterfaceName,
           stack: settings.tun.stack,
           mtu: settings.tun.mtu,
           autoRoute: settings.tun.autoRoute,
           strictRoute:
+              !Platform.isMacOS &&
               settings.tun.strictRouteEnabled(windows: Platform.isWindows),
         );
       } else {
@@ -584,11 +884,14 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
               routingMode: routingMode,
               managedProcessNames: switch (routingMode) {
                 AppRoutingMode.onlySelected ||
-                AppRoutingMode.allExceptSelected =>
-                  processNames,
+                AppRoutingMode.allExceptSelected => processNames,
                 AppRoutingMode.allProxy => const <String>[],
               },
-              appProcessName: Platform.isAndroid
+              managedProcessPaths: processPaths,
+              appProcessPath: Platform.isMacOS
+                  ? Platform.resolvedExecutable
+                  : '',
+              appProcessName: Platform.isAndroid || Platform.isMacOS
                   ? ''
                   : p.basename(Platform.resolvedExecutable),
             )
@@ -597,8 +900,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Готовый конфиг несёт свои geo-правила: неизвестный ядру код уронил бы
       // разбор целиком (для списков настроек это уже сделал
       // GeoAssetService.sanitizeRules выше).
-      final customGeoIndex =
-          server.protocol == 'custom' ? await GeoAssetService.index() : null;
+      final customGeoIndex = server.protocol == 'custom'
+          ? await GeoAssetService.index()
+          : null;
       // Чистка молчит, а выброшенное авторское правило меняет смысл конфига:
       // его трафик проваливается в наш `final`, и с «остальной трафик = блок»
       // перестаёт ходить вовсе. Снаружи это «приложение блокирует то, что
@@ -640,8 +944,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             'code, so the rules cannot be kept. Their traffic now falls '
             'through to "unmatched traffic" in Settings → Routing'
             '${blocked ? ', which is set to BLOCK — that traffic will not '
-                'connect at all. Set it to Proxy or Bypass, or replace the '
-                'codes in the config.' : '.'}',
+                      'connect at all. Set it to Proxy or Bypass, or replace the '
+                      'codes in the config.' : '.'}',
           );
         }
       }
@@ -650,7 +954,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       // Туннель отдаём самому ядру только там, где ему есть что отдавать:
       // на Android, в режиме VPN и на самом xray. В режиме «прокси»
       // интерфейса нет вовсе, у mihomo туннель свой.
-      final nativeTun = Platform.isAndroid &&
+      final nativeTun =
+          Platform.isAndroid &&
           connectionMode == ConnectionMode.tun &&
           !mihomoPicked;
 
@@ -663,14 +968,17 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
               localInboundsNoAuth: proxyModeNoAuth,
               geoIndex: customGeoIndex,
               nativeTunInbound: nativeTun,
+              physicalBootstrapDns:
+                  TunnelSessionBuilder.usePhysicalBootstrapDns(connectionMode),
             );
 
       // Забирать ли IPv6 в туннель. Спрашиваем машину, а не только настройку:
       // IPv6-адрес на TUN-интерфейсе там, где IPv6 в системе выключен, роняет
       // sing-box на старте («set ipv6 dns: Access is denied»), то есть чинил бы
       // утечку ценой неработающего TUN. См. [TunSettings.blockIpv6Leak].
-      final hostHasIpv6 = connectionMode == ConnectionMode.tun &&
-              (Platform.isWindows || Platform.isLinux) &&
+      final hostHasIpv6 =
+          connectionMode == ConnectionMode.tun &&
+              (Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
               settings.tun.blockIpv6Leak &&
               !mihomoPicked
           ? await hostHasGlobalIpv6(excludeInterfaceName: kTunInterfaceName)
@@ -680,8 +988,13 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       if (mihomoPicked &&
           connectionMode == ConnectionMode.tun &&
           settings.tun.blockIpv6Leak &&
-          (Platform.isWindows || Platform.isLinux) &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS) &&
           await hostHasGlobalIpv6(excludeInterfaceName: kTunInterfaceName)) {
+        if (Platform.isMacOS) {
+          throw const VpnStartException(
+            'Mihomo on macOS cannot guarantee IPv6 leak protection. Select the keqrnel core before connecting.',
+          );
+        }
         AppLogger.instance.warn(
           'This machine has global IPv6, but the tunnel here belongs to the '
           'mihomo core, which keeps its own IPv6 handling — the TUN option '
@@ -691,8 +1004,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         );
       }
 
-      // Свои DNS в десктопном TUN исполняет sing-box, а он держит ровно один
-      // резолвер (см. [SingBoxTunConfigGen.ignoredCustomDnsServers]). На xray
+      // Свои DNS в десктопном TUN исполняет sing-box: один адрес на группу
+      // DNS (см. [SingBoxTunConfigGen.ignoredCustomDnsServers]). На xray
       // тот же список опрашивается по очереди, поэтому «у меня три сервера, а
       // работает первый» — не поломка, но и не то, о чём можно молчать.
       if (!mihomoPicked &&
@@ -707,10 +1020,13 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         }
       }
 
-      final chinaDnsDomains = !mihomoPicked &&
+      // Check the original rules: sanitization must not hide a missing CN
+      // database when the user asked to split domestic DNS.
+      final chinaDnsDomains =
+          !mihomoPicked &&
               !Platform.isAndroid &&
               connectionMode == ConnectionMode.tun &&
-              SingBoxTunConfigGen.needsChinaDnsDomains(settings)
+              SingBoxTunConfigGen.needsChinaDnsDomains(requestedSettings)
           ? await GeoAssetService.chinaDnsDomains()
           : const <GeoDomain>[];
 
@@ -732,18 +1048,25 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
             ? processNames
             : const [],
         routingMode: routingMode,
+        managedProcessPaths: processPaths,
         serverName: server.displayName,
         modeOverride: connectionMode,
         hostHasIpv6: hostHasIpv6,
       );
-      await engine.startSession(session);
+      if (cancelled()) return;
+      await engine.startSession(
+        session,
+        allowPermissionPrompt: !automaticRecovery && !autostartTunFallback,
+      );
       _awaitingSessionStart = false;
 
-      if (_cancelRequested) {
+      if (cancelled()) {
         // Отмена пришла, пока сессия поднималась — гасим её и выходим тихо.
         try {
           await engine.stopVpn();
-        } catch (_) {}
+        } catch (_) {
+          if (engine.usesMacOSNetworkService) rethrow;
+        }
         state = const AsyncData(VpnState(status: VpnStatus.disconnected));
         return;
       }
@@ -752,25 +1075,41 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       if (sessionState.status == VpnStatus.connecting) {
         sessionState = await _awaitNativeConnectOutcome(engine);
       }
-      if (_cancelRequested) {
-        state = const AsyncData(VpnState(status: VpnStatus.disconnected));
+      if (cancelled()) {
+        state = AsyncData(
+          engine.usesMacOSNetworkService
+              ? await engine.getCurrentState()
+              : VpnState.disconnected,
+        );
         return;
       }
       if (sessionState.status == VpnStatus.connected) {
+        _recovery?.connected();
         state = AsyncData(sessionState);
       } else if (sessionState.status == VpnStatus.error) {
         // Присваиваем явно: во время смены сервера _applyNativeState дропает
         // error-эмиты из стрима (_serverSwitchInProgress), а на десктопе нет
         // поллинга — без этого UI навсегда застревал в «подключается».
         state = AsyncData(sessionState);
+      } else if (engine.usesMacOSNetworkService) {
+        state = AsyncData(sessionState);
+        throw const VpnStartException(
+          'The macOS service did not confirm an active connection.',
+        );
       } else {
-        state = AsyncData(VpnState(
-          status: VpnStatus.connected,
-          activeMode: sessionState.activeMode,
-        ));
+        state = AsyncData(
+          VpnState(
+            status: VpnStatus.connected,
+            activeMode: sessionState.activeMode,
+          ),
+        );
       }
     } catch (e, st) {
-      if (_cancelRequested) {
+      if (operation != _connectGeneration || !ref.mounted) return;
+      if (_cancelRequested &&
+          !(ref.read(vpnEngineProvider).usesMacOSNetworkService &&
+              MacOSTunnelBackend.activeInstance?.currentState.status !=
+                  VpnStatus.disconnected)) {
         // Ошибка спровоцирована самой отменой (ядро убито стопом) —
         // это не сбой подключения, показываем спокойный «отключён».
         state = const AsyncData(VpnState(status: VpnStatus.disconnected));
@@ -781,19 +1120,47 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: e.toString(),
-      ));
+      state = AsyncData(
+        VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+      );
+      if (_recovery?.wanted == true) {
+        final backend = ref.read(vpnEngineProvider).macOSBackend;
+        _recovery!.failed(
+          macOSFailureCode(e),
+          text: e.toString(),
+          occurrence: backend?.lastSnapshot['errorCode'] == macOSFailureCode(e)
+              ? backend?.failureOccurrence
+              : null,
+        );
+        if (_recovery!.waiting || automaticRecovery) return;
+      }
       Error.throwWithStackTrace(e, st);
     } finally {
       _connectInFlight = false;
+      if (!finished.isCompleted) finished.complete();
+      if (identical(_connectFinished, finished)) _connectFinished = null;
       _awaitingSessionStart = false;
+      if (ref.mounted &&
+          operation == _connectGeneration &&
+          _recovery?.wanted == true &&
+          _recovery?.phase == MacOSRecoveryPhase.retrying) {
+        final backend = ref.read(vpnEngineProvider).macOSBackend;
+        if (backend?.currentState.status == VpnStatus.connected) {
+          _recovery!.connected();
+        } else {
+          _recovery!.failed(
+            backend?.lastSnapshot['errorCode'] as String? ?? 'startFailed',
+            text: state.value?.errorMessage,
+            occurrence: backend?.failureOccurrence,
+          );
+        }
+      }
       // Ветки connect() присваивают state напрямую, мимо _applyNativeState —
       // порт сессии на диск кладём здесь, каким бы ни был исход.
       _persistActiveLocalHttpPort(
         state.value?.status ?? VpnStatus.disconnected,
       );
+      if (_recovery?.waiting == true) _showRecovery();
     }
   }
 
@@ -801,6 +1168,8 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// гасим поднимающуюся сессию, connect-in-flight завершится как disconnected.
   /// Если connect уже не в полёте — обычный disconnect.
   Future<void> cancelConnect() async {
+    _recovery?.cancel();
+    ++_connectGeneration;
     if (!_connectInFlight) {
       await disconnect();
       return;
@@ -818,10 +1187,20 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
+      if (Platform.isMacOS) {
+        state = AsyncData(
+          VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+        );
+        Error.throwWithStackTrace(e, st);
+      }
     }
   }
 
   Future<void> disconnect() async {
+    _cancelRequested = true;
+    _awaitingSessionStart = false;
+    ++_connectGeneration;
+    _recovery?.cancel();
     state = const AsyncData(VpnState(status: VpnStatus.disconnecting));
     // Порты сессии больше ничего не слушает — апдейтер обязан вернуться к
     // настройке, а не стучаться в подменённый порт умершего ядра.
@@ -835,21 +1214,27 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
         error: e,
         stackTrace: st,
       );
-      state = AsyncData(VpnState(
-        status: VpnStatus.error,
-        errorMessage: e.toString(),
-      ));
+      state = AsyncData(
+        VpnState(status: VpnStatus.error, errorMessage: e.toString()),
+      );
       Error.throwWithStackTrace(e, st);
     }
   }
 
   /// Сервер и подписка, за которыми сейчас следит автовыбор, или null.
   ({ServerItem server, String subId})? _autoSelectTarget() {
-    if (state.value?.status != VpnStatus.connected) return null;
+    if (!ref.mounted ||
+        _connectInFlight ||
+        _serverSwitchInProgress ||
+        _recovery?.waiting == true ||
+        state.value?.status != VpnStatus.connected) {
+      return null;
+    }
     final server = ref.read(serversProvider).activeServer;
     final subId = server?.subscriptionId;
     if (server == null || subId == null) return null;
-    final subs = ref.read(subscriptionsProvider).value ?? const <Subscription>[];
+    final subs =
+        ref.read(subscriptionsProvider).value ?? const <Subscription>[];
     final owner = subs.where((s) => s.id == subId).firstOrNull;
     if (owner == null || !owner.autoSelect) return null;
     return (server: server, subId: subId);
@@ -872,7 +1257,26 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// роутинга, ни от того, что творится в живой сессии. Результаты копятся по
   /// мере прихода — решать можно, не дожидаясь таймаута мёртвого сервера — и
   /// в конце ложатся в список: мёртвый сервер краснеет там же, где его видно.
-  _AutoSelectMeasure _autoSelectStartMeasure(ServerItem current, String subId) {
+  /// Uses the same GET probe as the server list; overridable for isolated tests.
+  @visibleForTesting
+  Future<List<PingResult>> probeAutoSelectCandidates(
+    List<ServerItem> servers,
+    AppSettings settings, {
+    required String testUrl,
+    required void Function(PingResult) onResult,
+  }) => PingService.pingUrlBatch(
+    servers,
+    settings,
+    testUrl: testUrl,
+    timeoutSeconds: AutoSelectWatchdog.judgeTimeoutSeconds,
+    onResult: onResult,
+  );
+
+  _AutoSelectMeasure _autoSelectStartMeasure(
+    ServerItem current,
+    String subId,
+    bool Function() isCurrent,
+  ) {
     final measure = _AutoSelectMeasure(current.id);
     final servers = AutoServerSelect.candidatesToMeasure(
       ref.read(serversProvider).servers,
@@ -885,13 +1289,15 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     measure.done = () async {
       try {
         final settings = await ref.read(storageProvider).getSettings();
-        final results = await PingService.pingUrlBatch(
+        final testUrl = await _autoSelectTestUrl();
+        if (!isCurrent()) return;
+        final results = await probeAutoSelectCandidates(
           servers,
           settings,
-          testUrl: await _autoSelectTestUrl(),
-          timeoutSeconds: AutoSelectWatchdog.judgeTimeoutSeconds,
+          testUrl: testUrl,
           onResult: (r) => measure.add(entry(r)),
         );
+        if (!isCurrent()) return;
         for (final r in results) {
           measure.results[r.serverId] = entry(r);
         }
@@ -932,7 +1338,36 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// приложению, ответы живых соседей выглядели ответом сервера, и тишина не
   /// набиралась — на Vless живой тест так и не дождался переезда.
   Future<void> _autoSelectListen() async {
-    if (_autoSelectBusy) return;
+    if (_autoSelectBusy || _autoSelectListening || !ref.mounted) return;
+    _autoSelectListening = true;
+    try {
+      await _sampleAutoSelect();
+    } finally {
+      _autoSelectListening = false;
+    }
+  }
+
+  String? get _autoSelectSessionIdentity =>
+      ref.read(vpnEngineProvider).macOSBackend?.activeSessionIdentity;
+
+  bool _autoSelectCurrent(
+    int generation,
+    int revision,
+    String serverId,
+    String subId,
+    String? sessionIdentity,
+  ) {
+    if (!ref.mounted ||
+        generation != _connectGeneration ||
+        revision != _autoSelectRevision ||
+        sessionIdentity != _autoSelectSessionIdentity) {
+      return false;
+    }
+    final current = _autoSelectTarget();
+    return current?.server.id == serverId && current?.subId == subId;
+  }
+
+  Future<void> _sampleAutoSelect() async {
     final target = _autoSelectTarget();
     if (target == null) {
       _autoSelectSeenFailures = null;
@@ -940,10 +1375,25 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       _autoSelectCounters = null;
       return;
     }
+    final sessionIdentity = _autoSelectSessionIdentity;
+    if (_autoSelectSampleSession != sessionIdentity) {
+      _autoSelectSampleSession = sessionIdentity;
+      _invalidateAutoSelect();
+    }
     final quietUntil = _autoSelectQuietUntil;
     if (quietUntil != null && DateTime.now().isBefore(quietUntil)) return;
 
-    final second = await _autoSelectSecond();
+    final generation = _connectGeneration;
+    final revision = _autoSelectRevision;
+    bool isCurrent() => _autoSelectCurrent(
+      generation,
+      revision,
+      target.server.id,
+      target.subId,
+      sessionIdentity,
+    );
+    final second = await _autoSelectSecond(isCurrent);
+    if (!isCurrent() || _autoSelectBusy) return;
     if (second != null) {
       _autoSelectSilence = _autoSelectSilence.next(
         sent: second.sent,
@@ -956,6 +1406,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     final failures = Platform.isAndroid
         ? await VpnNativeBridge.dialFailures()
         : CoreDialFailures.count;
+    if (!isCurrent() || _autoSelectBusy) return;
     var newFailures = 0;
     if (failures != null) {
       final previous = _autoSelectSeenFailures;
@@ -969,12 +1420,13 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       _autoSelectSilence.silent,
       desktop: !Platform.isAndroid,
     );
-    if (!stalled && !AutoSelectWatchdog.dialFailuresSuggestDeadServer(newFailures)) {
+    if (!stalled &&
+        !AutoSelectWatchdog.dialFailuresSuggestDeadServer(newFailures)) {
       return;
     }
     await _autoSelectDecide(
       target.server,
-      _autoSelectStartMeasure(target.server, target.subId),
+      target.subId,
       reason: stalled
           ? 'nothing came back for ${_autoSelectSilence.silent} s'
           : '$newFailures failed dial(s) in the core log',
@@ -987,18 +1439,24 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// несёт вовсе, а экранный опрос счётчиков стоит, пока окно в трее, —
   /// поэтому сторож читает кумулятивные счётчики ядра сам и вычитает прошлое
   /// показание. Первое чтение и переподключение — только точка отсчёта.
-  Future<({int sent, int received})?> _autoSelectSecond() async {
+  Future<({int sent, int received})?> _autoSelectSecond(
+    bool Function() isCurrent,
+  ) async {
     final engine = ref.read(vpnEngineProvider);
     if (Platform.isAndroid) {
       final now = await engine.getCurrentState();
       return (sent: now.uploadSpeed ?? 0, received: now.downloadSpeed ?? 0);
     }
     final counters = await engine.sessionTrafficCounters();
+    if (!isCurrent()) return null;
     final previous = _autoSelectCounters;
     _autoSelectCounters = counters;
     if (counters == null || previous == null) return null;
     if (counters.up < previous.up || counters.down < previous.down) return null;
-    return (sent: counters.up - previous.up, received: counters.down - previous.down);
+    return (
+      sent: counters.up - previous.up,
+      received: counters.down - previous.down,
+    );
   }
 
   /// Страховочный тик: ловит соединения, которые повисли молча.
@@ -1008,7 +1466,7 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// пришло ничего. Пришёл, а не прошёл: в мёртвый туннель приложения шлют
   /// исправно.
   Future<void> _autoSelectTick() async {
-    if (_autoSelectBusy) return;
+    if (_autoSelectBusy || _autoSelectListening || !ref.mounted) return;
     final target = _autoSelectTarget();
     if (target == null) return;
     final received = state.value?.totalDownload ?? 0;
@@ -1034,8 +1492,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     }
     await _autoSelectDecide(
       target.server,
-      _autoSelectStartMeasure(target.server, target.subId),
-      reason: 'nothing received for ${AutoSelectWatchdog.probeEvery.inSeconds} s',
+      target.subId,
+      reason:
+          'nothing received for ${AutoSelectWatchdog.probeEvery.inSeconds} s',
     );
   }
 
@@ -1051,15 +1510,29 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
   /// [AutoSelectWatchdog.maxSwitchesPerWindow] раз за окно.
   Future<void> _autoSelectDecide(
     ServerItem server,
-    _AutoSelectMeasure measure, {
+    String subId, {
     required String reason,
   }) async {
     if (_autoSelectBusy) return;
+    final generation = _connectGeneration;
+    final revision = _autoSelectRevision;
+    final sessionIdentity = _autoSelectSessionIdentity;
+    bool isCurrent() => _autoSelectCurrent(
+      generation,
+      revision,
+      server.id,
+      subId,
+      sessionIdentity,
+    );
+    if (!isCurrent()) return;
     _autoSelectBusy = true;
+    final measure = _autoSelectStartMeasure(server, subId, isCurrent);
     var switched = false;
     // Причина и вердикт — в лог: на десктопе он пишется в файл, и живой тест
     // без них превращается в гадание, звался ли судья вообще.
-    AppLogger.instance.info('Auto select: checking ${server.displayName} — $reason');
+    AppLogger.instance.info(
+      'Auto select: checking ${server.displayName} — $reason',
+    );
     try {
       var verdict = AutoServerSelect.judge(
         currentId: server.id,
@@ -1068,12 +1541,14 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
       );
       while (!verdict.decided) {
         await measure.changed;
+        if (!isCurrent()) return;
         verdict = AutoServerSelect.judge(
           currentId: server.id,
           results: measure.results.values,
           batchComplete: measure.complete,
         );
       }
+      if (!isCurrent()) return;
       final nextId = verdict.nextId;
       if (nextId == null) {
         final answered = measure.results[server.id]?.success == true;
@@ -1106,13 +1581,37 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
           .where((s) => s.id == nextId)
           .firstOrNull;
       if (next == null) return;
+      // Keep the verdict already used for this switch visible even when other
+      // candidates are still running. Their late batch belongs to the old session.
+      if (!isCurrent()) return;
+      await ref.read(serversProvider.notifier).updatePingResults({
+        for (final result in measure.results.values)
+          result.id: (
+            pingMs: result.success ? result.latencyMs : null,
+            lastPingType: PingService.pingTypeToStored(PingType.url),
+          ),
+      });
+      if (!isCurrent()) return;
       AppLogger.instance.info(
         'Auto select: ${server.displayName} did not answer, '
         '${next.displayName} did — switching',
       );
+      await ref.read(serversProvider.notifier).setActive(next);
+      if (!ref.mounted ||
+          generation != _connectGeneration ||
+          revision != _autoSelectRevision ||
+          sessionIdentity != _autoSelectSessionIdentity ||
+          _autoSelectTarget()?.server.id != next.id ||
+          _autoSelectTarget()?.subId != subId) {
+        return;
+      }
       switched = true;
       _autoSelectSwitches.add(now);
-      await ref.read(serversProvider.notifier).setActive(next);
+      // Set our cooldown before reconnect changes the native session identity.
+      _autoSelectSeenFailures = null;
+      _autoSelectSilence = const SilenceStreak();
+      _autoSelectCounters = null;
+      _autoSelectQuietUntil = now.add(AutoSelectWatchdog.quietAfterSwitch);
       await reconnectToActiveServer();
     } catch (e, st) {
       AppLogger.instance.debug(
@@ -1123,38 +1622,63 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
     } finally {
       // Отсчёт заново: переподключение само даёт отказы и тихие секунды, и
       // принять их за новую смерть значило бы пойти по кругу.
-      _autoSelectSeenFailures = null;
-      _autoSelectSilence = const SilenceStreak();
-      _autoSelectCounters = null;
-      _autoSelectQuietUntil = DateTime.now().add(
-        switched
-            ? AutoSelectWatchdog.quietAfterSwitch
-            : AutoSelectWatchdog.quietAfterCheck,
-      );
+      if (!switched && isCurrent()) {
+        _autoSelectSeenFailures = null;
+        _autoSelectSilence = const SilenceStreak();
+        _autoSelectCounters = null;
+        _autoSelectQuietUntil = DateTime.now().add(
+          AutoSelectWatchdog.quietAfterCheck,
+        );
+      }
       _autoSelectBusy = false;
     }
   }
 
   /// переподключение к текущему activeServer (смена сервера на активном VPN)
-  Future<void> reconnectToActiveServer() async {
-    if (_serverSwitchInProgress || _connectInFlight) return;
-
-    final status = state.value?.status;
-    if (status != VpnStatus.connected && status != VpnStatus.connecting) {
-      await connect();
-      return;
+  Future<void> reconnectToActiveServer({
+    int? expectedGeneration,
+    Future<void> Function()? afterDisconnect,
+  }) async {
+    final ticket = expectedGeneration ?? _connectGeneration;
+    if (!isConnectionChangeCurrent(ticket)) return;
+    if (_serverSwitchInProgress) {
+      await _serverSwitchFinished?.future;
+      if (!isConnectionChangeCurrent(ticket)) return;
+    }
+    final generation = ++_connectGeneration;
+    if (_recovery != null) {
+      _cancelRequested = true;
+      _recovery!.cancel();
     }
 
+    final status = state.value?.status;
+    final stop =
+        _connectInFlight ||
+        status == VpnStatus.connected ||
+        status == VpnStatus.connecting;
     _serverSwitchInProgress = true;
+    final finished = _serverSwitchFinished = Completer<void>();
     ref.read(vpnServerSwitchInProgressProvider.notifier).set(true);
     try {
-      state = const AsyncData(VpnState(status: VpnStatus.disconnecting));
-      await ref.read(vpnEngineProvider).stopVpn();
-      await _waitForDisconnected();
+      if (stop) {
+        state = const AsyncData(VpnState(status: VpnStatus.disconnecting));
+        await ref.read(vpnEngineProvider).stopVpn();
+        await _waitForDisconnected();
+      }
+      await _connectFinished?.future;
+      if (!isConnectionChangeCurrent(generation)) return;
+      await afterDisconnect?.call();
+      if (!isConnectionChangeCurrent(generation)) return;
       await connect();
     } finally {
       _serverSwitchInProgress = false;
-      ref.read(vpnServerSwitchInProgressProvider.notifier).set(false);
+      if (!finished.isCompleted) finished.complete();
+      if (identical(_serverSwitchFinished, finished)) {
+        _serverSwitchFinished = null;
+      }
+      if (ref.mounted) {
+        ref.read(vpnServerSwitchInProgressProvider.notifier).set(false);
+      }
     }
   }
 
@@ -1188,8 +1712,9 @@ class VpnStateNotifier extends AsyncNotifier<VpnState> {
 }
 
 /// true пока переподключаемся при смене сервера — чтобы не показывать ложные ошибки
-final vpnStateProvider =
-    AsyncNotifierProvider<VpnStateNotifier, VpnState>(VpnStateNotifier.new);
+final vpnStateProvider = AsyncNotifierProvider<VpnStateNotifier, VpnState>(
+  VpnStateNotifier.new,
+);
 
 /// Замер, начатый сторожем автовыбора.
 ///
