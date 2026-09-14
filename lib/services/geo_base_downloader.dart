@@ -25,8 +25,8 @@ import 'update_service.dart';
 class GeoBaseDownloader {
   GeoBaseDownloader._();
 
-  static const _owner = 'Lemonochka';
-  static const _repo = 'keqdroid';
+  static const _owner = UpdateService.releaseOwner;
+  static const _repo = UpdateService.releaseRepository;
 
   /// Имя ассета в релизе. Его хеш — в `<имя>.sha256` рядом или в общем
   /// `SHA256SUMS` релиза; без хеша установка отклоняется.
@@ -43,6 +43,11 @@ class GeoBaseDownloader {
     void Function(double progress)? onProgress,
     Dio? client,
   }) async {
+    if (Platform.isMacOS) {
+      throw const GeoBaseDownloadException(
+        'macOS geo databases are managed by the installer. Install an updated PKG to update them.',
+      );
+    }
     final dir = await GeoAssetService.geoDir();
     if (dir == null) {
       throw const GeoBaseDownloadException('geo directory is unknown');
