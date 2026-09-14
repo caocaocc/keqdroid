@@ -74,6 +74,38 @@ void main() {
     expect(launch.executable, 'sh');
   });
 
+  test('resolved pkexec path survives a restricted graphical-session PATH', () {
+    for (final passwordless in [false, true]) {
+      final launch = planElevation(
+        coreArgs: coreArgs,
+        wrapperBody: wrapper,
+        helperPath: helper,
+        asRoot: false,
+        passwordless: passwordless,
+        pkexecPath: '/usr/bin/pkexec',
+      );
+      expect(launch.executable, '/usr/bin/pkexec');
+      expect(launch.viaPkexec, isTrue);
+      expect(
+        launch.args,
+        passwordless
+            ? [helper, ...coreArgs]
+            : ['sh', '-c', wrapper, 'sh', ...coreArgs],
+      );
+    }
+    final rootLaunch = planElevation(
+      coreArgs: coreArgs,
+      wrapperBody: wrapper,
+      helperPath: helper,
+      asRoot: true,
+      passwordless: true,
+      pkexecPath: '/usr/bin/pkexec',
+    );
+    expect(rootLaunch.executable, 'sh');
+    expect(rootLaunch.viaPkexec, isFalse);
+    expect(rootLaunch.args, ['-c', wrapper, 'sh', ...coreArgs]);
+  });
+
   test('на не-Linux root не мерещится', () {
     // Тесты гоняются под Windows: procfs нет, и ответ обязан быть «нет», иначе
     // логика выбора ушла бы в ветку без pkexec на ровном месте.

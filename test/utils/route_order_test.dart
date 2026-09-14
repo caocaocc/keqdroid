@@ -493,8 +493,9 @@ void main() {
       expect(site, isNot(-1));
       expect(zone, isNot(-1));
       expect(site, lessThan(zone));
-      expect(own[site]['address'], isNot('localhost'));
-      expect(own[zone]['address'], 'localhost');
+      // New-install DNS defaults: lifted proxy domains still precede direct DNS.
+      expect(own[site]['address'], 'https://1.1.1.1/dns-query');
+      expect(own[zone]['address'], 'tcp+local://223.5.5.5:53');
 
       // сайт ниже обхода и так решает обход: отдельной записи нет
       final below = servers(_placed([_ruDirect, _oneVpn]));
@@ -531,10 +532,10 @@ void main() {
             (s) => (s['domains'] as List?)?.contains('domain:$domain') ?? false,
           );
       expect(first('bank.example'), isNot(-1));
-      expect(servers[first('bank.example')]['address'], 'localhost');
+      expect(servers[first('bank.example')]['address'], 'tcp+local://223.5.5.5:53');
       expect(first('blocked.example'), isNot(-1));
       expect(first('blocked.example'), lessThan(first('bank.example')));
-      expect(servers[first('blocked.example')]['address'], isNot('localhost'));
+      expect(servers[first('blocked.example')]['address'], 'https://1.1.1.1/dns-query');
     });
 
     test('приватные сети из прежнего пресета резолв по правилам не включают', () {

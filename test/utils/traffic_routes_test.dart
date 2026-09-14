@@ -174,9 +174,16 @@ void main() {
     test('свежая установка — один маршрут из значения по умолчанию', () {
       final routes = routesFromLegacy(const AppSettings(), const [], newId: id);
       expect(routes, hasLength(1));
-      expect(routes.single.sites, 'ru, yandex.ru, vk.com');
+      expect(routes.single.sites, 'geosite:cn, geoip:cn');
       expect(routes.single.target, RouteTarget.direct);
       expect(legacyRoutingCustomized(const AppSettings(), const []), isFalse);
+    });
+
+    test('old JSON without routing fields retains its previous default', () {
+      final settings = AppSettings.fromJson({});
+      final routes = routesFromLegacy(settings, const [], newId: id);
+      expect(routes.single.sites, 'ru, yandex.ru, vk.com');
+      expect(foldRoutes(settings, routes).directRules, 'ru, yandex.ru, vk.com');
     });
 
     test('подсказка — только тем, кто менял маршрутизацию', () {

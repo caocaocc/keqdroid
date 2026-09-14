@@ -469,6 +469,7 @@ class ServersNotifier extends Notifier<ServersState> {
       };
       final now = DateTime.now();
       for (final r in buffered) {
+        ref.read(pingDiagnosticsProvider.notifier).set(r.serverId, r.diagnostics);
         final idx = indexById[r.serverId];
         if (idx == null) continue;
         newList[idx] = newList[idx].copyWith(
@@ -508,6 +509,7 @@ class ServersNotifier extends Notifier<ServersState> {
       (_) => flushBufferedToState(),
     );
 
+    ref.read(pingDiagnosticsProvider.notifier).clear(pingingIds);
     ref
         .read(pingingServerIdsProvider.notifier)
         .update((set) => {...set, ...pingingIds});
@@ -606,6 +608,7 @@ class ServersNotifier extends Notifier<ServersState> {
   }
 
   Future<void> pingSingle(String serverId) async {
+    ref.read(pingDiagnosticsProvider.notifier).set(serverId, null);
     ref.read(pingingServerIdsProvider.notifier).update((set) => {...set, serverId});
     final server = state.servers.cast<ServerItem?>().firstWhere(
           (s) => s?.id == serverId,
@@ -654,6 +657,7 @@ class ServersNotifier extends Notifier<ServersState> {
           lastPingType: PingService.pingTypeToStored(result.pingType),
         ),
       });
+      ref.read(pingDiagnosticsProvider.notifier).set(serverId, result.diagnostics);
       if (!result.success) {
         throw Exception(result.error.isEmpty ? 'Ping failed' : result.error);
       }

@@ -183,6 +183,14 @@ class _XrayDnsSection extends ConsumerWidget {
     final core = settings.xrayCore;
     final accent = AppTheme.accent(context);
     final xray = ref.watch(activeVpnBackendProvider) == VpnBackend.xray;
+    final splitApplies = xray
+        ? core.dnsSplitApplies
+        : core.dnsUseCustom &&
+            MihomoConfigGen.dnsServers(core).length > 1 &&
+            core.dnsServers
+                .split(RegExp(r'[\r\n,]+'))
+                .where((line) => line.trim().isNotEmpty)
+                .any((line) => MihomoConfigGen.droppedDnsServers(line).isEmpty);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -224,7 +232,7 @@ class _XrayDnsSection extends ConsumerWidget {
               duration: const Duration(milliseconds: 200),
               sizeCurve: Curves.easeOutCubic,
             ),
-            if (xray && core.dnsSplitApplies)
+            if (splitApplies)
               SwitchListTile(
                 value: core.dnsSplitDirectDomains,
                 onChanged: (v) => _saveXrayCore(

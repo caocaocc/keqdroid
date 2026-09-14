@@ -1,3 +1,4 @@
+import '../tunnel/url_test_diagnostics.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -6,10 +7,12 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 import '../core/app_logger.dart';
-import '../tunnel/linux_core_paths.dart';
-import '../tunnel/windows_core_paths.dart';
+import '../tunnel/desktop_core_paths.dart';
+import '../tunnel/macos_network_context.dart';
+import '../utils/keqrnel_config.dart';
 import '../tunnel/vpn_backend.dart';
 import 'windows_desktop_service.dart';
+import 'desktop_http_probe.dart';
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
@@ -33,7 +36,7 @@ class _CoreLog {
   void _add(String line) {
     final trimmed = stripAnsi(line).trim();
     if (trimmed.isEmpty) return;
-    _lines.add(trimmed);
+    _lines.add(trimmed.length > 1024 ? trimmed.substring(0, 1024) : trimmed);
     if (_lines.length > _keep) _lines.removeAt(0);
   }
 
@@ -43,17 +46,12 @@ class _CoreLog {
 class EphemeralXrayPing {
   EphemeralXrayPing._();
 
-  static Future<String?> _resolveXray() {
-    if (Platform.isWindows) return WindowsCorePaths.xrayExecutable();
-    if (Platform.isLinux) return LinuxCorePaths.xrayExecutable();
-    return Future<String?>.value(null);
-  }
+  // Desktop core resolution is platform-specific; the rest (config, socks probe)
+  // is platform-neutral so url/speed ping work on Windows and Linux alike.
+  static Future<String?> _resolveXray() => DesktopCorePaths.xrayExecutable();
 
-  static Future<String?> _resolveMihomo() {
-    if (Platform.isWindows) return WindowsCorePaths.mihomoExecutable();
-    if (Platform.isLinux) return LinuxCorePaths.mihomoExecutable();
-    return Future<String?>.value(null);
-  }
+  static Future<String?> _resolveMihomo() =>
+      DesktopCorePaths.mihomoExecutable();
 
   static Future<String?> _resolveCore(VpnBackend core) =>
       core == VpnBackend.mihomo ? _resolveMihomo() : _resolveXray();
@@ -63,18 +61,25 @@ class EphemeralXrayPing {
     VpnBackend core,
     String configPath,
     String sessionDirPath,
-  ) =>
-      core == VpnBackend.mihomo
-          ? ['-d', sessionDirPath, '-f', configPath]
-          : ['run', '-c', configPath];
+  ) => core == VpnBackend.mihomo
+      ? ['-d', sessionDirPath, '-f', configPath]
+      : ['run', '-c', configPath];
 
   static String _coreConfig(String configJson, int port, VpnBackend core) {
     if (core == VpnBackend.mihomo) return _mihomoConfig(configJson, port);
-    final config = jsonDecode(configJson) as Map<String, dynamic>;
+    final macos = Platform.isMacOS;
+    final config = jsonDecode(macos ? KeqrnelConfig.wrapXray(configJson) : configJson)
+        as Map<String, dynamic>;
+    if (macos && MacOSNetworkContext.active != null) {
+      (config['route'] as Map)['default_interface'] =
+          MacOSNetworkContext.active!.interfaceName;
+    }
     final inbounds = config['inbounds'];
     if (inbounds is List) {
       for (final inbound in inbounds) {
-        if (inbound is Map<String, dynamic>) inbound['port'] = port;
+        if (inbound is Map<String, dynamic>) {
+          inbound[macos ? 'listen_port' : 'port'] = port;
+        }
       }
     }
     return jsonEncode(config);
@@ -82,6 +87,9 @@ class EphemeralXrayPing {
 
   static String _mihomoConfig(String configJson, int port) {
     final config = jsonDecode(configJson) as Map<String, dynamic>;
+    if (Platform.isMacOS && MacOSNetworkContext.active != null) {
+      config['interface-name'] = MacOSNetworkContext.active!.interfaceName;
+    }
     for (final key in const ['port', 'socks-port', 'mixed-port']) {
       if (config.containsKey(key)) config[key] = port;
     }
@@ -95,13 +103,9 @@ class EphemeralXrayPing {
     return port;
   }
 
-  static Future<Directory> _sessionDir() {
-    if (Platform.isLinux) return LinuxCorePaths.sessionDir();
-    return WindowsCorePaths.sessionDir();
-  }
+  static Future<Directory> _sessionDir() => DesktopCorePaths.sessionDir();
 
-  static String get _binariesHint =>
-      Platform.isLinux ? LinuxCorePaths.binariesHint : WindowsCorePaths.binariesHint;
+  static String get _binariesHint => DesktopCorePaths.binariesHint;
 
   static Future<void> _attachCoreProcess(int pid) async {
     if (Platform.isWindows) {
@@ -126,12 +130,15 @@ class EphemeralXrayPing {
   }
 
   static Future<
-      ({
-        bool success,
-        int? latencyMs,
-        String error,
-        int? httpStatus,
-      })> urlTest({
+    ({
+      bool success,
+      int? latencyMs,
+      String error,
+      int? httpStatus,
+      UrlTestDiagnostics? diagnostics,
+    })
+  >
+  urlTest({
     required String xrayConfigJson,
     required int socksPort,
     required String testUrl,
@@ -148,14 +155,18 @@ class EphemeralXrayPing {
   }
 
   static Future<
-      List<
-          ({
-            String id,
-            bool success,
-            int? latencyMs,
-            String error,
-            int? httpStatus,
-          })>> urlTestBatch({
+    List<
+      ({
+        String id,
+        bool success,
+        int? latencyMs,
+        String error,
+        int? httpStatus,
+        UrlTestDiagnostics? diagnostics,
+      })
+    >
+  >
+  urlTestBatch({
     required List<({String id, String xrayConfigJson})> items,
     required int socksPort,
     required String testUrl,
@@ -164,14 +175,20 @@ class EphemeralXrayPing {
     bool keepAlive = true,
   }) async {
     if (items.isEmpty) return [];
-    // по очереди: у всех элементов батча один socksPort
-    final out = <({
-      String id,
-      bool success,
-      int? latencyMs,
-      String error,
-      int? httpStatus,
-    })>[];
+    // Внутри батча — по очереди: все элементы приходят с одним socksPort, и
+    // параллельно они дрались бы за него. Параллелит вызовы PingService, он же
+    // и выдаёт каждому замеру свой порт.
+    final out =
+        <
+          ({
+            String id,
+            bool success,
+            int? latencyMs,
+            String error,
+            int? httpStatus,
+            UrlTestDiagnostics? diagnostics,
+          })
+        >[];
     for (final item in items) {
       final r = await _runSingle(
         xrayConfigJson: item.xrayConfigJson,
@@ -187,13 +204,16 @@ class EphemeralXrayPing {
         latencyMs: r.latencyMs,
         error: r.error,
         httpStatus: r.httpStatus,
+        diagnostics: r.diagnostics,
       ));
     }
     return out;
   }
 
-  static Future<
-      List<({String id, bool success, int? kbps, String error})>> speedTestBatch({
+  /// Boots an ephemeral Xray per server and downloads [downloadUrl] through its
+  /// SOCKS, returning throughput in kbps.
+  static Future<List<({String id, bool success, int? kbps, String error})>>
+  speedTestBatch({
     required List<({String id, String xrayConfigJson})> items,
     required int socksPort,
     required String downloadUrl,
@@ -230,16 +250,18 @@ class EphemeralXrayPing {
   static bool retryProbeWhileCoreWakesUp({
     required VpnBackend core,
     required Duration sinceCoreStart,
-  }) =>
-      core == VpnBackend.mihomo && sinceCoreStart < coreWakeupGrace;
+  }) => core == VpnBackend.mihomo && sinceCoreStart < coreWakeupGrace;
 
   static Future<
-      ({
-        bool success,
-        int? latencyMs,
-        String error,
-        int? httpStatus,
-      })> _runSingle({
+    ({
+      bool success,
+      int? latencyMs,
+      String error,
+      int? httpStatus,
+      UrlTestDiagnostics? diagnostics,
+    })
+  >
+  _runSingle({
     required String xrayConfigJson,
     required int socksPort,
     required String testUrl,
@@ -247,12 +269,26 @@ class EphemeralXrayPing {
     VpnBackend core = VpnBackend.xray,
     bool keepAlive = true,
   }) async {
-    if (!Platform.isWindows && !Platform.isLinux) {
+    final preparation = Stopwatch()..start();
+    final startupBudget = timeoutMs.clamp(500, _startupBudgetMs);
+    UrlTestDiagnostics startupDetails() {
+      final elapsed = preparation.elapsedMilliseconds;
+      return UrlTestDiagnostics(
+        stage: 'coreStartup',
+        elapsedMs: elapsed,
+        budgetMs: startupBudget,
+        stageDurationsMs: {'coreStartup': elapsed},
+        coreStartupBudgetMs: startupBudget,
+      );
+    }
+
+    if (!DesktopCorePaths.supported) {
       return (
         success: false,
         latencyMs: null,
         error: 'Ephemeral Xray ping is only implemented on desktop in Dart',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     }
 
@@ -263,6 +299,7 @@ class EphemeralXrayPing {
         latencyMs: null,
         error: '${core.wireValue} not found. $_binariesHint',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     }
 
@@ -274,6 +311,9 @@ class EphemeralXrayPing {
       ),
     );
     Process? process;
+    _CoreLog? coreLog;
+    int? observedExit;
+    // Порт может смениться на второй попытке — см. ниже.
     var port = socksPort;
 
     try {
@@ -283,15 +323,29 @@ class EphemeralXrayPing {
           coreBin,
           _coreArgs(core, configFile.path, sessionDir.path),
           workingDirectory: sessionDir.path,
+          environment: Platform.isMacOS
+              ? MacOSNetworkContext.active?.bootstrapEnvironment
+              : null,
           mode: ProcessStartMode.normal,
         );
         unawaited(_attachCoreProcess(process.pid));
         final log = _CoreLog(process);
+        coreLog = log;
+        observedExit = null;
+        final launched = process;
+        unawaited(
+          launched.exitCode.then((code) {
+            if (identical(process, launched)) observedExit = code;
+          }),
+        );
 
         final startup = await _waitForPort(
           '127.0.0.1',
           port,
-          Duration(milliseconds: timeoutMs.clamp(500, _startupBudgetMs)),
+          Duration(
+            milliseconds: (startupBudget - preparation.elapsedMilliseconds)
+                .clamp(0, startupBudget),
+          ),
           process: process,
         );
         if (startup.ready) break;
@@ -303,37 +357,65 @@ class EphemeralXrayPing {
           return (
             success: false,
             latencyMs: null,
-            error: _startupError(startup.exitCode, port, log),
+            error:
+                'GET probe failed at coreStartup: ${AppLogger.redactSensitive(_startupError(startup.exitCode, port, log))}',
             httpStatus: null,
+            diagnostics: startupDetails(),
           );
         }
         port = await _freeLoopbackPort();
       }
 
-      final coreLife = Stopwatch()..start();
-      while (true) {
-        final probe = await _httpProbeViaSocks(
+      final coreStartupMs = preparation.elapsedMilliseconds;
+      final result = await probeWhileCoreWakesUp(
+        core: core,
+        timeoutMs: timeoutMs,
+        coreExited: () => observedExit != null,
+        probe: (remaining) => _httpProbeViaSocks(
           testUrl: testUrl,
           socksPort: port,
-          timeoutMs: timeoutMs,
+          timeoutMs: remaining,
           keepAlive: keepAlive,
+        ),
+      );
+      final diagnostic = result.diagnostics?.withCoreStartup(
+        elapsedMs: coreStartupMs,
+        budgetMs: startupBudget,
+      );
+      if (diagnostic != null) {
+        AppLogger.instance.debug(
+          'Desktop GET probe: ${jsonEncode(diagnostic.toMap())}',
         );
-        if (probe.success ||
-            !retryProbeWhileCoreWakesUp(
-              core: core,
-              sinceCoreStart: coreLife.elapsed,
-            )) {
-          return probe;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 200));
       }
+      if (result.success) {
+        return (
+          success: true,
+          latencyMs: result.latencyMs,
+          error: result.error,
+          httpStatus: result.httpStatus,
+          diagnostics: diagnostic,
+        );
+      }
+      final coreFailure = observedExit == null
+          ? ''
+          : ' Core exited with code $observedExit.';
+      return (
+        success: false,
+        latencyMs: null,
+        httpStatus: result.httpStatus,
+        diagnostics: diagnostic,
+        error:
+            '${result.error}$coreFailure${AppLogger.redactSensitive(coreLog?.tail ?? '')}',
+      );
     } catch (e) {
       AppLogger.instance.debug('EphemeralXrayPing failed: $e');
       return (
         success: false,
         latencyMs: null,
-        error: e.toString(),
+        error:
+            'GET probe failed at coreStartup: ${AppLogger.redactSensitive(e.toString())}',
         httpStatus: null,
+        diagnostics: startupDetails(),
       );
     } finally {
       await _killProcess(process);
@@ -350,8 +432,12 @@ class EphemeralXrayPing {
     required int timeoutMs,
     VpnBackend core = VpnBackend.xray,
   }) async {
-    if (!Platform.isWindows && !Platform.isLinux) {
-      return (success: false, kbps: null, error: 'Speed test runs on desktop only');
+    if (!DesktopCorePaths.supported) {
+      return (
+        success: false,
+        kbps: null,
+        error: 'Speed test runs on desktop only',
+      );
     }
 
     final coreBin = await _resolveCore(core);
@@ -365,18 +451,24 @@ class EphemeralXrayPing {
 
     final sessionDir = await _sessionDir();
     final configFile = File(
-      p.join(sessionDir.path,
-          '${core.wireValue}_speed_${DateTime.now().microsecondsSinceEpoch}.json'),
+      p.join(
+        sessionDir.path,
+        '${core.wireValue}_speed_${DateTime.now().microsecondsSinceEpoch}.json',
+      ),
     );
     Process? process;
 
     try {
-      await configFile
-          .writeAsString(_coreConfig(xrayConfigJson, socksPort, core));
+      await configFile.writeAsString(
+        _coreConfig(xrayConfigJson, socksPort, core),
+      );
       process = await Process.start(
         coreBin,
         _coreArgs(core, configFile.path, sessionDir.path),
         workingDirectory: sessionDir.path,
+        environment: Platform.isMacOS
+            ? MacOSNetworkContext.active?.bootstrapEnvironment
+            : null,
         mode: ProcessStartMode.normal,
       );
       unawaited(_attachCoreProcess(process.pid));
@@ -412,7 +504,10 @@ class EphemeralXrayPing {
     }
   }
 
-  static Future<({bool success, int? kbps, String error})> _downloadProbeViaSocks({
+  /// Downloads the payload through the SOCKS proxy and computes kbps from the
+  /// bytes received over the body-transfer time.
+  static Future<({bool success, int? kbps, String error})>
+  _downloadProbeViaSocks({
     required String downloadUrl,
     required int socksPort,
     required int timeoutMs,
@@ -421,18 +516,25 @@ class EphemeralXrayPing {
     try {
       // dart:io HttpClient умеет только PROXY и DIRECT, поэтому у ядра замера HTTP-инбаунд
       client.findProxy = (_) => 'PROXY 127.0.0.1:$socksPort';
-      // сертификат проверяем: иначе MITM нарисует успешный замер мёртвому серверу
-      client.connectionTimeout = Duration(milliseconds: timeoutMs.clamp(1000, 8000));
+      // Сертификат проверяем: с badCertificateCallback=true MITM мог
+      // «нарисовать» успешный замер мёртвому/подменённому серверу.
+      client.connectionTimeout = Duration(
+        milliseconds: timeoutMs.clamp(1000, 8000),
+      );
 
       final request = await client.getUrl(Uri.parse(_ensureHttps(downloadUrl)));
       request.headers.set('User-Agent', 'KEQDIS/1.0');
       final response = await request.close().timeout(
-            Duration(milliseconds: timeoutMs.clamp(2000, 30000)),
-          );
+        Duration(milliseconds: timeoutMs.clamp(2000, 30000)),
+      );
 
       if (response.statusCode < 200 || response.statusCode >= 400) {
         await response.drain<void>();
-        return (success: false, kbps: null, error: 'HTTP ${response.statusCode}');
+        return (
+          success: false,
+          kbps: null,
+          error: 'HTTP ${response.statusCode}',
+        );
       }
 
       final sw = Stopwatch()..start();
@@ -459,108 +561,65 @@ class EphemeralXrayPing {
     }
   }
 
-  static Future<
-      ({
-        bool success,
-        int? latencyMs,
-        String error,
-        int? httpStatus,
-      })> _httpProbeViaSocks({
+  // Открытый порт — ещё не готовность (см. [coreWakeupGrace]). Повторы
+  // делят один бюджет замера; подготовка ядра учитывается отдельно.
+  @visibleForTesting
+  static Future<UrlTestResult> probeWhileCoreWakesUp({
+    required VpnBackend core,
+    required int timeoutMs,
+    required bool Function() coreExited,
+    required Future<UrlTestResult> Function(int remainingMs) probe,
+  }) async {
+    final coreLife = Stopwatch()..start();
+    var result = await probe(timeoutMs);
+    var retryPreparationMs = 0;
+    while (!result.success &&
+        !coreExited() &&
+        retryProbeWhileCoreWakesUp(
+          core: core,
+          sinceCoreStart: coreLife.elapsed,
+        ) &&
+        coreLife.elapsedMilliseconds + 200 < timeoutMs) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final remaining = timeoutMs - coreLife.elapsedMilliseconds;
+      if (remaining <= 0 || coreExited()) break;
+      retryPreparationMs = coreLife.elapsedMilliseconds;
+      result = await probe(remaining);
+    }
+    final diagnostic = result.diagnostics;
+    if (retryPreparationMs == 0 || diagnostic == null) return result;
+    return (
+      success: result.success,
+      latencyMs: result.latencyMs,
+      error: result.error,
+      httpStatus: result.httpStatus,
+      diagnostics: UrlTestDiagnostics(
+        stage: diagnostic.stage,
+        elapsedMs: coreLife.elapsedMilliseconds,
+        budgetMs: timeoutMs,
+        timingKind: diagnostic.timingKind,
+        completedRequests: diagnostic.completedRequests,
+        warning: diagnostic.warning,
+        stageDurationsMs: {
+          'coreWakeup': retryPreparationMs,
+          ...diagnostic.stageDurationsMs,
+        },
+        coreStartupBudgetMs: diagnostic.coreStartupBudgetMs,
+      ),
+    );
+  }
+
+  static Future<UrlTestResult> _httpProbeViaSocks({
     required String testUrl,
     required int socksPort,
     required int timeoutMs,
     bool keepAlive = true,
-  }) async {
-    final uri = Uri.parse(_ensureHttps(testUrl));
-    final host = uri.host;
-    final port = uri.hasPort ? uri.port : 443;
-    final path = uri.path.isEmpty ? '/' : uri.path;
-    final connectTimeout = Duration(milliseconds: timeoutMs.clamp(1000, 6000));
-    final readTimeout = Duration(milliseconds: timeoutMs.clamp(1000, 8000));
-
-    Socket? raw;
-    _HttpResponseReader? reader;
-    try {
-      // HttpClient не переиспользует туннель CONNECT: каждый запрос платил заново TCP, CONNECT и TLS,
-      // и сервер с честными 50 мс показывал 200
-      raw = await Socket.connect(
-        InternetAddress.loopbackIPv4,
-        socksPort,
-        timeout: connectTimeout,
-      );
-      raw.setOption(SocketOption.tcpNoDelay, true);
-      reader = _HttpResponseReader(raw);
-
-      raw.write('CONNECT $host:$port HTTP/1.1\r\nHost: $host:$port\r\n\r\n');
-      await raw.flush();
-      final tunnel = await reader.readResponse(
-        DateTime.now().add(readTimeout),
-        headOnly: true,
-      );
-      if (tunnel.status < 200 || tunnel.status > 299) {
-        return (
-          success: false,
-          latencyMs: null,
-          error: 'proxy CONNECT ${tunnel.status}',
-          httpStatus: tunnel.status,
-        );
-      }
-
-      final tls = await SecureSocket.secure(raw, host: host)
-          .timeout(connectTimeout);
-      raw = tls;
-      reader = _HttpResponseReader(tls);
-
-      // первая попытка платит за рукопожатие, вторая меряет чистое время ответа
-      ({bool success, int? latencyMs, String error, int? httpStatus})? best;
-      final attempts = keepAlive ? 2 : 1;
-      for (var attempt = 0; attempt < attempts; attempt++) {
-        final sw = Stopwatch()..start();
-        // всегда GET: на HEAD не отвечали как раз gstatic и Microsoft
-        tls.write(
-          'GET $path HTTP/1.1\r\n'
-          'Host: $host\r\n'
-          'User-Agent: KEQDIS/1.0\r\n'
-          'Accept: */*\r\n'
-          'Connection: keep-alive\r\n\r\n',
-        );
-        await tls.flush();
-        final res = await reader.readResponse(DateTime.now().add(readTimeout));
-        sw.stop();
-
-        final ok = (res.status >= 200 && res.status < 400);
-        final result = (
-          success: ok,
-          latencyMs: sw.elapsedMilliseconds,
-          error: ok ? '' : 'HTTP ${res.status}',
-          httpStatus: res.status,
-        );
-        if (!ok) return result;
-        if (best == null || sw.elapsedMilliseconds < best.latencyMs!) {
-          best = result;
-        }
-        if (res.closing) break;
-      }
-      return best!;
-    } on TimeoutException {
-      return (
-        success: false,
-        latencyMs: null,
-        error: 'Timeout',
-        httpStatus: null,
-      );
-    } catch (e) {
-      return (
-        success: false,
-        latencyMs: null,
-        error: e.toString(),
-        httpStatus: null,
-      );
-    } finally {
-      await reader?.cancel();
-      raw?.destroy();
-    }
-  }
+  }) => DesktopHttpProbe.run(
+    testUrl: testUrl,
+    proxyPort: socksPort,
+    timeout: Duration(milliseconds: timeoutMs),
+    keepAlive: keepAlive,
+  );
 
   static String _ensureHttps(String url) {
     final trimmed = url.trim();
@@ -573,6 +632,14 @@ class EphemeralXrayPing {
   // до шестнадцати ядер стартуют разом и делят диск с антивирусом, 5 с не хватало
   static const int _startupBudgetMs = 12000;
 
+  /// Ждёт порт временного ядра. `exitCode` не null — ядро вышло само.
+  @visibleForTesting
+  static Future<({bool ready, int? exitCode})> waitForCorePort({
+    required Process process,
+    required int port,
+    Duration timeout = const Duration(seconds: 1),
+  }) => _waitForPort('127.0.0.1', port, timeout, process: process);
+
   static Future<({bool ready, int? exitCode})> _waitForPort(
     String host,
     int port,
@@ -580,15 +647,18 @@ class EphemeralXrayPing {
     Process? process,
   }) async {
     final deadline = DateTime.now().add(maxWait);
+    int? exited;
+    if (process != null) {
+      unawaited(
+        process.exitCode.then((code) {
+          exited = code;
+        }),
+      );
+    }
     var delay = const Duration(milliseconds: 20);
     while (DateTime.now().isBefore(deadline)) {
-      if (process != null) {
-        final code = await process.exitCode.timeout(
-          const Duration(milliseconds: 1),
-          onTimeout: () => -1,
-        );
-        if (code >= 0) return (ready: false, exitCode: code);
-      }
+      // POSIX signal exits are negative; they are exits, not a timeout sentinel.
+      if (exited != null) return (ready: false, exitCode: exited);
       try {
         final s = await Socket.connect(
           host,
@@ -609,8 +679,8 @@ class EphemeralXrayPing {
 
   static String _startupError(int? exitCode, int port, _CoreLog log) =>
       exitCode != null
-          ? 'Core exited with code $exitCode before opening port $port${log.tail}'
-          : 'Core did not open port $port in time${log.tail}';
+      ? 'Core exited with code $exitCode before opening port $port${log.tail}'
+      : 'Core did not open port $port in time${log.tail}';
 
   static Future<void> _killProcess(Process? process) async {
     if (process == null) return;
@@ -625,149 +695,5 @@ class EphemeralXrayPing {
       );
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 80));
-  }
-}
-
-// тело каждого ответа дочитываем до конца, иначе следующий GET прочитает хвост предыдущего
-class _HttpResponseReader {
-  _HttpResponseReader(Stream<List<int>> socket) {
-    _sub = socket.listen(
-      (data) {
-        _buffer.addAll(data);
-        _wake();
-      },
-      onDone: () {
-        _done = true;
-        _wake();
-      },
-      onError: (Object e) {
-        _error = e;
-        _wake();
-      },
-      cancelOnError: false,
-    );
-  }
-
-  late final StreamSubscription<List<int>> _sub;
-  final List<int> _buffer = [];
-  bool _done = false;
-  Object? _error;
-  Completer<void>? _waiter;
-
-  void _wake() {
-    final waiter = _waiter;
-    _waiter = null;
-    if (waiter != null && !waiter.isCompleted) waiter.complete();
-  }
-
-  Future<void> _more(DateTime deadline) {
-    if (_error != null) throw _error!;
-    if (_done) throw const SocketException('connection closed by peer');
-    final left = deadline.difference(DateTime.now());
-    if (left <= Duration.zero) throw TimeoutException('read');
-    return (_waiter ??= Completer<void>()).future.timeout(left);
-  }
-
-  // после CONNECT по сокету пойдёт TLS, лишний байт читать нельзя
-  Future<({int status, bool closing})> readResponse(
-    DateTime deadline, {
-    bool headOnly = false,
-  }) async {
-    var end = -1;
-    while ((end = _indexOf(13, 10, 13, 10)) < 0) {
-      await _more(deadline);
-    }
-    final head = String.fromCharCodes(_buffer.sublist(0, end));
-    _buffer.removeRange(0, end + 4);
-
-    final lines = head.split('\r\n');
-    final status = _parseStatus(lines.isEmpty ? '' : lines.first);
-    final headers = <String, String>{};
-    for (final line in lines.skip(1)) {
-      final i = line.indexOf(':');
-      if (i > 0) {
-        headers[line.substring(0, i).trim().toLowerCase()] =
-            line.substring(i + 1).trim();
-      }
-    }
-    final closing =
-        (headers['connection'] ?? '').toLowerCase().contains('close');
-
-    if (status >= 100 && status < 200) {
-      return readResponse(deadline, headOnly: headOnly);
-    }
-    if (headOnly || status == 204 || status == 304) {
-      return (status: status, closing: closing);
-    }
-
-    final chunked =
-        (headers['transfer-encoding'] ?? '').toLowerCase().contains('chunked');
-    if (chunked) {
-      await _drainChunked(deadline);
-    } else {
-      final length = int.tryParse(headers['content-length'] ?? '');
-      if (length != null) {
-        await _drainExactly(length, deadline);
-      } else if (closing) {
-        while (!_done) {
-          await _more(deadline);
-        }
-        _buffer.clear();
-      }
-    }
-    return (status: status, closing: closing);
-  }
-
-  Future<void> _drainExactly(int count, DateTime deadline) async {
-    while (_buffer.length < count) {
-      await _more(deadline);
-    }
-    _buffer.removeRange(0, count);
-  }
-
-  Future<void> _drainChunked(DateTime deadline) async {
-    while (true) {
-      var nl = -1;
-      while ((nl = _indexOf(13, 10)) < 0) {
-        await _more(deadline);
-      }
-      final sizeLine = String.fromCharCodes(_buffer.sublist(0, nl));
-      _buffer.removeRange(0, nl + 2);
-      final size =
-          int.tryParse(sizeLine.split(';').first.trim(), radix: 16) ?? 0;
-      if (size == 0) {
-        while (true) {
-          var tail = -1;
-          while ((tail = _indexOf(13, 10)) < 0) {
-            await _more(deadline);
-          }
-          _buffer.removeRange(0, tail + 2);
-          if (tail == 0) return;
-        }
-      }
-      await _drainExactly(size + 2, deadline);
-    }
-  }
-
-  int _indexOf(int a, int b, [int? c, int? d]) {
-    final len = c == null ? 2 : 4;
-    for (var i = 0; i + len - 1 < _buffer.length; i++) {
-      if (_buffer[i] != a || _buffer[i + 1] != b) continue;
-      if (c == null) return i;
-      if (_buffer[i + 2] == c && _buffer[i + 3] == d) return i;
-    }
-    return -1;
-  }
-
-  static int _parseStatus(String line) {
-    final parts = line.split(' ');
-    if (parts.length < 2) return 0;
-    return int.tryParse(parts[1]) ?? 0;
-  }
-
-  Future<void> cancel() async {
-    try {
-      await _sub.cancel();
-    } catch (_) {}
   }
 }

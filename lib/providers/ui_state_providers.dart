@@ -1,4 +1,30 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../tunnel/url_test_diagnostics.dart';
+
+/// Session-only measurement details; server/backup formats remain unchanged.
+class PingDiagnosticsNotifier
+    extends Notifier<Map<String, UrlTestDiagnostics>> {
+  @override
+  Map<String, UrlTestDiagnostics> build() => {};
+
+  void set(String serverId, UrlTestDiagnostics? diagnostic) {
+    state = {...state}..remove(serverId);
+    if (diagnostic != null) state = {...state, serverId: diagnostic};
+  }
+
+  void clear(Iterable<String> ids) {
+    final next = {...state};
+    for (final id in ids) {
+      next.remove(id);
+    }
+    state = next;
+  }
+}
+
+final pingDiagnosticsProvider =
+    NotifierProvider<PingDiagnosticsNotifier, Map<String, UrlTestDiagnostics>>(
+      PingDiagnosticsNotifier.new,
+    );
 
 abstract class StringSetNotifier extends Notifier<Set<String>> {
   @override

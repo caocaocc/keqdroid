@@ -1,3 +1,4 @@
+import 'url_test_diagnostics.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -739,6 +740,7 @@ $run''';
     final usePasswordless = allowPasswordless && isPasswordlessTunInstalled();
     final installNow =
         !asRoot && !usePasswordless && !await passwordlessTunDeclined();
+    final pkexecPath = asRoot ? null : LinuxCorePaths.findPkexec();
     final launch = planElevation(
       coreArgs: coreArgs,
       wrapperBody: installNow
@@ -747,8 +749,13 @@ $run''';
       helperPath: _polkitHelperPath,
       asRoot: asRoot,
       passwordless: usePasswordless,
+      pkexecPath: pkexecPath ?? 'pkexec',
     );
-    if (launch.viaPkexec && LinuxCorePaths.findPkexec() == null) {
+    // Проверяем до запуска: без polkit `Process.start` бросает
+    // `ProcessException`, а она печатает себя вместе со всей командой — то есть
+    // с телом root-обёртки, где `$1`..`$8` ещё не подставлены. Пользователь
+    // видел несколько экранов шелла вместо одной фразы «поставьте polkit».
+    if (launch.viaPkexec && pkexecPath == null) {
       throw const VpnStartException(
         'TUN mode needs root through pkexec, and polkit is not installed. '
         'Install polkit with an authentication agent, run the app as root '
@@ -1167,7 +1174,7 @@ $run''';
   @override
   Future<
     List<
-      ({String id, bool success, int? latencyMs, String error, int? httpStatus})
+      ({String id, bool success, int? latencyMs, String error, int? httpStatus, UrlTestDiagnostics? diagnostics})
     >
   >
   xrayUrlTestBatch({
@@ -1195,6 +1202,7 @@ $run''';
             latencyMs: r.latencyMs,
             error: r.error,
             httpStatus: r.httpStatus,
+            diagnostics: r.diagnostics,
           ),
         )
         .toList();

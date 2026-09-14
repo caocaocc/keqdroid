@@ -32,6 +32,10 @@ class ConfigGeneratorV2 {
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
     DesktopTunOptions? desktopTun,
+
+    /// macOS TUN installs a protected physical resolver for generated nodes.
+    /// Explicit custom DNS and complete author configs retain their policy.
+    bool physicalBootstrapDns = false,
     GeoAssetIndex? geoIndex,
     List<RouteServerOutbound> routeServers = const [],
     List<RouteAppRules> appRoutes = const [],
@@ -45,6 +49,7 @@ class ConfigGeneratorV2 {
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: nativeTunInbound,
         desktopTun: desktopTun,
+        physicalBootstrapDns: physicalBootstrapDns,
         geoIndex: geoIndex,
         routeServers: routeServers,
         appRoutes: appRoutes,
@@ -60,6 +65,8 @@ class ConfigGeneratorV2 {
     String? resolvedServerIp,
     bool httpInbound = false,
     String? outboundInterface,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
     final config = _buildXrayConfig(
       input,
@@ -72,6 +79,20 @@ class ConfigGeneratorV2 {
       _bindToInterface(config, outboundInterface);
       // у готового JSON тут был простой 8.8.8.8, а его ядро отправило бы в тот же ещё не найденный сервер
       config['dns'] = _pingDns();
+    }
+    // A complete hand-written config retains its author's resolver choices.
+    // The explicit flag keeps Android's existing ping output unchanged.
+    if (desktopDns) {
+      final custom = CustomXrayConfig.tryParse(input.trim());
+      config['dns'] =
+          custom?.authorDns ??
+          settings.xrayCore.buildBootstrapDnsBlock(
+            splitDirectDomains: splitDomainsAndIps(
+              _parseRuleList(settings.directRules),
+            ).domains.isNotEmpty,
+            physicalBootstrapDns: physicalBootstrapDns,
+          );
+      config['log'] = {'loglevel': 'warning'};
     }
     return jsonEncode(config);
   }
@@ -231,6 +252,7 @@ class ConfigGeneratorV2 {
     bool localInboundsNoAuth = false,
     bool nativeTunInbound = false,
     DesktopTunOptions? desktopTun,
+    bool physicalBootstrapDns = false,
     GeoAssetIndex? geoIndex,
     List<RouteServerOutbound> routeServers = const [],
     List<RouteAppRules> appRoutes = const [],
@@ -262,6 +284,7 @@ class ConfigGeneratorV2 {
         routeServers: routeServers,
         appRoutes: appRoutes,
         ownerGuard: guard,
+        physicalBootstrapDns: physicalBootstrapDns,
       );
     } else if (custom != null) {
       config = _buildCustomConfig(
@@ -288,6 +311,7 @@ class ConfigGeneratorV2 {
         resolvedServerIp ?? link.address,
         link.port,
         originalServerAddress: link.address,
+        physicalBootstrapDns: physicalBootstrapDns,
         pingSocksPort: pingSocksPort,
         pingHttpInbound: pingHttpInbound,
         localInboundsNoAuth: localInboundsNoAuth,
@@ -462,6 +486,7 @@ class ConfigGeneratorV2 {
     List<RouteServerOutbound> routeServers = const [],
     List<RouteAppRules> appRoutes = const [],
     OwnerGuard ownerGuard = OwnerGuard.off,
+    bool physicalBootstrapDns = false,
   }) {
     if (chain.hops.isEmpty) {
       throw ArgumentError('Proxy chain has no nodes');
@@ -494,6 +519,7 @@ class ConfigGeneratorV2 {
       resolvedServerIp ?? built.first.address,
       built.first.port,
       originalServerAddress: built.first.address,
+      physicalBootstrapDns: physicalBootstrapDns,
       // обход туннеля нужен адресам всех узлов, иначе обращение к промежуточному закольцуется через цепочку
       extraServerAddresses: [
         for (var i = 1; i < built.length; i++) built[i].address,
@@ -1991,9 +2017,22 @@ class ConfigGeneratorV2 {
   }
 
   static Map<String, dynamic> _wrapConfig(
-      List<Map<String, dynamic>> proxyOutbounds, AppSettings settings, String serverAddress, int serverPort,
-      {String? originalServerAddress, List<String> extraServerAddresses = const [], int? pingSocksPort, bool pingHttpInbound = false, bool localInboundsNoAuth = false, bool nativeTunInbound = false, DesktopTunOptions? desktopTun, List<RouteServerOutbound> routeServers = const [], List<RouteAppRules> appRoutes = const [], OwnerGuard ownerGuard = OwnerGuard.off}) {
-
+    List<Map<String, dynamic>> proxyOutbounds,
+    AppSettings settings,
+    String serverAddress,
+    int serverPort, {
+    String? originalServerAddress,
+    List<String> extraServerAddresses = const [],
+    int? pingSocksPort,
+    bool pingHttpInbound = false,
+    bool localInboundsNoAuth = false,
+    bool nativeTunInbound = false,
+    DesktopTunOptions? desktopTun,
+    bool physicalBootstrapDns = false,
+    List<RouteServerOutbound> routeServers = const [],
+    List<RouteAppRules> appRoutes = const [],
+    OwnerGuard ownerGuard = OwnerGuard.off,
+  }) {
     originalServerAddress ??= serverAddress;
     final isPingMode = pingSocksPort != null;
     // пинг меряет один сервер, маршрутам там места нет
@@ -2080,6 +2119,7 @@ class ConfigGeneratorV2 {
             liftedDomains: placedDns.lifted,
             bootstrapDomains: bootstrapDomains,
             proxiedDoh: globalProxy,
+            physicalBootstrapDns: physicalBootstrapDns,
           );
 
     // ruleTag печатается в логе на Info, по нему экран Соединения показывает правило
@@ -2602,9 +2642,9 @@ class ConfigGeneratorV2 {
       },
       if (settings.lanSharing) ...[
         {
-          'tag': 'socks-lan',
-          'port': settings.lanSocksPort,
-          'listen': '0.0.0.0',
+          'tag': 'socks-in',
+          'port': socksPort,
+          'listen': '127.0.0.1',
           'protocol': 'socks',
           'settings': _lanAuthEnabled(settings)
               ? {
@@ -2612,14 +2652,10 @@ class ConfigGeneratorV2 {
                   'udp': true,
                   'accounts': [
                     {
-                      'user': settings.lanUsername.trim(),
-                      'pass': settings.lanPassword,
-                    }
+                      'user': Socks5Credentials().username,
+                      'pass': Socks5Credentials().password,
+                    },
                   ],
-                }
-              : {
-                  'auth': 'noauth',
-                  'udp': true,
                 },
           'sniffing': core.buildSniffing(),
         },
@@ -2633,9 +2669,9 @@ class ConfigGeneratorV2 {
                   'allowTransparent': false,
                   'accounts': [
                     {
-                      'user': settings.lanUsername.trim(),
-                      'pass': settings.lanPassword,
-                    }
+                      'user': Socks5Credentials().username,
+                      'pass': Socks5Credentials().password,
+                    },
                   ],
                 }
               : {'allowTransparent': false},
