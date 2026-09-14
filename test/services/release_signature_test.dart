@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keqdroid/services/geo_base_downloader.dart';
+import 'package:keqdroid/services/linux_install.dart';
 import 'package:keqdroid/services/release_signature.dart';
 import 'package:keqdroid/services/update_service.dart';
 
@@ -81,6 +82,15 @@ void main() {
     for (final k in productionKeys) {
       expect(base64.decode(k), hasLength(32), reason: k);
     }
+    // This distribution must not trust a release signed only by upstream.
+    expect(
+      productionKeys,
+      isNot(contains('pPWpQvbW0WGwkEr/YcOsnEIeZ2CZTsOh/d/4Y+g6Q9k=')),
+    );
+    expect(
+      productionKeys,
+      isNot(contains('pMuHfej/dlfiszKhI7UCgfX3Ljch5YiCSv9TzIRRzpw=')),
+    );
   });
 
   group('fetchVerifiedSums', () {
@@ -150,20 +160,46 @@ void main() {
       'keqdroid-0.36.0-android.apk',
       'keqdroid-0.36.0-armeabi-v7a-android.apk',
       'keqdroid-windows-x64-0.36.0.zip',
+      'keqdroid-0.36.0-x86_64.AppImage',
+      'keqdroid-0.36.0-macos-arm64.pkg',
+      'keqdroid-0.36.0-macos-x64.pkg',
       'SHA256SUMS',
       'SHA256SUMS.sig',
     ];
 
     test('обновление ссылается на SHA256SUMS и его подпись', () {
-      final info = UpdateService.buildUpdateInfo(release(signed), '0.35.0')!;
+      final info = UpdateService.buildUpdateInfo(
+        release(signed),
+        '0.35.0',
+        linuxKind: LinuxInstallKind.appImage,
+      )!;
       expect(info.checksumUrl, 'https://x.invalid/SHA256SUMS');
       expect(info.signatureUrl, 'https://x.invalid/SHA256SUMS.sig');
+    });
+
+    test('macOS selects only its install PKG from the signed release', () {
+      final assets = [for (final n in signed) asset(n)];
+      for (final arch in ['arm64', 'x64']) {
+        final name = UpdateService.findAssetNameForPlatform(
+          assets,
+          'macos',
+          architecture: arch,
+          releaseVersion: 'v0.36.0',
+        );
+        expect(name, 'keqdroid-0.36.0-macos-$arch.pkg');
+        expect(ReleaseSignature.sumsAsset(assets)?['name'], 'SHA256SUMS');
+        expect(
+          ReleaseSignature.signatureAsset(assets)?['name'],
+          'SHA256SUMS.sig',
+        );
+      }
     });
 
     test('у неподписанного релиза ссылки на подпись нет', () {
       final info = UpdateService.buildUpdateInfo(
         release(signed.where((n) => n != 'SHA256SUMS.sig').toList()),
         '0.35.0',
+        linuxKind: LinuxInstallKind.appImage,
       )!;
       expect(info.signatureUrl, isNull);
     });

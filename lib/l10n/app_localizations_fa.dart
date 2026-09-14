@@ -3154,7 +3154,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get macosNetworkServiceHint => 'Proxy بدون مجوز مدیر متصل می‌شود و پراکسی سیستم را تغییر می‌دهد. TUN برای هر نسخهٔ نصب‌شده یک بار به مجوز نیاز دارد.';
 
   @override
-  String get macosNetworkServiceMissing => 'برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.';
+  String get macosNetworkServiceMissing => 'برای فعال‌سازی سرویس شبکه، keqdroid را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.';
 
   @override
   String get macosAuthorizeAccount => 'اجازهٔ TUN به این حساب';
@@ -3192,7 +3192,7 @@ class AppLocalizationsFa extends AppLocalizations {
   String get appearanceShowMenuBarSpeed => 'نمایش سرعت لحظه‌ای در نوار منو';
 
   @override
-  String get appearanceShowMenuBarSpeedSubtitle => 'ترافیک پردازش‌شده توسط KEQDIS';
+  String get appearanceShowMenuBarSpeedSubtitle => 'ترافیک پردازش‌شده توسط keqdroid';
 
   @override
   String get macosMenuOpenServers => 'باز کردن پنجره برای انتخاب گره';

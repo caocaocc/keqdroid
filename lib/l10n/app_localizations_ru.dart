@@ -3175,7 +3175,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get macosNetworkServiceHint => 'Proxy подключается и переключает системный прокси без прав администратора. Для TUN нужно разрешение один раз для установленной версии.';
 
   @override
-  String get macosNetworkServiceMissing => 'Установите или обновите KEQDIS полным пакетом PKG, чтобы включить сетевую службу.';
+  String get macosNetworkServiceMissing => 'Установите или обновите keqdroid полным пакетом PKG, чтобы включить сетевую службу.';
 
   @override
   String get macosAuthorizeAccount => 'Разрешить TUN этому аккаунту';
@@ -3213,7 +3213,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get appearanceShowMenuBarSpeed => 'Показывать текущую скорость в строке меню';
 
   @override
-  String get appearanceShowMenuBarSpeedSubtitle => 'Трафик, обрабатываемый KEQDIS';
+  String get appearanceShowMenuBarSpeedSubtitle => 'Трафик, обрабатываемый keqdroid';
 
   @override
   String get macosMenuOpenServers => 'Открыть окно для выбора узла';

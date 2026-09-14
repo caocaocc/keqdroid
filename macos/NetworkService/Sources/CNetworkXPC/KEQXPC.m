@@ -21,7 +21,7 @@ static const char *serviceName = "io.github.caocaocc.keqdroid.network-service";
 // Use the system-owned administrator right. A custom right may have been
 // pre-created with an insecure "allow" rule before our installer ever runs.
 static const char *authorizationRight = kAuthorizationRightExecute;
-static const char *transportError = "{\"ok\":false,\"error\":{\"code\":\"serviceUnavailable\",\"message\":\"Network service is unavailable. Install or repair KEQDIS.pkg.\"}}";
+static const char *transportError = "{\"ok\":false,\"error\":{\"code\":\"serviceUnavailable\",\"message\":\"Network service is unavailable. Install or repair using the keqdroid PKG installer.\"}}";
 
 @interface KEQConnection : NSObject
 @property(nonatomic, strong) xpc_connection_t connection;
@@ -208,7 +208,7 @@ int keq_server_start(const char *requirement, const char *app_path, keq_request_
             void *replyHandle = (__bridge_retained void *)reply;
             const char *json = xpc_dictionary_get_string(event, "json");
             if (!json || strnlen(json, 4 * 1024 * 1024 + 1) > 4 * 1024 * 1024 || !trustedApp(event, app.UTF8String, req.UTF8String, !validatedBundle)) {
-                keq_server_reply(replyHandle, "{\"ok\":false,\"error\":{\"code\":\"untrustedClient\",\"message\":\"Install the matching KEQDIS application package.\"}}");
+                keq_server_reply(replyHandle, "{\"ok\":false,\"error\":{\"code\":\"untrustedClient\",\"message\":\"Install the matching keqdroid application package.\"}}");
                 return;
             }
             // The root-owned bundle cannot change through an unprivileged

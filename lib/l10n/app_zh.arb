@@ -1515,7 +1515,7 @@
   "macosAppNeedsMatching": "当前列表中未找到此应用；如已移动或删除，请重新选择。",
   "macosNetworkServiceTitle": "网络服务",
   "macosNetworkServiceHint": "Proxy 连接时无需管理员授权，并会自动切换系统代理。TUN 每个已安装版本需要授权一次。",
-  "macosNetworkServiceMissing": "请使用完整 PKG 安装或更新 KEQDIS，以启用网络服务。",
+  "macosNetworkServiceMissing": "请使用完整 PKG 安装或更新 keqdroid，以启用网络服务。",
   "macosAuthorizeAccount": "授权当前账户使用 TUN",
   "macosWaitingNetwork": "等待网络恢复",
   "macosRestoringNetwork": "正在恢复原网络设置",
@@ -1528,6 +1528,6 @@
   "pingProbeDetails": "阶段 {stage}；总耗时 {elapsed} ms / {budget} ms",
   "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
   "appearanceShowMenuBarSpeed": "菜单栏显示实时速率",
-  "appearanceShowMenuBarSpeedSubtitle": "KEQDIS处理流量",
+  "appearanceShowMenuBarSpeedSubtitle": "keqdroid处理流量",
   "macosMenuOpenServers": "打开窗口选择节点"
 }

@@ -13,10 +13,10 @@ final class StatusItemTests: XCTestCase {
         for status in StatusItemPresentation.Status.allCases {
             let value = try StatusItemPresentation(arguments: arguments(status: status.rawValue))
             XCTAssertEqual(value.status, status)
-            XCTAssertEqual(value.accessibilityText, "KEQDIS — 已连接\n上传: 12 MB/s\n下载: — KB/s")
+            XCTAssertEqual(value.accessibilityText, "keqdroid — 已连接\n上传: 12 MB/s\n下载: — KB/s")
         }
         let iconOnly = try StatusItemPresentation(arguments: arguments(showSpeed: false))
-        XCTAssertEqual(iconOnly.accessibilityText, "KEQDIS — 已连接")
+        XCTAssertEqual(iconOnly.accessibilityText, "keqdroid — 已连接")
     }
 
     func testRejectsMalformedUpdatesInsteadOfPartiallyApplyingThem() {

@@ -1,9 +1,9 @@
 # keqdroid
 
-Proxy and VPN client for Android, Android TV, Windows and Linux, built on Xray-core and mihomo. keqdroid manages subscriptions, server configurations and traffic routing in a single application.
+Proxy and VPN client for Android, Android TV, Windows, Linux and macOS, built on Xray-core and mihomo. keqdroid manages subscriptions, server configurations and traffic routing in a single application.
 
-[![Release](https://img.shields.io/github/v/release/Lemonochka/keqdroid?label=release)](https://github.com/Lemonochka/keqdroid/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/Lemonochka/keqdroid/ci.yml?branch=master&label=build)](https://github.com/Lemonochka/keqdroid/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/caocaocc/keqdroid?label=release)](https://github.com/caocaocc/keqdroid/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/caocaocc/keqdroid/macos.yml?branch=dev&label=build)](https://github.com/caocaocc/keqdroid/actions/workflows/macos.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-chat-26A5E4?logo=telegram&logoColor=white)](https://t.me/keqdroid)
 
@@ -15,15 +15,17 @@ https://github.com/user-attachments/assets/e1f899dd-4f2c-4ca2-896c-1da64a3a5645
 
 ## Download
 
-Builds are published on the [Releases](https://github.com/Lemonochka/keqdroid/releases) page.
+This fork follows [Lemonochka/keqdroid](https://github.com/Lemonochka/keqdroid), including its product name. App and Geo updates come from `caocaocc/keqdroid`.
+
+Builds are published on the [Releases](https://github.com/caocaocc/keqdroid/releases) page.
 
 | Platform | Package |
 |----------|---------|
 | Android 7.0 and later, Android TV | `keqdroid-<version>-android.apk` |
 | Android 7.0 and later, 32-bit firmware | `keqdroid-<version>-armeabi-v7a-android.apk` |
-| Windows x64 | `keqdroid-windows-x64-<version>-setup.exe` (installer) |
 | Windows x64 | `keqdroid-windows-x64-<version>.zip` (portable) |
 | Linux x86_64 | `.AppImage`, `.deb`, `.rpm`, `.tar.gz`, `PKGBUILD` |
+| macOS arm64 / x64 | `keqdroid-<version>-macos-<arch>.pkg` and matching `-uninstall.pkg` |
 
 Each release includes `SHA256SUMS` with the hash of every file and `SHA256SUMS.sig` with its signature. The built-in updater verifies both before installing an update.
 
@@ -46,7 +48,7 @@ Each release includes `SHA256SUMS` with the hash of every file and `SHA256SUMS.s
 - Routes limited to selected applications, TCP or UDP, and ports
 - Routing profiles per subscription, including profiles supplied by the provider
 - Profiles shared as a link or QR code; Happ and Incy routing links are accepted
-- Split tunneling by application on Android and by program on Windows and Linux
+- Split tunneling by application on Android and by program on Windows, Linux and macOS
 - Live list of connections with the rule applied to each one
 
 **Application**
@@ -58,6 +60,8 @@ Each release includes `SHA256SUMS` with the hash of every file and `SHA256SUMS.s
 - Hotkeys for the main actions
 - Signed updates from GitHub Releases
 - English, Russian, German, Chinese and Persian
+
+macOS uses its existing keqrnel/sing-box TUN integration for Xray and the shared mihomo core. See [macOS support and validation limits](docs/MACOS.md).
 
 ## Supported formats
 
@@ -94,11 +98,13 @@ A ready-made configuration keeps its own routing, DNS and outbounds. Inbounds an
 | Linux | Proxy | System proxy on GNOME and KDE; manual setup elsewhere | None |
 | Linux | TUN | All traffic goes through a virtual adapter | Root through `pkexec`, or Passwordless TUN in Settings → Advanced → Permissions |
 
+**macOS.** Install the PKG with administrator authorization. The GUI and Proxy core run as the current user; the protected network service manages TUN and system settings. The app is ad-hoc signed, without Apple notarization. Existing `KEQDIS.app`, Bundle ID and data paths remain compatible. macOS 12 and Intel device acceptance is still pending.
+
 **Android.** The connection can be controlled from the notification, the Quick Settings tile, a home screen widget and launcher shortcuts. Per-application routing and DNS interception require VPN mode. An active VPN session resumes after an application update or a device restart.
 
 **Android TV.** The application is operated with a remote control. A subscription can be sent from keqdroid on a phone by scanning a QR code on the TV.
 
-**Windows.** The installer places the application in Program Files and can remove it together with its data; the portable version runs from any folder. The application can start with the system, connect automatically and stay in the tray. Settings are stored in `%APPDATA%\com.keqdroid\keqdroid\` and are shared by both versions.
+**Windows.** This fork distributes the portable ZIP, which runs from any folder. The application can start with the system, connect automatically and stay in the tray. Settings are stored in `%APPDATA%\com.keqdroid\keqdroid\` and are shared by both versions.
 
 **Linux.** The application can start at login and connect automatically. On Arch Linux, install with `makepkg -si` using the `PKGBUILD` from the release.
 
@@ -133,16 +139,15 @@ On Android, crash reports go to Google Firebase Crashlytics: the error with link
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). Signing is being set up; until it is enabled, Windows builds are not signed.
+This fork builds platform packages with [Development packages](.github/workflows/macos.yml) and publishes verified artifacts with [Publish verified release](.github/workflows/release.yml). Release checksums carry this fork's Ed25519 signature. Android APKs use a persistent fork key; Windows ZIPs are unsigned; macOS internals use ad-hoc signatures with unsigned PKGs and no Apple notarization.
 
-- Committers and reviewers: [Lemonochka](https://github.com/Lemonochka)
-- Approvers: [Lemonochka](https://github.com/Lemonochka)
-
-Releases after 0.35.0 are built from this repository by [GitHub Actions](.github/workflows/release.yml). `gh attestation verify <file> --repo Lemonochka/keqdroid` confirms that a file came from that build. Signing covers `keqdroid.exe`; the bundled `xray.exe` and `mihomo.exe` are builds of the upstream Xray-core and mihomo.
+Upstream's SignPath setup and build attestations do not apply to these fork artifacts. See [build and release instructions](docs/BUILD.md) for this repository's verification process.
 
 ## Security
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
+Android uses the independent application ID `io.github.caocaocc.keqdroid` and a persistent fork signing key; migrate from upstream with backup/import. This fork does not publish to AUR.
 
 ## Building from source
 

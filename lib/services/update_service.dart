@@ -16,6 +16,7 @@ import 'linux_install.dart';
 import 'release_signature.dart';
 import 'windows_install.dart';
 import 'windows_setup_updater.dart';
+import 'macos_desktop_service.dart';
 import 'windows_zip_updater.dart';
 import 'zip_piece_download.dart';
 import '../core/app_logger.dart';
@@ -67,8 +68,18 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const _owner = 'Lemonochka';
-  static const _repo = 'keqdroid';
+  static const releaseOwner = 'caocaocc';
+  static const releaseRepository = 'keqdroid';
+  static const _owner = releaseOwner;
+  static const _repo = releaseRepository;
+
+  static String releaseOwnerForPlatform(String platform) => releaseOwner;
+
+  static String? get _macOSArchitecture => switch (Abi.current()) {
+    Abi.macosArm64 => 'arm64',
+    Abi.macosX64 => 'x64',
+    _ => null,
+  };
 
   // ведущая v необязательна: в репозитории есть теги обоих видов
   static final _releaseTagPattern = RegExp(
@@ -92,7 +103,8 @@ class UpdateService {
   static Future<UpdateInfo?> Function({
     required bool viaLocalProxy,
     required int httpPort,
-  }) fetchUpdate = _fetchUpdate;
+  })
+  fetchUpdate = _fetchUpdate;
 
   @visibleForTesting
   static void resetAutoCheck() {
@@ -137,9 +149,10 @@ class UpdateService {
     if (last != null && DateTime.now().difference(last) < minAutoCheckGap) {
       return _cachedAutoResult;
     }
-    return _autoCheckInFlight ??=
-        _autoCheck(viaLocalProxy: viaLocalProxy, httpPort: httpPort)
-            .whenComplete(() => _autoCheckInFlight = null);
+    return _autoCheckInFlight ??= _autoCheck(
+      viaLocalProxy: viaLocalProxy,
+      httpPort: httpPort,
+    ).whenComplete(() => _autoCheckInFlight = null);
   }
 
   static Future<UpdateInfo?> _autoCheck({
@@ -168,7 +181,10 @@ class UpdateService {
     required bool force,
   }) async {
     try {
-      return await fetchUpdate(viaLocalProxy: viaLocalProxy, httpPort: httpPort);
+      return await fetchUpdate(
+        viaLocalProxy: viaLocalProxy,
+        httpPort: httpPort,
+      );
     } catch (e) {
       AppLogger.instance.warn(
         'Update check failed '
@@ -226,11 +242,16 @@ class UpdateService {
     final assets = latestRelease['assets'] as List?;
     final asset = linuxKind != null
         ? _findLinuxAsset(assets, linuxKind)
-        : _findAssetForCurrentPlatform(assets, windowsInstalled: windowsInstalled);
+        : _findAssetForCurrentPlatform(
+            assets,
+            latestTag,
+            windowsInstalled: windowsInstalled,
+          );
     if (asset == null) return null;
 
     final assetName = (asset['name'] ?? '').toString();
-    final checksumAsset = ReleaseSignature.sumsAsset(assets) ??
+    final checksumAsset =
+        ReleaseSignature.sumsAsset(assets) ??
         _findChecksumAsset(assets, assetName);
     final signatureAsset = ReleaseSignature.signatureAsset(assets);
 
@@ -240,11 +261,12 @@ class UpdateService {
       // pacman обновляет pacman: ведём на страницу релиза, keqdroid-bin в AUR может и не быть
       downloadUrl: linuxKind == LinuxInstallKind.pacman
           ? (latestRelease['html_url'] ??
-              'https://github.com/$_owner/$_repo/releases/latest')
+                'https://github.com/$_owner/$_repo/releases/latest')
           : asset['browser_download_url'],
       releaseNotes: latestRelease['body'],
       apkSize: asset['size'] ?? 0,
-      openInBrowser: linuxKind == LinuxInstallKind.pacman ||
+      openInBrowser:
+          linuxKind == LinuxInstallKind.pacman ||
           linuxKind == LinuxInstallKind.readOnly ||
           (Platform.isWindows && _shouldOpenDesktopAssetInBrowser(asset)),
       assetName: assetName,
@@ -308,7 +330,7 @@ class UpdateService {
 
   // один повтор: WRONG_VERSION_NUMBER бывает разовым, таймауты не повторяем
   static Future<Response> _getReleasesPage(Dio dio, int page) async {
-    for (var attempt = 0;; attempt++) {
+    for (var attempt = 0; ; attempt++) {
       try {
         return await dio.get(
           'https://api.github.com/repos/$_owner/$_repo/releases',
@@ -368,18 +390,27 @@ class UpdateService {
   }
 
   static Map<String, dynamic>? _findAssetForCurrentPlatform(
-    List? assets, {
+    List? assets,
+    String releaseVersion, {
     bool windowsInstalled = false,
   }) {
     if (Platform.isWindows) {
       return _findWindowsAsset(assets, installed: windowsInstalled);
     }
-    return _findApkAsset(assets, arm32: Abi.current() == Abi.androidArm);
+    if (Platform.isMacOS) {
+      return _findMacOSAsset(assets, _macOSArchitecture, releaseVersion);
+    }
+    if (Platform.isAndroid) {
+      return _findApkAsset(assets, arm32: Abi.current() == Abi.androidArm);
+    }
+    return null;
   }
 
   static String? findAssetNameForPlatform(
     List? assets,
     String platform, {
+    String? architecture,
+    String? releaseVersion,
     LinuxInstallKind linuxKind = LinuxInstallKind.appImage,
   }) {
     final asset = switch (platform) {
@@ -388,9 +419,31 @@ class UpdateService {
       'linux' => _findLinuxAsset(assets, linuxKind),
       'android' => _findApkAsset(assets, arm32: false),
       'android-arm' => _findApkAsset(assets, arm32: true),
+      'macos' => _findMacOSAsset(assets, architecture, releaseVersion),
       _ => null,
     };
     return asset?['name']?.toString();
+  }
+
+  static Map<String, dynamic>? _findMacOSAsset(
+    List? assets,
+    String? architecture,
+    String? releaseVersion,
+  ) {
+    if (assets == null || !const {'arm64', 'x64'}.contains(architecture)) {
+      return null;
+    }
+    final version = releaseVersion?.replaceFirst(RegExp(r'^[vV]'), '');
+    if (version == null ||
+        !RegExp(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$').hasMatch(version)) {
+      return null;
+    }
+    final expected = 'keqdroid-$version-macos-$architecture.pkg';
+    for (final asset in assets) {
+      if (asset is! Map<String, dynamic>) continue;
+      if (asset['name'] == expected) return asset;
+    }
+    return null;
   }
 
   // без установщика в релизе установленная копия возьмёт zip: обновится, хоть версия в «Приложениях» и отстанет
@@ -427,8 +480,7 @@ class UpdateService {
       LinuxInstallKind.rpm => const ['.x86_64.rpm', '.rpm'],
       LinuxInstallKind.pacman ||
       LinuxInstallKind.portable ||
-      LinuxInstallKind.readOnly =>
-        const ['-linux-x64.tar.gz'],
+      LinuxInstallKind.readOnly => const ['-linux-x64.tar.gz'],
     };
     for (final suffix in preferredSuffixes) {
       for (final asset in assets) {
@@ -442,8 +494,7 @@ class UpdateService {
   static Map<String, dynamic>? checksumAssetFor(
     List? assets,
     String assetName,
-  ) =>
-      _findChecksumAsset(assets, assetName);
+  ) => _findChecksumAsset(assets, assetName);
 
   // хеш либо в <имя>.sha256 рядом, либо в общем SHA256SUMS/checksums.txt, с 0.19.0 только общий
   static Map<String, dynamic>? _findChecksumAsset(
@@ -557,6 +608,7 @@ class UpdateService {
     return prefs.getString(_prefSkipVersion) == version;
   }
 
+  /// Returns `true` when the app is exiting to apply a desktop update.
   static Future<bool> downloadAndInstall(
     UpdateInfo info, {
     bool viaLocalProxy = false,
@@ -564,6 +616,19 @@ class UpdateService {
     void Function(int received, int total)? onProgress,
     Future<void> Function()? beforeRestart,
   }) async {
+    if (Platform.isMacOS &&
+        (_findMacOSAsset(
+                  [
+                    {'name': info.assetName},
+                  ],
+                  _macOSArchitecture,
+                  info.latestVersion,
+                ) ==
+                null ||
+            Uri.parse(info.downloadUrl).pathSegments.lastOrNull !=
+                info.assetName)) {
+      throw StateError('macOS updates require the matching PKG installer.');
+    }
     final dio = _buildDio(viaLocalProxy: viaLocalProxy, httpPort: httpPort);
     if (info.openInBrowser) {
       await _openUrlInBrowser(info.downloadUrl);
@@ -579,7 +644,8 @@ class UpdateService {
       await file.delete();
     }
 
-    final assembled = Platform.isAndroid &&
+    final assembled =
+        Platform.isAndroid &&
         ext == '.apk' &&
         await _assembleFromInstalledApk(dio, info, file, onProgress);
     if (!assembled) {
@@ -648,11 +714,11 @@ class UpdateService {
       throw StateError(
         target == null
             ? 'The AppImage this app was started from has been moved or '
-                'renamed, so it cannot be replaced in place. The new version '
-                'is saved as $saved'
+                  'renamed, so it cannot be replaced in place. The new version '
+                  'is saved as $saved'
             : 'The AppImage is in ${p.dirname(target)}, where this user '
-                'cannot write, so it cannot be replaced in place. The new '
-                'version is saved as $saved',
+                  'cannot write, so it cannot be replaced in place. The new '
+                  'version is saved as $saved',
       );
     }
 
@@ -670,6 +736,24 @@ class UpdateService {
       );
     }
 
+    if (Platform.isMacOS) {
+      return handOffMacOSInstaller(
+        restoreNetwork:
+            beforeRestart ??
+            () async => throw StateError(
+              'Network cleanup is required before updating macOS.',
+            ),
+        openInstaller: () async {
+          final opened = await Process.run('/usr/bin/open', [file.path]);
+          if (opened.exitCode != 0) {
+            throw StateError(
+              'Could not open the macOS installer: ${opened.stderr}',
+            );
+          }
+        },
+        quit: MacOSDesktopService.completeQuit,
+      );
+    }
     await OpenFilex.open(file.path);
     return false;
   }
@@ -678,10 +762,7 @@ class UpdateService {
 
   // у каждой версии своё имя, и после установки файл оставался: на ПК за неделю 13.11.2026 набралось 258 МБ.
   // свежие не трогаем, после перезапуска их ещё может держать установщик или скрипт обновления
-  static Future<void> sweepLeftovers({
-    Directory? dir,
-    DateTime? now,
-  }) async {
+  static Future<void> sweepLeftovers({Directory? dir, DateTime? now}) async {
     try {
       final temp = dir ?? await getTemporaryDirectory();
       final cutoff = (now ?? DateTime.now()).subtract(
@@ -702,16 +783,15 @@ class UpdateService {
     UpdateInfo info,
     File file,
     void Function(int received, int total)? onProgress,
-  ) =>
-      dio.download(
-        info.downloadUrl,
-        file.path,
-        onReceiveProgress: (received, total) {
-          if (total > 0) {
-            onProgress?.call(received, total);
-          }
-        },
-      );
+  ) => dio.download(
+    info.downloadUrl,
+    file.path,
+    onReceiveProgress: (received, total) {
+      if (total > 0) {
+        onProgress?.call(received, total);
+      }
+    },
+  );
 
   static Future<bool> _assembleFromInstalledApk(
     Dio dio,
@@ -748,6 +828,19 @@ class UpdateService {
     }
   }
 
+  /// Run only after validating the downloaded package. A failed cleanup or
+  /// Installer launch leaves the GUI available to report the error.
+  static Future<bool> handOffMacOSInstaller({
+    required Future<void> Function() restoreNetwork,
+    required Future<void> Function() openInstaller,
+    required Future<void> Function() quit,
+  }) async {
+    await restoreNetwork();
+    await openInstaller();
+    await quit();
+    return true;
+  }
+
   @visibleForTesting
   static String extensionFromUrl(String url) {
     final path = Uri.parse(url).path.toLowerCase();
@@ -761,6 +854,8 @@ class UpdateService {
       '.msi',
       '.exe',
       '.apk',
+      '.pkg',
+      '.dmg',
     ]) {
       if (path.endsWith(ext)) return ext;
     }
@@ -793,7 +888,11 @@ class UpdateService {
       sumsUrl: checksumUrl,
       signatureUrl: signatureUrl,
     );
-    final expected = _parseSha256(manifest, info.assetName);
+    final expected = _parseSha256(
+      manifest,
+      info.assetName,
+      allowBareHash: false,
+    );
     if (expected == null) {
       throw StateError(
         'Could not read the SHA-256 checksum for ${info.assetName}; aborting update.',
@@ -814,24 +913,43 @@ class UpdateService {
     return digest.toString();
   }
 
-  static String? extractSha256(String manifest, String assetName) =>
-      _parseSha256(manifest, assetName);
+  /// Test hook for [_parseSha256] (kept public like the other version helpers).
+  static String? extractSha256(
+    String manifest,
+    String assetName, {
+    bool allowBareHash = true,
+  }) => _parseSha256(manifest, assetName, allowBareHash: allowBareHash);
 
-  static String? _parseSha256(String text, String assetName) {
-    final hexPattern = RegExp(r'\b[a-fA-F0-9]{64}\b');
-    final lowerAsset = assetName.toLowerCase();
-
-    if (lowerAsset.isNotEmpty) {
-      for (final line in const LineSplitter().convert(text)) {
-        if (line.toLowerCase().contains(lowerAsset)) {
-          final m = hexPattern.firstMatch(line);
-          if (m != null) return m.group(0)!.toLowerCase();
-        }
-      }
+  /// Extracts the 64-hex-char SHA-256 for [assetName]. Handles a bare hash, a
+  /// `sha256sum`-style `<hash>  <file>` line, and multi-asset manifests.
+  static String? _parseSha256(
+    String text,
+    String assetName, {
+    bool allowBareHash = true,
+  }) {
+    final lines = const LineSplitter()
+        .convert(text)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    if (allowBareHash &&
+        lines.length == 1 &&
+        RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(lines.single)) {
+      return lines.single.toLowerCase();
     }
-
-    final m = hexPattern.firstMatch(text);
-    return m?.group(0)?.toLowerCase();
+    if (assetName.isEmpty) return null;
+    final entry = RegExp(r'^([a-fA-F0-9]{64})[ \t]+\*?(.+)$');
+    String? selected;
+    for (final line in lines) {
+      final match = entry.firstMatch(line);
+      if (match == null) return null;
+      // A release-wide manifest must identify this exact asset once. A hash
+      // for another architecture or a similarly named sidecar is not a fallback.
+      if (match.group(2) != assetName) continue;
+      if (selected != null) return null;
+      selected = match.group(1)!.toLowerCase();
+    }
+    return selected;
   }
 
   // только https и без метасимволов cmd: ссылка идёт в cmd /c start

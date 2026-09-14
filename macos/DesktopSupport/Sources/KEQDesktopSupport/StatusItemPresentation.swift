@@ -16,7 +16,7 @@ public struct StatusItemPresentation: Equatable {
     public let downloadLabel: String
 
     public static let initial = StatusItemPresentation(status: .disconnected,
-        statusText: "KEQDIS", showSpeed: false, uploadText: "— KB/s", downloadText: "— KB/s",
+        statusText: "keqdroid", showSpeed: false, uploadText: "— KB/s", downloadText: "— KB/s",
         uploadLabel: "", downloadLabel: "")
 
     public init(arguments: [String: Any]) throws {
@@ -57,7 +57,7 @@ public struct StatusItemPresentation: Equatable {
     }
 
     public var accessibilityText: String {
-        let title = statusText == "KEQDIS" ? statusText : "KEQDIS — \(statusText)"
+        let title = statusText == "keqdroid" ? statusText : "keqdroid — \(statusText)"
         guard showSpeed else { return title }
         return "\(title)\n\(uploadLabel): \(uploadText)\n\(downloadLabel): \(downloadText)"
     }

@@ -13,8 +13,8 @@ class ReleaseSignature {
   // второй ключ запасной и хранится не на GitHub: без него потеря основного навсегда закрыла бы обновления
   @visibleForTesting
   static List<String> publicKeys = const [
-    'pPWpQvbW0WGwkEr/YcOsnEIeZ2CZTsOh/d/4Y+g6Q9k=',
-    'pMuHfej/dlfiszKhI7UCgfX3Ljch5YiCSv9TzIRRzpw=',
+    'w8dRUOyxqGPbEhpxu7dBoVt95Y++gf3HJxfd+/IydbU=',
+    'CZl5yUrEfyTA9SsbxE6Np+gjFJtomxCC5m2J84VpDLU=',
   ];
 
   static Map<String, dynamic>? sumsAsset(List? assets) =>

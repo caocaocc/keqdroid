@@ -1003,7 +1003,7 @@
   "macosAppNeedsMatching": "برنامه در فهرست یافت نشد. اگر جابه‌جا یا حذف شده است، دوباره انتخاب کنید.",
   "macosNetworkServiceTitle": "سرویس شبکه",
   "macosNetworkServiceHint": "Proxy بدون مجوز مدیر متصل می‌شود و پراکسی سیستم را تغییر می‌دهد. TUN برای هر نسخهٔ نصب‌شده یک بار به مجوز نیاز دارد.",
-  "macosNetworkServiceMissing": "برای فعال‌سازی سرویس شبکه، KEQDIS را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.",
+  "macosNetworkServiceMissing": "برای فعال‌سازی سرویس شبکه، keqdroid را با نصب‌کنندهٔ کامل PKG نصب یا به‌روز کنید.",
   "macosAuthorizeAccount": "اجازهٔ TUN به این حساب",
   "macosWaitingNetwork": "Waiting for network to recover",
   "macosRestoringNetwork": "Restoring previous network settings",
@@ -1016,6 +1016,6 @@
   "pingProbeDetails": "Stage {stage}; elapsed {elapsed} ms / {budget} ms",
   "@pingProbeDetails": {"placeholders": {"stage": {"type": "String"}, "elapsed": {"type": "int"}, "budget": {"type": "int"}}},
   "appearanceShowMenuBarSpeed": "نمایش سرعت لحظه‌ای در نوار منو",
-  "appearanceShowMenuBarSpeedSubtitle": "ترافیک پردازش‌شده توسط KEQDIS",
+  "appearanceShowMenuBarSpeedSubtitle": "ترافیک پردازش‌شده توسط keqdroid",
   "macosMenuOpenServers": "باز کردن پنجره برای انتخاب گره"
 }

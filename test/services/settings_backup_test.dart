@@ -211,7 +211,7 @@ void main() {
 
       await SettingsBackupService.applyBackup(
         storage,
-        backup: KeqdisBackup(
+        backup: KeqdroidBackup(
           version: 1,
           exportedAt: DateTime(2026),
           data: {

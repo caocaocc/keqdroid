@@ -19,7 +19,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
 APP=keqdroid
-GH_OWNER=Lemonochka
+GH_OWNER=caocaocc
 GH_REPO=keqdroid
 MAINTAINER="Lemonochka <noreply@users.noreply.github.com>"
 ARCH_DEB=amd64
@@ -51,6 +51,10 @@ fi
 
 BUNDLE="$REPO_DIR/build/linux/x64/release/bundle"
 if [ ! -x "$BUNDLE/$APP" ]; then
+  if [ "${1:-}" = --no-build ]; then
+    echo "Verified precompiled Linux bundle is missing" >&2
+    exit 1
+  fi
   log "Bundle missing — building first"
   bash "$REPO_DIR/tool/build_linux_wsl.sh"
 fi

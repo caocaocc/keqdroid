@@ -3159,7 +3159,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get macosNetworkServiceHint => 'Proxy verbindet sich und stellt den Systemproxy ohne Administratorfreigabe um. TUN benötigt eine Freigabe pro installierter Version.';
 
   @override
-  String get macosNetworkServiceMissing => 'Installiere oder aktualisiere KEQDIS mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.';
+  String get macosNetworkServiceMissing => 'Installiere oder aktualisiere keqdroid mit dem vollständigen PKG, um den Netzwerkdienst zu aktivieren.';
 
   @override
   String get macosAuthorizeAccount => 'TUN für dieses Konto autorisieren';
@@ -3197,7 +3197,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get appearanceShowMenuBarSpeed => 'Aktuelle Geschwindigkeit in der Menüleiste anzeigen';
 
   @override
-  String get appearanceShowMenuBarSpeedSubtitle => 'Von KEQDIS verarbeiteter Datenverkehr';
+  String get appearanceShowMenuBarSpeedSubtitle => 'Von keqdroid verarbeiteter Datenverkehr';
 
   @override
   String get macosMenuOpenServers => 'Fenster zur Knotenauswahl öffnen';
