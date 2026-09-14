@@ -89,6 +89,124 @@ void main() {
         'keqdroid-0.5.1-x86_64.AppImage',
       );
     });
+
+    test('macOS never falls back to another platform', () {
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          assets,
+          'macos',
+          architecture: 'arm64',
+        ),
+        isNull,
+      );
+    });
+
+    test('macOS matches the exact release version and PKG architecture', () {
+      final mixed = [
+        ...assets,
+        {'name': 'keqdroid-0.5.1-macos-arm64.dmg'},
+        {'name': 'keqdroid-0.5.1-macos-x64.pkg'},
+        {'name': 'keqdroid-0.5.1-macos-arm64-uninstall.pkg'},
+        {'name': 'keqdroid-0.5.1-macos-arm64.pkg.sha256'},
+        {'name': 'keqdroid-0.5.0-macos-arm64.pkg'},
+        {'name': 'keqdroid-0.5.1-macos-arm64.pkg'},
+      ];
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'arm64',
+          releaseVersion: 'v0.5.1',
+        ),
+        'keqdroid-0.5.1-macos-arm64.pkg',
+      );
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'x64',
+          releaseVersion: '0.5.1',
+        ),
+        'keqdroid-0.5.1-macos-x64.pkg',
+      );
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed,
+          'macos',
+          architecture: 'unknown',
+          releaseVersion: 'v0.5.1',
+        ),
+        isNull,
+      );
+      for (final version in [null, 'v0.5.2', '../0.5.1', 'v0.5']) {
+        expect(
+          UpdateService.findAssetNameForPlatform(
+            mixed,
+            'macos',
+            architecture: 'arm64',
+            releaseVersion: version,
+          ),
+          isNull,
+        );
+      }
+      expect(
+        UpdateService.findAssetNameForPlatform(
+          mixed
+              .where(
+                (asset) => asset['name'] != 'keqdroid-0.5.1-macos-arm64.pkg',
+              )
+              .toList(),
+          'macos',
+          architecture: 'arm64',
+          releaseVersion: 'v0.5.1',
+        ),
+        isNull,
+      );
+    });
+
+    test('all platforms share this repository release source', () {
+      expect(UpdateService.releaseRepository, 'keqdroid');
+      expect(UpdateService.releaseOwner, 'caocaocc');
+      for (final platform in ['macos', 'windows', 'android', 'linux']) {
+        expect(UpdateService.releaseOwnerForPlatform(platform), 'caocaocc');
+      }
+    });
+  });
+
+  group('macOS installer hand-off', () {
+    test('restores network, opens Installer, then exits', () async {
+      final calls = <String>[];
+      final exiting = await UpdateService.handOffMacOSInstaller(
+        restoreNetwork: () async => calls.add('restore'),
+        openInstaller: () async => calls.add('open'),
+        quit: () async => calls.add('quit'),
+      );
+      expect(exiting, isTrue);
+      expect(calls, ['restore', 'open', 'quit']);
+    });
+
+    for (final failedPhase in ['restore', 'open']) {
+      test('$failedPhase failure keeps the GUI available', () async {
+        final calls = <String>[];
+        Future<void> phase(String name) async {
+          calls.add(name);
+          if (name == failedPhase) throw StateError(name);
+        }
+
+        await expectLater(
+          UpdateService.handOffMacOSInstaller(
+            restoreNetwork: () => phase('restore'),
+            openInstaller: () => phase('open'),
+            quit: () => phase('quit'),
+          ),
+          throwsStateError,
+        );
+        expect(
+          calls,
+          failedPhase == 'restore' ? ['restore'] : ['restore', 'open'],
+        );
+      });
+    }
   });
 
   group('UpdateService.extractSha256', () {
@@ -129,6 +247,37 @@ void main() {
     test('returns null when no 64-hex hash is present', () {
       expect(UpdateService.extractSha256('not a hash', 'x.apk'), isNull);
     });
+
+    test(
+      'a shared manifest cannot fall back to another asset or bare hash',
+      () {
+        const asset = 'keqdroid-0.19.0-macos-arm64.dmg';
+        for (final name in [
+          'keqdroid-0.19.0-macos-x64.dmg',
+          '$asset.sha256',
+          'old-$asset',
+          './$asset',
+        ]) {
+          expect(UpdateService.extractSha256('$hash  $name', asset), isNull);
+        }
+        expect(
+          UpdateService.extractSha256(hash, asset, allowBareHash: false),
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'duplicate manifest entries are rejected even with identical hashes',
+      () {
+        const asset = 'keqdroid-0.19.0-macos-arm64.dmg';
+        expect(
+          UpdateService.extractSha256('$hash  $asset\n$hash  $asset', asset),
+          isNull,
+        );
+        expect(UpdateService.extractSha256('$hash *$asset', asset), hash);
+      },
+    );
   });
 
   group('one SHA256SUMS for the whole release', () {
@@ -143,6 +292,10 @@ void main() {
       'keqdroid-0.19.0-x86_64.AppImage',
       'keqdroid-windows-x64-0.19.0.zip',
       'keqdroid_0.19.0_amd64.deb',
+      'keqdroid-0.19.0-macos-arm64.pkg',
+      'keqdroid-0.19.0-macos-x64.pkg',
+      'keqdroid-0.19.0-macos-arm64-uninstall.pkg',
+      'keqdroid-0.19.0-macos-x64-uninstall.pkg',
     ];
     String hashOf(int i) => (i + 1).toRadixString(16).padLeft(64, '0');
     final manifest = [
@@ -154,8 +307,13 @@ void main() {
     ];
 
     test('every platform asset is verified against the manifest', () {
-      for (final platform in ['android', 'windows', 'linux']) {
-        final name = UpdateService.findAssetNameForPlatform(assets, platform)!;
+      for (final platform in ['android', 'windows', 'linux', 'macos']) {
+        final name = UpdateService.findAssetNameForPlatform(
+          assets,
+          platform,
+          architecture: 'arm64',
+          releaseVersion: 'v0.19.0',
+        )!;
         expect(
           UpdateService.checksumAssetFor(assets, name)?['name'],
           'SHA256SUMS',

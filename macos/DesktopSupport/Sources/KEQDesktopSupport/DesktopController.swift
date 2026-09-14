@@ -10,6 +10,7 @@ public final class DesktopController: NSObject, NSWindowDelegate, NSMenuDelegate
     private var hotkeys: GlobalHotkeys?
     private var initialized = false
     private var quitHandlerReady = false
+    private var terminationPending = false
     private var minimizeToTray = true
     private var pendingLinks: [String] = []
     private var deliveredLinks: [String: Date] = [:]
@@ -70,8 +71,16 @@ public final class DesktopController: NSObject, NSWindowDelegate, NSMenuDelegate
             case "showWindow": showWindow(); completion(.success(nil))
             case "completeQuit":
                 terminationApproved = true
-                NSApp.reply(toApplicationShouldTerminate: true)
                 completion(.success(nil))
+                DispatchQueue.main.async { [self] in
+                    if terminationPending {
+                        terminationPending = false
+                        NSApp.reply(toApplicationShouldTerminate: true)
+                    } else {
+                        // An updater can finish cleanup without a pending Cmd+Q.
+                        NSApp.terminate(nil)
+                    }
+                }
             case "getPendingDeepLink":
                 let link = pendingLinks.isEmpty ? nil : pendingLinks.removeFirst()
                 if let link { deliveredLinks[link] = Date() }
@@ -79,7 +88,10 @@ public final class DesktopController: NSObject, NSWindowDelegate, NSMenuDelegate
                 if !pendingLinks.isEmpty { DispatchQueue.main.async { self.emit("onDeepLink", [:]) } }
             case "cancelQuit":
                 terminationApproved = false
-                NSApp.reply(toApplicationShouldTerminate: false)
+                if terminationPending {
+                    terminationPending = false
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                }
                 showWindow()
                 completion(.success(nil))
             case "setGlobalHotkeys":
@@ -228,6 +240,7 @@ public final class DesktopController: NSObject, NSWindowDelegate, NSMenuDelegate
 
     public func requestQuit() {
         if !quitHandlerReady { terminationApproved = true; NSApp.reply(toApplicationShouldTerminate: true); return }
+        terminationPending = true
         emit("onQuitRequest", [:])
     }
 

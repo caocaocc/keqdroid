@@ -18,7 +18,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
 APP=keqdroid
-GH_OWNER=Lemonochka
+GH_OWNER=caocaocc
 GH_REPO=keqdroid
 MAINTAINER="Lemonochka <noreply@users.noreply.github.com>"
 ARCH_DEB=amd64
@@ -36,6 +36,10 @@ log "Packaging $APP $TAG"
 
 BUNDLE="$REPO_DIR/build/linux/x64/release/bundle"
 if [ ! -x "$BUNDLE/$APP" ]; then
+  if [ "${1:-}" = --no-build ]; then
+    echo "Verified precompiled Linux bundle is missing" >&2
+    exit 1
+  fi
   log "Bundle missing — building first"
   bash "$REPO_DIR/tool/build_linux_wsl.sh"
 fi
@@ -122,7 +126,7 @@ write_desktop() { # $1 = exec name, $2 = dest file
   cat > "$2" <<EOF
 [Desktop Entry]
 Type=Application
-Name=KeqDroid
+Name=KEQDIS
 Comment=KEQDIS proxy/VPN client
 Exec=$1
 Icon=$APP
@@ -332,7 +336,7 @@ package() {
   install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/$APP.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
-Name=KeqDroid
+Name=KEQDIS
 Comment=KEQDIS proxy/VPN client
 Exec=$APP
 Icon=$APP
