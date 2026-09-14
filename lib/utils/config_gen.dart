@@ -25,6 +25,9 @@ class ConfigGeneratorV2 {
     /// Туннель держит само ядро: в конфиг добавляется tun-инбаунд, а
     /// дескриптор ему передаёт нативная часть через переменную окружения.
     bool nativeTunInbound = false,
+    /// macOS TUN installs a protected physical resolver for generated nodes.
+    /// Explicit custom DNS and complete author configs retain their policy.
+    bool physicalBootstrapDns = false,
     /// Индекс поставляемых geo-баз. Нужен только готовым (custom) конфигам: их
     /// правила приходят от провайдера, а неизвестный `geosite:`-код роняет
     /// разбор всего конфига. Для ссылок списки чистит GeoAssetService заранее.
@@ -37,6 +40,7 @@ class ConfigGeneratorV2 {
         resolvedServerIp: resolvedServerIp,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: nativeTunInbound,
+        physicalBootstrapDns: physicalBootstrapDns,
         geoIndex: geoIndex,
       ),
     );
@@ -53,16 +57,27 @@ class ConfigGeneratorV2 {
     required int socksPort,
     String? resolvedServerIp,
     bool httpInbound = false,
+    bool desktopDns = false,
+    bool physicalBootstrapDns = false,
   }) {
-    return jsonEncode(
-      _buildXrayConfig(
-        input,
-        settings,
-        resolvedServerIp: resolvedServerIp,
-        pingSocksPort: socksPort,
-        pingHttpInbound: httpInbound,
-      ),
+    final config = _buildXrayConfig(
+      input,
+      settings,
+      resolvedServerIp: resolvedServerIp,
+      pingSocksPort: socksPort,
+      pingHttpInbound: httpInbound,
     );
+    // A complete hand-written config retains its author's resolver choices.
+    // The explicit flag keeps Android's existing ping output unchanged.
+    if (desktopDns) {
+      final custom = CustomXrayConfig.tryParse(input.trim());
+      config['dns'] = custom?.authorDns ?? settings.xrayCore.buildBootstrapDnsBlock(
+        splitDirectDomains: splitDomainsAndIps(_parseRuleList(settings.directRules)).domains.isNotEmpty,
+        physicalBootstrapDns: physicalBootstrapDns,
+      );
+      config['log'] = {'loglevel': 'warning'};
+    }
+    return jsonEncode(config);
   }
 
   /// Запасной localhost-порт для временного ядра замера. Рабочий путь порт не
@@ -240,6 +255,7 @@ class ConfigGeneratorV2 {
     /// Туннель держит само ядро: в конфиг добавляется tun-инбаунд, а
     /// дескриптор ему передаёт нативная часть через переменную окружения.
     bool nativeTunInbound = false,
+    bool physicalBootstrapDns = false,
     GeoAssetIndex? geoIndex,
   }) {
     final trimmed = input.trim();
@@ -255,6 +271,7 @@ class ConfigGeneratorV2 {
         pingHttpInbound: pingHttpInbound,
         localInboundsNoAuth: localInboundsNoAuth,
         nativeTunInbound: nativeTunInbound,
+        physicalBootstrapDns: physicalBootstrapDns,
       );
     }
 
@@ -283,6 +300,7 @@ class ConfigGeneratorV2 {
       resolvedServerIp ?? link.address,
       link.port,
       originalServerAddress: link.address,
+      physicalBootstrapDns: physicalBootstrapDns,
       pingSocksPort: pingSocksPort,
       pingHttpInbound: pingHttpInbound,
       localInboundsNoAuth: localInboundsNoAuth,
@@ -437,6 +455,7 @@ class ConfigGeneratorV2 {
     /// Туннель держит само ядро: в конфиг добавляется tun-инбаунд, а
     /// дескриптор ему передаёт нативная часть через переменную окружения.
     bool nativeTunInbound = false,
+    bool physicalBootstrapDns = false,
   }) {
     if (chain.hops.isEmpty) {
       throw ArgumentError('Proxy chain has no nodes');
@@ -472,6 +491,7 @@ class ConfigGeneratorV2 {
       resolvedServerIp ?? built.first.address,
       built.first.port,
       originalServerAddress: built.first.address,
+      physicalBootstrapDns: physicalBootstrapDns,
       // Адреса остальных узлов: правило «сам сервер — мимо туннеля» должно
       // накрывать всю цепочку, иначе обращение к адресу промежуточного узла
       // (тот же адрес панели провайдера) закольцуется через неё же.
@@ -1816,7 +1836,7 @@ class ConfigGeneratorV2 {
   // нужно правило «мимо туннеля».
   static Map<String, dynamic> _wrapConfig(
       List<Map<String, dynamic>> proxyOutbounds, AppSettings settings, String serverAddress, int serverPort,
-      {String? originalServerAddress, List<String> extraServerAddresses = const [], int? pingSocksPort, bool pingHttpInbound = false, bool localInboundsNoAuth = false, bool nativeTunInbound = false}) {
+      {String? originalServerAddress, List<String> extraServerAddresses = const [], int? pingSocksPort, bool pingHttpInbound = false, bool localInboundsNoAuth = false, bool nativeTunInbound = false, bool physicalBootstrapDns = false}) {
 
     originalServerAddress ??= serverAddress;
     final isPingMode = pingSocksPort != null;
@@ -1897,6 +1917,7 @@ class ConfigGeneratorV2 {
             directDomains: directDomains,
             bootstrapDomains: bootstrapDomains,
             proxiedDoh: globalProxy,
+            physicalBootstrapDns: physicalBootstrapDns,
           );
 
     // `ruleTag` — имя правила в логах ядра: xray печатает «Hit route rule:
